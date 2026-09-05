@@ -62,6 +62,15 @@ class NoteParserTest {
         assertEquals(3, result.items.size)
         assertEquals("Filtry", result.items[0].name)
         assertEquals("okulary BHP", result.items[1].name)
+        assertEquals("9", result.items[2].variant)
+    }
+
+    @Test
+    fun sizeMarkerDoesNotConsumeLetterRInsideProductName() {
+        val result = parser.parse("Filtry x2")
+
+        assertEquals("Filtry", result.items.single().name)
+        assertNull(result.items.single().variant)
     }
 
     @Test

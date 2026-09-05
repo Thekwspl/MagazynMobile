@@ -40,7 +40,10 @@ data class ParsedNote(
  */
 class NoteParser {
     private val positions = listOf("spawacz", "monter", "fitter", "rusztowania")
-    private val sizeRegex = Regex("""(?:r\.?|rozmiar\s*)\s*(\d{2}|[A-Z]{1,3})""", RegexOption.IGNORE_CASE)
+    private val sizeRegex = Regex(
+        """(?<![\p{L}\p{N}])(?:r\.?\s*|rozmiar\s*)(\d{1,2}|[A-Z]{1,3})(?![\p{L}\p{N}])""",
+        RegexOption.IGNORE_CASE,
+    )
     private val compactWorkwearSizeRegex = Regex("""(?<!\w)([ms])\s*(\d{2})(?!\w)""", RegexOption.IGNORE_CASE)
     private val quantityRegex = Regex("""(?:x\s*|[-–—]\s*)(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
     private val phoneRegex = Regex("""(?<!\w)(?:\+\d{1,3}[\s-]?)?(?:\d[\s-]?){7,12}(?!\w)""")

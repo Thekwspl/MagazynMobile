@@ -9,8 +9,10 @@ fun matchesSearch(query: String, vararg fields: String): Boolean {
     return tokens.all { rawToken ->
         val token = rawToken.replace(" ", "")
         searchable.contains(token) || (token.length >= 3 && words.any { word ->
-            val prefix = word.take(token.length)
-            prefix.length == token.length && editDistanceAtMostOne(token, prefix)
+            ((token.length - 1)..(token.length + 1)).any { prefixLength ->
+                prefixLength > 0 && word.length >= prefixLength &&
+                    editDistanceAtMostOne(token, word.take(prefixLength))
+            }
         })
     }
 }

@@ -2,7 +2,10 @@
 
 Natywna aplikacja Android do lokalnej obsługi magazynu głównego, pracowników i stanów stoczni.
 
-## Obecny zakres — 0.9.9
+## Obecny zakres — 0.9.11
+
+- hotfix parsera rozmiarów: oznaczenie `r.` jest rozpoznawane wyłącznie jako osobny znacznik i nie uszkadza już nazw takich jak `Filtry` ani `monterski`;
+- wyszukiwanie toleruje brak jednej litery na początku słowa, np. `Dszczówka` nadal odpowiada zapytaniu `des`;
 
 - darmowy kanał aktualizacji `GitHub Actions → GitHub Releases → telefon`, z ekranem sprawdzania, pobierania i uruchamiania systemowego instalatora APK;
 - podpisany build wydania uruchamiany tagiem `v*`; prywatny klucz i hasła są pobierane wyłącznie z sekretów GitHub Actions;
