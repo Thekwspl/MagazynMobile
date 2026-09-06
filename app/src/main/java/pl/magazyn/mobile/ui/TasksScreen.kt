@@ -146,7 +146,7 @@ private fun TaskCard(task: NotebookTaskView, onCompleted: (Boolean) -> Unit, onE
                     task.dueDate?.let { Text(formatDisplayDate(it), style = MaterialTheme.typography.labelMedium, color = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) }
                 }
                 listOfNotNull(
-                    task.employeeName?.takeIf(String::isNotBlank)?.let { "Osoby: $it" },
+                    task.employeeName?.takeIf(String::isNotBlank)?.let { "Osoby: ${it.replace(",", ", ")}" },
                     task.place.takeIf(String::isNotBlank)?.let { "Miejsce: $it" },
                     task.shipyardName?.let { "Stocznia: $it" }, task.productName?.takeIf(String::isNotBlank)?.let { "Przedmiot: $it" },
                     task.orderName?.takeIf(String::isNotBlank)?.let { "Zamówienie: $it" },

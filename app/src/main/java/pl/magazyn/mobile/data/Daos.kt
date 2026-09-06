@@ -555,26 +555,24 @@ interface NotebookDao {
                t.employeeId, t.shipyardId, t.productId, t.orderId,
                n.createdAtEpochMillis,
                COALESCE(
-                   (SELECT GROUP_CONCAT(TRIM(COALESCE(te.lastName, '') || ' ' || COALESCE(te.firstName, ')), ', ')
-                    FROM notebook_task_employees nte JOIN employees te ON te.id = nte.employeeId
-                    WHERE nte.taskId = t.id),
+                   GROUP_CONCAT(TRIM(COALESCE(te.lastName, '') || ' ' || COALESCE(te.firstName, ''))),
                    NULLIF(TRIM(COALESCE(e.lastName, '') || ' ' || COALESCE(e.firstName, '')), '')
                ) AS employeeName,
-               COALESCE(
-                   (SELECT GROUP_CONCAT(nte.employeeId, ',') FROM notebook_task_employees nte WHERE nte.taskId = t.id),
-                   t.employeeId
-               ) AS employeeIds,
+               COALESCE(GROUP_CONCAT(nte.employeeId), t.employeeId) AS employeeIds,
                s.name AS shipyardName,
                TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.variant, '')) AS productName,
                COALESCE(NULLIF(TRIM(oe.lastName || ' ' || oe.firstName), ''), o.recipientLabel) AS orderName
         FROM notebook_tasks t
         JOIN order_notebooks n ON n.id = t.notebookId
         LEFT JOIN employees e ON e.id = t.employeeId
+        LEFT JOIN notebook_task_employees nte ON nte.taskId = t.id
+        LEFT JOIN employees te ON te.id = nte.employeeId
         LEFT JOIN shipyards s ON s.id = t.shipyardId
         LEFT JOIN products p ON p.id = t.productId
         LEFT JOIN orders o ON o.id = t.orderId
         LEFT JOIN employees oe ON oe.id = o.employeeId
         WHERE n.status != 'ARCHIVED'
+        GROUP BY t.id
         ORDER BY t.isCompleted, CASE WHEN t.dueDate IS NULL THEN 1 ELSE 0 END, t.dueDate, n.createdAtEpochMillis DESC, t.position
     """)
     fun observeTasks(): Flow<List<NotebookTaskView>>
