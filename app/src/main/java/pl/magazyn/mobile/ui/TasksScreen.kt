@@ -66,10 +66,11 @@ fun TasksScreen(
     }
 
     if (creating || edited != null) {
-        val closeEditor = {
+        val closeEditor: () -> Unit = {
             creating = false
             edited = null
             onCloseEditor?.invoke()
+            Unit
         }
         BackHandler(onBack = closeEditor)
         TaskEditorScreen(
