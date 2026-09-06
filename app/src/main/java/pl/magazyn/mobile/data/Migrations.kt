@@ -462,3 +462,30 @@ val MIGRATION_16_17 = object : Migration(16, 17) {
         )
     }
 }
+
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS notebook_task_employees (
+                taskId TEXT NOT NULL,
+                employeeId TEXT NOT NULL,
+                PRIMARY KEY(taskId, employeeId),
+                FOREIGN KEY(taskId) REFERENCES notebook_tasks(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                FOREIGN KEY(employeeId) REFERENCES employees(id) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_notebook_task_employees_taskId ON notebook_task_employees(taskId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_notebook_task_employees_employeeId ON notebook_task_employees(employeeId)")
+        db.execSQL(
+            "INSERT OR IGNORE INTO notebook_task_employees(taskId, employeeId) SELECT id, employeeId FROM notebook_tasks WHERE employeeId IS NOT NULL",
+        )
+    }
+}
+
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE notebook_tasks ADD COLUMN place TEXT NOT NULL DEFAULT ''")
+    }
+}

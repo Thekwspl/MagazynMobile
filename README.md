@@ -2,7 +2,26 @@
 
 Natywna aplikacja Android do lokalnej obsługi magazynu głównego, pracowników i stanów stoczni.
 
-## Obecny zakres — 0.9.11
+## Obecny zakres — 0.9.12
+
+- historia zamówienia pomija przygotowanie pozycji i nie zapisuje operacji, która nie zmieniła danych;
+- zmiana produktu jest zapisywana jako `Poprawiono / Z: stary przedmiot / Na: nowy przedmiot`, a zmiana ilości pokazuje nazwę produktu oraz wartości `Z` i `Na`;
+- z widoku historii zmian usunięto zbędny podpis `Użytkownik lokalny`;
+- tworzenie i edycja zadania odbywa się na pełnym ekranie z wyraźnym powrotem, anulowaniem i zapisem;
+- przycisk `Nowe zadanie` jest widoczny bezpośrednio po wejściu w `Zadania` z menu bocznego;
+- podpowiedzi osób w zadaniu są nieznacznie większe;
+- zadanie może mieć własne opcjonalne `Miejsce`, niezależne od stoczni, widoczne na karcie i uwzględniane w wyszukiwaniu;
+- migracja 18→19 dodaje miejsca do zadań bez utraty dotychczasowych danych;
+- aplikacja używa zaakceptowanej ikony MM z symbolem magazynu i czerwonym akcentem;
+
+- wynik tworzenia kopii zapasowej jest pokazany w dużym, kolorowym komunikacie; powodzenie zawiera dokładną datę i godzinę utworzenia;
+- w `Znajdź i wydaj` wiersze osób mają tę samą kompaktową wysokość co wiersze stoczni;
+- jedno zadanie można powiązać z kilkoma osobami, wyszukując i dodając je kolejno w edytorze;
+- migracja 17→18 zachowuje istniejące zadania jednoosobowe i przenosi ich powiązania do modelu wieloosobowego;
+- formularz tworzenia nierozpoznanej osoby z zamówienia wstępnie uzupełnia imię i nazwisko odczytane z notatki;
+- historia zmian zamówienia jest domyślnie schowana pod przyciskiem obok `Dodaj pozycję`;
+- zaznaczanie przygotowania nie jest zapisywane w historii, wcześniejsze takie wpisy są ukryte, a zapis bez faktycznej zmiany nie tworzy wpisu;
+- zmiana produktu jest opisywana czytelnym zapisem `stary produkt → nowy produkt`;
 
 - hotfix parsera rozmiarów: oznaczenie `r.` jest rozpoznawane wyłącznie jako osobny znacznik i nie uszkadza już nazw takich jak `Filtry` ani `monterski`;
 - wyszukiwanie toleruje brak jednej litery na początku słowa, np. `Dszczówka` nadal odpowiada zapytaniu `des`;
@@ -189,7 +208,7 @@ Natywna aplikacja Android do lokalnej obsługi magazynu głównego, pracowników
 - puste pola inwentaryzacji pozostawiają stan bez zmian, a korekty nie wymagają powodu;
 - eksport stanu wybranego magazynu do pliku XLSX albo CSV i udostępnienie go z telefonu;
 - arkusz XLSX ma zamrożony nagłówek, filtr i kolumny magazynu, produktu, wariantu, grupy, podgrupy, kategorii, stanu oraz jednostki;
-- migracje bazy 1→2→3→4→5→6→7→8→9→10→11→12→13→14→15→16→17 zachowujące dane z wcześniejszej instalacji;
+- migracje bazy 1→2→3→4→5→6→7→8→9→10→11→12→13→14→15→16→17→18→19 zachowujące dane z wcześniejszej instalacji;
 - import plików XLSX wybieranych z pamięci telefonu;
 - automatyczne rozpoznawanie arkuszy `Stan Magazynowy`, `Osoby` i `Wydanie Stocznie`;
 - podgląd liczby rekordów, błędów, powtórzeń i nierozpoznanych produktów przed zatwierdzeniem;

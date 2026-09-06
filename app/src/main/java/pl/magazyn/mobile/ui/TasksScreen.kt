@@ -1,5 +1,6 @@
 package pl.magazyn.mobile.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,6 +13,8 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,7 +39,13 @@ private val priorities = listOf(TaskPriority("LOW", "Niski"), TaskPriority("NORM
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TasksScreen(contentPadding: PaddingValues, startAdding: Boolean = false, viewModel: TasksViewModel = viewModel()) {
+fun TasksScreen(
+    contentPadding: PaddingValues,
+    startAdding: Boolean = false,
+    onNewTask: (() -> Unit)? = null,
+    onCloseEditor: (() -> Unit)? = null,
+    viewModel: TasksViewModel = viewModel(),
+) {
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
     val people by viewModel.people.collectAsStateWithLifecycle()
     val products by viewModel.products.collectAsStateWithLifecycle()
@@ -51,17 +60,47 @@ fun TasksScreen(contentPadding: PaddingValues, startAdding: Boolean = false, vie
     val visible = remember(tasks, filter, query) {
         tasks.filter { task ->
             (filter == TaskFilter.ALL || (filter == TaskFilter.OPEN && !task.isCompleted) || (filter == TaskFilter.DONE && task.isCompleted)) &&
-                (query.isBlank() || listOf(task.text, task.employeeName, task.shipyardName, task.productName, task.orderName)
+                (query.isBlank() || listOf(task.text, task.place, task.employeeName, task.shipyardName, task.productName, task.orderName)
                     .filterNotNull().any { ImportParser.key(it).contains(ImportParser.key(query)) })
         }
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize().padding(contentPadding),
-        floatingActionButton = { FloatingActionButton(onClick = { creating = true }) { Icon(Icons.Default.Add, "Dodaj zadanie") } },
-    ) { inner ->
+    if (creating || edited != null) {
+        val closeEditor = {
+            creating = false
+            edited = null
+            onCloseEditor?.invoke()
+        }
+        BackHandler(onBack = closeEditor)
+        TaskEditorScreen(
+            contentPadding = contentPadding,
+            task = edited,
+            people = people,
+            shipyards = shipyards,
+            products = products,
+            orders = orders,
+            onDismiss = closeEditor,
+            onSave = { text, date, priority, place, peopleIds, shipyard, product, order ->
+                edited?.let { viewModel.updateTask(it.id, text, date, priority, place, peopleIds, shipyard, product, order) }
+                    ?: viewModel.createTask(text, date, priority, place, peopleIds, shipyard, product, order)
+                creating = false
+                edited = null
+                onCloseEditor?.invoke()
+            },
+        )
+        return
+    }
+
+    Scaffold(modifier = Modifier.fillMaxSize().padding(contentPadding)) { inner ->
         Column(Modifier.fillMaxSize().padding(inner)) {
-            Text("Zadania", Modifier.padding(horizontal = 16.dp, vertical = 14.dp), style = MaterialTheme.typography.headlineSmall)
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Zadania", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
+                FilledTonalButton(onClick = { onNewTask?.invoke() ?: run { creating = true } }) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Nowe zadanie")
+                }
+            }
             OutlinedTextField(
                 value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 label = { Text("Szukaj w zadaniach") }, leadingIcon = { Icon(Icons.Default.Search, null) },
@@ -84,15 +123,6 @@ fun TasksScreen(contentPadding: PaddingValues, startAdding: Boolean = false, vie
         }
     }
 
-    if (creating || edited != null) TaskEditorDialog(
-        task = edited, people = people, shipyards = shipyards, products = products, orders = orders,
-        onDismiss = { creating = false; edited = null },
-        onSave = { text, date, priority, person, shipyard, product, order ->
-            edited?.let { viewModel.updateTask(it.id, text, date, priority, person, shipyard, product, order) }
-                ?: viewModel.createTask(text, date, priority, person, shipyard, product, order)
-            creating = false; edited = null
-        },
-    )
     deleting?.let { task ->
         AlertDialog(
             onDismissRequest = { deleting = null }, title = { Text("Usunąć zadanie?") },
@@ -116,7 +146,8 @@ private fun TaskCard(task: NotebookTaskView, onCompleted: (Boolean) -> Unit, onE
                     task.dueDate?.let { Text(formatDisplayDate(it), style = MaterialTheme.typography.labelMedium, color = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) }
                 }
                 listOfNotNull(
-                    task.employeeName?.takeIf(String::isNotBlank)?.let { "Osoba: $it" },
+                    task.employeeName?.takeIf(String::isNotBlank)?.let { "Osoby: $it" },
+                    task.place.takeIf(String::isNotBlank)?.let { "Miejsce: $it" },
                     task.shipyardName?.let { "Stocznia: $it" }, task.productName?.takeIf(String::isNotBlank)?.let { "Przedmiot: $it" },
                     task.orderName?.takeIf(String::isNotBlank)?.let { "Zamówienie: $it" },
                 ).forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -129,24 +160,33 @@ private fun TaskCard(task: NotebookTaskView, onCompleted: (Boolean) -> Unit, onE
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun TaskEditorDialog(
+private fun TaskEditorScreen(
+    contentPadding: PaddingValues,
     task: NotebookTaskView?, people: List<EmployeeSummary>, shipyards: List<ShipyardEntity>, products: List<ProductWithStock>, orders: List<OrderSummary>,
-    onDismiss: () -> Unit, onSave: (String, String?, String, String?, String?, String?, String?) -> Unit,
+    onDismiss: () -> Unit, onSave: (String, String?, String, String, List<String>, String?, String?, String?) -> Unit,
 ) {
     var text by remember(task?.id) { mutableStateOf(task?.text.orEmpty()) }
     var date by remember(task?.id) { mutableStateOf(task?.dueDate) }
     var priority by remember(task?.id) { mutableStateOf(task?.priority ?: "NORMAL") }
-    var personId by remember(task?.id) { mutableStateOf(task?.employeeId) }
+    var place by remember(task?.id) { mutableStateOf(task?.place.orEmpty()) }
+    var personIds by remember(task?.id) {
+        mutableStateOf(task?.employeeIds?.split(',')?.filter(String::isNotBlank)?.toSet() ?: task?.employeeId?.let(::setOf).orEmpty())
+    }
     var shipyardId by remember(task?.id) { mutableStateOf(task?.shipyardId) }
     var productId by remember(task?.id) { mutableStateOf(task?.productId) }
     var orderId by remember(task?.id) { mutableStateOf(task?.orderId) }
     var showDatePicker by remember { mutableStateOf(false) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (task == null) "Nowe zadanie" else "Edytuj zadanie") },
-        text = {
-            Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxSize().padding(contentPadding).imePadding()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onDismiss) { Icon(Icons.Default.ArrowBack, "Wróć") }
+            Text(if (task == null) "Nowe zadanie" else "Edytuj zadanie", style = MaterialTheme.typography.headlineSmall)
+        }
+        HorizontalDivider()
+        Column(
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
                 OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), label = { Text("Treść zadania *") }, minLines = 2)
                 Text("Priorytet", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -156,15 +196,25 @@ private fun TaskEditorDialog(
                     OutlinedButton(onClick = { showDatePicker = true }, Modifier.weight(1f)) { Text(date?.let(::formatDisplayDate) ?: "Dodaj termin") }
                     if (date != null) IconButton(onClick = { date = null }) { Icon(Icons.Default.Clear, "Usuń termin") }
                 }
-                RelationPicker("Osoba", personId, people, { it.id }, { it.listDisplayName() }, { personId = it })
+                OutlinedTextField(
+                    place,
+                    { place = it },
+                    Modifier.fillMaxWidth(),
+                    label = { Text("Miejsce (opcjonalnie)") },
+                    leadingIcon = { Icon(Icons.Default.LocationOn, null) },
+                    singleLine = true,
+                )
+                PeopleRelationPicker(people, personIds) { personIds = it }
                 RelationPicker("Stocznia", shipyardId, shipyards, { it.id }, { it.name }, { shipyardId = it })
                 RelationPicker("Przedmiot", productId, products, { it.id }, { it.name + it.variant?.let { v -> " · $v" }.orEmpty() }, { productId = it })
                 RelationPicker("Zamówienie", orderId, orders, { it.id }, { it.recipient + " · " + formatDisplayDate(it.plannedIssueDate) }, { orderId = it })
-            }
-        },
-        confirmButton = { Button(onClick = { onSave(text, date, priority, personId, shipyardId, productId, orderId) }, enabled = text.isNotBlank()) { Text("Zapisz") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Anuluj") } },
-    )
+        }
+        HorizontalDivider()
+        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onDismiss, Modifier.weight(1f)) { Text("Anuluj") }
+            Button(onClick = { onSave(text, date, priority, place, personIds.toList(), shipyardId, productId, orderId) }, enabled = text.isNotBlank(), modifier = Modifier.weight(1f)) { Text("Zapisz") }
+        }
+    }
     if (showDatePicker) {
         val state = rememberDatePickerState(initialSelectedDateMillis = date?.let { runCatching { LocalDate.parse(it).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() }.getOrNull() })
         DatePickerDialog(
@@ -175,6 +225,48 @@ private fun TaskEditorDialog(
             }) { Text("Ustaw") } },
             dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Anuluj") } },
         ) { DatePicker(state) }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PeopleRelationPicker(people: List<EmployeeSummary>, selectedIds: Set<String>, onSelected: (Set<String>) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val matches = remember(query, people, selectedIds) {
+        if (query.isBlank()) emptyList() else people.filter {
+            it.id !in selectedIds && pl.magazyn.mobile.domain.matchesSearch(query, it.fullName, it.aliases, it.tags, it.positions)
+        }.take(5)
+    }
+    Text("Osoby (opcjonalnie)", style = MaterialTheme.typography.labelLarge)
+    if (selectedIds.isNotEmpty()) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            people.filter { it.id in selectedIds }.forEach { person ->
+                InputChip(
+                    selected = true,
+                    onClick = { onSelected(selectedIds - person.id) },
+                    label = { Text(person.listDisplayName()) },
+                    trailingIcon = { Icon(Icons.Default.Clear, "Usuń osobę", Modifier.size(18.dp)) },
+                )
+            }
+        }
+    }
+    OutlinedTextField(
+        query,
+        { query = it },
+        Modifier.fillMaxWidth(),
+        label = { Text("Wyszukaj kolejną osobę") },
+        leadingIcon = { Icon(Icons.Default.Search, null) },
+        singleLine = true,
+    )
+    matches.forEach { person ->
+        Surface(
+            modifier = Modifier.fillMaxWidth().clickable {
+                onSelected(selectedIds + person.id)
+                query = ""
+            },
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = MaterialTheme.shapes.small,
+        ) { Text(person.listDisplayName(), Modifier.padding(horizontal = 14.dp, vertical = 11.dp), style = MaterialTheme.typography.bodyMedium) }
     }
 }
 

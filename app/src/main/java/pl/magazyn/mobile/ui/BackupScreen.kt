@@ -10,6 +10,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -60,8 +62,25 @@ fun BackupScreen(contentPadding: PaddingValues, viewModel: BackupViewModel = vie
             modifier = Modifier.fillMaxWidth(),
         ) { Icon(Icons.Default.Restore, null); Spacer(Modifier.width(7.dp)); Text("Wybierz kopię do przywrócenia") }
         if (state.working) LinearProgressIndicator(Modifier.fillMaxWidth())
-        state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        state.message?.let { message ->
+            Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium) {
+                Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                    Text(message, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+        }
+        state.error?.let { error ->
+            Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
+                Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(Icons.Default.Error, null, tint = MaterialTheme.colorScheme.error)
+                    Column {
+                        Text("Nie utworzono kopii", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                        Text(error, color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                }
+            }
+        }
         Text("Klucz Gemini nie jest częścią kopii i na nowym telefonie trzeba wpisać go ponownie.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 

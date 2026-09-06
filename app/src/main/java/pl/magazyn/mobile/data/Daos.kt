@@ -551,10 +551,19 @@ data class OrderDetailLine(
 @Dao
 interface NotebookDao {
     @Query("""
-        SELECT t.id, t.notebookId, t.text, t.isCompleted, t.dueDate, t.priority,
+        SELECT t.id, t.notebookId, t.text, t.isCompleted, t.dueDate, t.priority, t.place,
                t.employeeId, t.shipyardId, t.productId, t.orderId,
                n.createdAtEpochMillis,
-               TRIM(COALESCE(e.lastName, '') || ' ' || COALESCE(e.firstName, '')) AS employeeName,
+               COALESCE(
+                   (SELECT GROUP_CONCAT(TRIM(COALESCE(te.lastName, '') || ' ' || COALESCE(te.firstName, ')), ', ')
+                    FROM notebook_task_employees nte JOIN employees te ON te.id = nte.employeeId
+                    WHERE nte.taskId = t.id),
+                   NULLIF(TRIM(COALESCE(e.lastName, '') || ' ' || COALESCE(e.firstName, '')), '')
+               ) AS employeeName,
+               COALESCE(
+                   (SELECT GROUP_CONCAT(nte.employeeId, ',') FROM notebook_task_employees nte WHERE nte.taskId = t.id),
+                   t.employeeId
+               ) AS employeeIds,
                s.name AS shipyardName,
                TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.variant, '')) AS productName,
                COALESCE(NULLIF(TRIM(oe.lastName || ' ' || oe.firstName), ''), o.recipientLabel) AS orderName
@@ -576,15 +585,21 @@ interface NotebookDao {
     @Insert
     suspend fun insertTasks(items: List<NotebookTaskEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTaskEmployees(items: List<NotebookTaskEmployeeEntity>)
+
+    @Query("DELETE FROM notebook_task_employees WHERE taskId = :taskId")
+    suspend fun deleteTaskEmployees(taskId: String)
+
     @Query("UPDATE notebook_tasks SET isCompleted = :completed WHERE id = :id")
     suspend fun setTaskCompleted(id: String, completed: Boolean)
 
     @Query("""
-        UPDATE notebook_tasks SET text = :text, dueDate = :dueDate, priority = :priority,
+        UPDATE notebook_tasks SET text = :text, dueDate = :dueDate, priority = :priority, place = :place,
             employeeId = :employeeId, shipyardId = :shipyardId, productId = :productId, orderId = :orderId
         WHERE id = :id
     """)
-    suspend fun updateTask(id: String, text: String, dueDate: String?, priority: String, employeeId: String?, shipyardId: String?, productId: String?, orderId: String?)
+    suspend fun updateTask(id: String, text: String, dueDate: String?, priority: String, place: String, employeeId: String?, shipyardId: String?, productId: String?, orderId: String?)
 
     @Query("DELETE FROM notebook_tasks WHERE id = :id")
     suspend fun deleteTask(id: String)
@@ -597,7 +612,9 @@ data class NotebookTaskView(
     val isCompleted: Boolean,
     val dueDate: String?,
     val priority: String,
+    val place: String,
     val employeeId: String?,
+    val employeeIds: String?,
     val shipyardId: String?,
     val productId: String?,
     val orderId: String?,

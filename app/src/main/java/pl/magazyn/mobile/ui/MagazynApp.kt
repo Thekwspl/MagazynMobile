@@ -24,7 +24,7 @@ fun MagazynApp(modifier: Modifier = Modifier) {
     val homeViewModel: HomeViewModel = viewModel()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route.orEmpty()
-    val isFocusedScreen = currentRoute == "note-review" || currentRoute.startsWith("shipyards/")
+    val isFocusedScreen = currentRoute == "note-review" || currentRoute == "tasks-new" || currentRoute.startsWith("shipyards/")
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showQuickAdd by remember { mutableStateOf(false) }
@@ -164,8 +164,8 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
         composable("search") { combinedScreen() }
         composable("issue") { combinedScreen() }
         composable("orders") { OrdersScreen(contentPadding = padding) }
-        composable("tasks") { TasksScreen(contentPadding = padding) }
-        composable("tasks-new") { TasksScreen(contentPadding = padding, startAdding = true) }
+        composable("tasks") { TasksScreen(contentPadding = padding, onNewTask = { navController.navigate("tasks-new") }) }
+        composable("tasks-new") { TasksScreen(contentPadding = padding, startAdding = true, onCloseEditor = { navController.popBackStack() }) }
         composable("operations") { OperationsScreen(contentPadding = padding) }
         composable("inventory") { InventoryScreen(contentPadding = padding) }
         composable("products") { ProductsScreen(contentPadding = padding) }

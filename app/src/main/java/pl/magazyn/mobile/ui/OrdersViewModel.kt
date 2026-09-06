@@ -56,9 +56,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setPrepared(lineId: String, prepared: Boolean) {
         viewModelScope.launch {
-            val line = database.orderDao().findLineById(lineId) ?: return@launch
             database.orderDao().setPrepared(lineId, prepared)
-            log(line.orderId, "PREPARED", if (prepared) "Oznaczono jako przygotowane: ${line.rawText}" else "Cofnięto przygotowanie: ${line.rawText}")
         }
     }
 
@@ -66,11 +64,28 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         if (quantity <= 0) return
         viewModelScope.launch {
             val previous = database.orderDao().findLineById(lineId) ?: return@launch
+            val cleanText = rawText.trim()
+            val newQuantity = quantity.toDouble()
+            if (previous.productId == productId && previous.quantity == newQuantity && previous.unit == unit) return@launch
             database.orderDao().updateLine(
-                lineId, productId, rawText.trim(), quantity.toDouble(), unit,
+                lineId, productId, cleanText, newQuantity, unit,
                 if (productId == null) "NEEDS_MAPPING" else "VERIFIED",
             )
-            log(previous.orderId, "EDIT_LINE", "Poprawiono pozycję „${previous.rawText}” na „${rawText.trim()}”, ilość $quantity $unit")
+            val previousName = previous.productId?.let { database.productDao().findById(it) }
+                ?.let { it.name + it.variant?.let { variant -> " · $variant" }.orEmpty() }
+                ?: previous.rawText
+            val newName = productId?.let { database.productDao().findById(it) }
+                ?.let { it.name + it.variant?.let { variant -> " · $variant" }.orEmpty() }
+                ?: cleanText
+            val descriptions = buildList {
+                if (previous.productId != productId) {
+                    add("Poprawiono:\n\nZ: \"$previousName\"\n\nNa: \"$newName\"")
+                }
+                if (previous.quantity != newQuantity || previous.unit != unit) {
+                    add("Poprawiono ilość \"$newName\"\n\nZ: ${quantityLabel(previous.quantity)}\n\nNa: ${quantityLabel(newQuantity)}")
+                }
+            }
+            if (descriptions.isNotEmpty()) log(previous.orderId, "EDIT_LINE", descriptions.joinToString("\n\n"))
         }
     }
 
@@ -185,4 +200,6 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun log(orderId: String, action: String, description: String) {
         database.orderDao().insertChange(OrderChangeEntity(UUID.randomUUID().toString(), orderId, action, description, System.currentTimeMillis()))
     }
+
+    private fun quantityLabel(value: Double): String = if (value % 1.0 == 0.0) value.toLong().toString() else value.toString()
 }

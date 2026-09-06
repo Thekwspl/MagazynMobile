@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -119,6 +120,7 @@ private fun OrderDetails(
     var editingLine by remember { mutableStateOf<OrderDetailLine?>(null) }
     var confirmNegative by rememberSaveable(order.id) { mutableStateOf(false) }
     var confirmCancel by remember { mutableStateOf(false) }
+    var showChanges by rememberSaveable(order.id) { mutableStateOf(false) }
     val createsNegative = lines.filter { it.productId != null }.groupBy { it.productId }.any { (_, grouped) ->
         grouped.first().stockQuantity - grouped.sumOf { it.quantity } < 0
     }
@@ -149,18 +151,27 @@ private fun OrderDetails(
             }
             HorizontalDivider()
         }
-        OutlinedButton(onClick = onAddLine, Modifier.fillMaxWidth()) { Icon(Icons.Default.Add, null); Text("Dodaj pozycję") }
-        HorizontalDivider()
-        Text("Historia zmian", style = MaterialTheme.typography.titleMedium)
-        if (changes.isEmpty()) {
-            Text("Brak zapisanych zmian w tym zamówieniu.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else {
-            changes.take(30).forEach { change ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(java.time.Instant.ofEpochMilli(change.createdAtEpochMillis).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime().format(java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm", java.util.Locale("pl", "PL"))), Modifier.width(112.dp), style = MaterialTheme.typography.labelSmall)
-                    Column(Modifier.weight(1f)) {
-                        Text(change.description, style = MaterialTheme.typography.bodySmall)
-                        Text(change.actorLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { showChanges = !showChanges }, Modifier.weight(1f)) {
+                Icon(Icons.Default.History, null)
+                Spacer(Modifier.width(5.dp))
+                Text("Historia")
+            }
+            OutlinedButton(onClick = onAddLine, Modifier.weight(1f)) { Icon(Icons.Default.Add, null); Text("Dodaj pozycję") }
+        }
+        if (showChanges) {
+            HorizontalDivider()
+            Text("Historia zmian", style = MaterialTheme.typography.titleMedium)
+            val meaningfulChanges = changes.filterNot { it.action == "PREPARED" }
+            if (meaningfulChanges.isEmpty()) {
+                Text("Brak zapisanych zmian w tym zamówieniu.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                meaningfulChanges.take(30).forEach { change ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(java.time.Instant.ofEpochMilli(change.createdAtEpochMillis).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime().format(java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm", java.util.Locale("pl", "PL"))), Modifier.width(112.dp), style = MaterialTheme.typography.labelSmall)
+                        Column(Modifier.weight(1f)) {
+                            Text(change.description, style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 }
             }
@@ -187,6 +198,7 @@ private fun OrderDetails(
     if (showNewPerson) {
         NewOrderPersonDialog(
             jobPositions = jobPositions,
+            initialRecipient = order.recipient,
             onDismiss = { showNewPerson = false },
             onCreate = { first, last, phones, positions, aliases ->
                 onCreatePerson(first, last, phones, positions, aliases) { id, fullName ->
@@ -286,9 +298,10 @@ private fun OrderPersonPickerDialog(
 }
 
 @Composable
-private fun NewOrderPersonDialog(jobPositions: List<pl.magazyn.mobile.data.JobPositionEntity>, onDismiss: () -> Unit, onCreate: (String, String, String, String, String) -> Unit) {
-    var first by rememberSaveable { mutableStateOf("") }
-    var last by rememberSaveable { mutableStateOf("") }
+private fun NewOrderPersonDialog(jobPositions: List<pl.magazyn.mobile.data.JobPositionEntity>, initialRecipient: String, onDismiss: () -> Unit, onCreate: (String, String, String, String, String) -> Unit) {
+    val suggestedParts = remember(initialRecipient) { initialRecipient.trim().split(Regex("\\s+")).filter(String::isNotBlank) }
+    var first by rememberSaveable(initialRecipient) { mutableStateOf(suggestedParts.firstOrNull().orEmpty()) }
+    var last by rememberSaveable(initialRecipient) { mutableStateOf(suggestedParts.drop(1).joinToString(" ")) }
     var phones by rememberSaveable { mutableStateOf("") }
     var positions by rememberSaveable { mutableStateOf("") }
     var aliases by rememberSaveable { mutableStateOf("") }

@@ -1,5 +1,6 @@
 package pl.magazyn.mobile.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -76,16 +77,12 @@ fun SearchScreen(
                     OutlinedCard(onClick = { onPerson(person.id) }, modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Person, null)
-                            Column(Modifier.padding(start = 10.dp).weight(1f)) {
-                                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                                    Text(person.listDisplayName(), fontWeight = FontWeight.SemiBold)
-                                    if (person.phoneNumbers.isNotBlank()) PhoneNumbersInline(person.phoneNumbers)
-                                }
-                                if (person.positions.isNotBlank()) Text(person.positions, style = MaterialTheme.typography.labelMedium)
-                            }
-                            FilledTonalIconButton(onClick = { onIssuePerson(person.id) }) {
-                                Icon(Icons.Default.ArrowUpward, "Wydaj tej osobie")
-                            }
+                            Text(person.listDisplayName(), Modifier.padding(start = 10.dp).weight(1f), fontWeight = FontWeight.SemiBold)
+                            Icon(
+                                Icons.Default.ArrowUpward,
+                                "Wydaj tej osobie",
+                                Modifier.size(24.dp).clickable { onIssuePerson(person.id) },
+                            )
                         }
                     }
                 }

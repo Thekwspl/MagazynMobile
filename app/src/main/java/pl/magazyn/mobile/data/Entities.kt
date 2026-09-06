@@ -377,6 +377,21 @@ data class NotebookTaskEntity(
     val shipyardId: String? = null,
     val productId: String? = null,
     val orderId: String? = null,
+    @ColumnInfo(defaultValue = "''") val place: String = "",
+)
+
+@Entity(
+    tableName = "notebook_task_employees",
+    primaryKeys = ["taskId", "employeeId"],
+    foreignKeys = [
+        ForeignKey(entity = NotebookTaskEntity::class, parentColumns = ["id"], childColumns = ["taskId"], onDelete = ForeignKey.CASCADE),
+        ForeignKey(entity = EmployeeEntity::class, parentColumns = ["id"], childColumns = ["employeeId"], onDelete = ForeignKey.CASCADE),
+    ],
+    indices = [Index("taskId"), Index("employeeId")],
+)
+data class NotebookTaskEmployeeEntity(
+    val taskId: String,
+    val employeeId: String,
 )
 
 @Entity(

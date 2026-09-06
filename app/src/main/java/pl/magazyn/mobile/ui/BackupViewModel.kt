@@ -13,6 +13,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import pl.magazyn.mobile.MagazynApplication
 import pl.magazyn.mobile.data.BackupManager
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 data class BackupUiState(val working: Boolean = false, val message: String? = null, val error: String? = null)
 
@@ -25,7 +28,10 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _state.value = BackupUiState(working = true)
             runCatching { withContext(Dispatchers.IO) { manager.createEncryptedBackup(uri, password) } }
-                .onSuccess { _state.value = BackupUiState(message = "Zaszyfrowana kopia została utworzona") }
+                .onSuccess {
+                    val createdAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm", Locale("pl", "PL")))
+                    _state.value = BackupUiState(message = "Kopia utworzona poprawnie\n$createdAt")
+                }
                 .onFailure { _state.value = BackupUiState(error = it.message ?: "Nie udało się utworzyć kopii") }
         }
     }

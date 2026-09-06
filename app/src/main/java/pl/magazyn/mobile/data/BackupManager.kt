@@ -92,7 +92,7 @@ class BackupManager(private val application: MagazynApplication) {
         val sqlite = SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY)
         try {
             val version = sqlite.rawQuery("PRAGMA user_version", null).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
-            require(version in 1..17) { if (version > 17) "Kopia pochodzi z nowszej wersji aplikacji" else "Kopia ma nieprawidłową wersję bazy" }
+            require(version in 1..19) { if (version > 19) "Kopia pochodzi z nowszej wersji aplikacji" else "Kopia ma nieprawidłową wersję bazy" }
             sqlite.rawQuery("PRAGMA integrity_check", null).use { cursor ->
                 require(cursor.moveToFirst() && cursor.getString(0).equals("ok", true)) { "Kontrola spójności kopii nie powiodła się" }
             }

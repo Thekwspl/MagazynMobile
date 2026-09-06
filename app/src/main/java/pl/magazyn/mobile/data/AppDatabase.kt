@@ -25,6 +25,7 @@ import androidx.room.RoomDatabase
         ImportPendingRowEntity::class,
         OrderNotebookEntity::class,
         NotebookTaskEntity::class,
+        NotebookTaskEmployeeEntity::class,
         OrderEntity::class,
         OrderLineEntity::class,
         IssueAmendmentEntity::class,
@@ -32,7 +33,7 @@ import androidx.room.RoomDatabase
         ParserLearningRuleEntity::class,
         OrderChangeEntity::class,
     ],
-    version = 17,
+    version = 19,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
