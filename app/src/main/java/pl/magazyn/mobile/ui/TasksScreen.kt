@@ -65,7 +65,12 @@ fun TasksScreen(
     }
 
     if (creating || edited != null) {
-        val closeEditor = { creating = false; edited = null; onCloseEditor?.invoke() }
+        val closeEditor: () -> Unit = {
+            creating = false
+            edited = null
+            onCloseEditor?.invoke()
+            Unit
+        }
         BackHandler(onBack = closeEditor)
         val taskSteps = edited?.let { task -> allSteps.filter { it.taskId == task.id } }.orEmpty()
         TaskEditorScreen(
