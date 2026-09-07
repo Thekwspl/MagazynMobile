@@ -41,11 +41,8 @@ fun ProductInfo(
     Row(modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Row(Modifier.fillMaxWidth()) {
-            Text(name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            variant?.takeIf(String::isNotBlank)?.let {
-                Spacer(Modifier.width(6.dp))
-                Text("• $it", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            }
+                val title = listOf(name.trim(), variant?.trim().orEmpty()).filter(String::isNotBlank).joinToString(" • ")
+                Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
             productSecondaryLine(groupName, subgroupName).takeIf(String::isNotBlank)?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
@@ -53,8 +50,8 @@ fun ProductInfo(
         }
         if (stockQuantity != null) {
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.widthIn(min = 34.dp), horizontalAlignment = androidx.compose.ui.Alignment.End) {
-                Text(formatWholeQuantity(stockQuantity), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Column(Modifier.widthIn(min = 38.dp).padding(end = 4.dp), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                Text(formatWholeQuantity(stockQuantity), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 unit?.takeIf(String::isNotBlank)?.let {
                     Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
