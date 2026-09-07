@@ -3,9 +3,9 @@ package pl.magazyn.mobile.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,7 +21,7 @@ data class ProductRowText(val title: String, val secondary: String?, val quantit
 
 fun productRowText(name: String, variant: String?, groupName: String, subgroupName: String, stockQuantity: Double?, unit: String?): ProductRowText =
     ProductRowText(
-        title = listOf(name.trim(), variant?.trim().orEmpty()).filter(String::isNotBlank).joinToString("    "),
+        title = listOf(name.trim(), variant?.trim().orEmpty()).filter(String::isNotBlank).joinToString(" • "),
         secondary = productSecondaryLine(groupName, subgroupName).takeIf(String::isNotBlank),
         quantity = stockQuantity?.let(::formatWholeQuantity),
         unit = unit?.trim()?.takeIf(String::isNotBlank),
@@ -39,29 +39,25 @@ fun ProductInfo(
     unit: String? = null,
 ) {
     Row(modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        Column(Modifier.weight(1f, fill = true)) {
+        Column(Modifier.weight(1f)) {
             Row(Modifier.fillMaxWidth()) {
-                Text(
-                    name,
-                    Modifier.weight(1f),
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
-                variant?.takeIf(String::isNotBlank)?.let {
-                    Spacer(Modifier.width(10.dp))
-                    Text(it, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                }
+            Text(name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            variant?.takeIf(String::isNotBlank)?.let {
+                Spacer(Modifier.width(6.dp))
+                Text("• $it", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
             }
             productSecondaryLine(groupName, subgroupName).takeIf(String::isNotBlank)?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
         }
         if (stockQuantity != null) {
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.widthIn(min = 38.dp), horizontalAlignment = androidx.compose.ui.Alignment.End) {
-                Text(formatWholeQuantity(stockQuantity), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                unit?.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1) }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.widthIn(min = 34.dp), horizontalAlignment = androidx.compose.ui.Alignment.End) {
+                Text(formatWholeQuantity(stockQuantity), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                unit?.takeIf(String::isNotBlank)?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                }
             }
         }
     }

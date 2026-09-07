@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.Refresh
@@ -17,11 +18,17 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import pl.magazyn.mobile.BuildConfig
 
 @Composable
-fun UpdateScreen(contentPadding: PaddingValues, viewModel: UpdateViewModel = viewModel()) {
+fun UpdateScreen(contentPadding: PaddingValues, onBack: () -> Unit, viewModel: UpdateViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var permissionHint by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(contentPadding).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Aktualizacje", style = MaterialTheme.typography.headlineSmall)
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Wróć") }
+            Column {
+                Text("Aktualizacje", style = MaterialTheme.typography.headlineSmall)
+                Text("Sprawdzanie i instalowanie nowej wersji", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         Text("Zainstalowana wersja: ${BuildConfig.VERSION_NAME}", fontWeight = FontWeight.SemiBold)
         OutlinedTextField(
             state.repository, viewModel::setRepository, Modifier.fillMaxWidth(),

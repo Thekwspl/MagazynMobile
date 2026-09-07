@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
@@ -18,13 +19,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import pl.magazyn.mobile.data.ParserLearningRuleEntity
 
 @Composable
-fun LearningRulesScreen(contentPadding: PaddingValues, viewModel: LearningRulesViewModel = viewModel()) {
+fun LearningRulesScreen(contentPadding: PaddingValues, onBack: () -> Unit, viewModel: LearningRulesViewModel = viewModel()) {
     val rules by viewModel.rules.collectAsStateWithLifecycle()
     var edited by remember { mutableStateOf<ParserLearningRuleEntity?>(null) }
     var adding by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<ParserLearningRuleEntity?>(null) }
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Wróć") }
             Column(Modifier.weight(1f)) {
                 Text("Uczenie offline", style = MaterialTheme.typography.headlineSmall)
                 Text("Reguły używane bez internetu i bez AI", style = MaterialTheme.typography.bodySmall)

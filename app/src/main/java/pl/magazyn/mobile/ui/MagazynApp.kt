@@ -38,10 +38,8 @@ fun MagazynApp(modifier: Modifier = Modifier) {
         Destination("people", "Osoby", Icons.Default.People),
         Destination("products", "Przedmioty", Icons.Default.Inventory2),
         Destination("data-exchange", "Import i eksport danych", Icons.Default.ImportExport),
-        Destination("learning-rules", "Uczenie offline", Icons.Default.Psychology),
-        Destination("updates", "Aktualizacje", Icons.Default.SystemUpdate),
+        Destination("settings", "Ustawienia", Icons.Default.Settings),
     )
-    val aiDestination = Destination("ai-settings", "Ustawienia AI", Icons.Default.AutoAwesome)
 
     fun goTo(route: String) {
         navController.navigate(route) {
@@ -69,14 +67,6 @@ fun MagazynApp(modifier: Modifier = Modifier) {
                         )
                     }
                     Spacer(Modifier.weight(1f))
-                    HorizontalDivider()
-                    NavigationDrawerItem(
-                        label = { Text(aiDestination.label) },
-                        icon = { Icon(aiDestination.icon, null) },
-                        selected = backStack?.destination?.route == aiDestination.route,
-                        onClick = { goTo(aiDestination.route) },
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                    )
                 }
             }
         },
@@ -198,8 +188,17 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
             )
         }
         composable("shipyard-stock") { ShipyardsScreen(contentPadding = padding, onShipyard = { navController.navigate("shipyards/$it") }) }
+        composable("settings") {
+            SettingsScreen(
+                contentPadding = padding,
+                onBack = { navController.popBackStack() },
+                onAiSettings = { navController.navigate("ai-settings") },
+                onUpdates = { navController.navigate("updates") },
+                onLearningRules = { navController.navigate("learning-rules") },
+            )
+        }
         composable("ai-settings") { AiSettingsScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
-        composable("learning-rules") { LearningRulesScreen(contentPadding = padding) }
-        composable("updates") { UpdateScreen(contentPadding = padding) }
+        composable("learning-rules") { LearningRulesScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
+        composable("updates") { UpdateScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
     }
 }

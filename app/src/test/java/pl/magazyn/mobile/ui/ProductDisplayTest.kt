@@ -7,7 +7,7 @@ import org.junit.Test
 class ProductDisplayTest {
     @Test fun createsCompleteProductRowText() {
         val text = productRowText("Bluza Monterska", "52", "Monterskie", "Bluza", 18.0, "szt.")
-        assertEquals("Bluza Monterska    52", text.title)
+        assertEquals("Bluza Monterska • 52", text.title)
         assertEquals("Monterskie • Bluza", text.secondary)
         assertEquals("18", text.quantity)
         assertEquals("szt.", text.unit)
