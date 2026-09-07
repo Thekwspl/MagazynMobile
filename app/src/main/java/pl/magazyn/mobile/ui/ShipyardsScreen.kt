@@ -89,7 +89,7 @@ fun ShipyardsScreen(
     val valid = selected != null && lines.all { it.productId.isNotBlank() && (it.quantity.toLongOrNull() ?: 0L) > 0L }
     val visibleShipyards = shipyards.filter { search.isBlank() || it.name.contains(search, true) }
     val exportItems = shipyardStock.map { item ->
-        ProductWithStock(item.productId, item.name, item.variant, item.unit, "", "", "", "", "", "", false, 0.0, 0, false, item.quantity, true)
+        ProductWithStock(item.productId, item.name, item.variant, item.unit, "", item.groupName, item.subgroupName, "", "", "", false, 0.0, 0, false, item.quantity, true)
     }
 
     if (selected == null) {
@@ -253,10 +253,7 @@ fun ShipyardsScreen(
                         }
                         shipyardStock.forEach { stockItem ->
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(stockItem.name + stockItem.variant?.let { " · $it" }.orEmpty(), Modifier.weight(1f))
-                                Text("${formatWholeQuantity(stockItem.quantity)} ${stockItem.unit}", fontWeight = FontWeight.SemiBold)
-                            }
+                            ProductInfo(stockItem.name, stockItem.variant, stockItem.groupName, stockItem.subgroupName, Modifier.fillMaxWidth().padding(vertical = 8.dp), stockQuantity = stockItem.quantity, unit = stockItem.unit)
                         }
                     }
                 }
@@ -343,7 +340,7 @@ private fun ShipyardReturnDialog(
                 stock.forEach { item ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(item.name + item.variant?.let { " · $it" }.orEmpty())
+                            ProductInfo(item.name, item.variant, item.groupName, item.subgroupName, stockQuantity = item.quantity, unit = item.unit)
                             Text("Na stoczni: ${formatWholeQuantity(item.quantity)} ${item.unit}", style = MaterialTheme.typography.labelSmall)
                         }
                         OutlinedTextField(
@@ -497,10 +494,7 @@ private fun ShipyardProductLine(
                 OutlinedCard(onClick = {
                     onChange(line.copy(productId = product.id, query = product.name + product.variant?.let { " · $it" }.orEmpty(), showSuggestions = false))
                 }, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth().padding(9.dp)) {
-                        Text(product.name + product.variant?.let { " · $it" }.orEmpty(), Modifier.weight(1f))
-                        Text(if (product.stockKnown) "${formatWholeQuantity(product.stockQuantity)} ${product.unit}" else "stan ?", fontWeight = FontWeight.SemiBold)
-                    }
+                    ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.fillMaxWidth().padding(9.dp), stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit)
                 }
             }
             OutlinedTextField(

@@ -25,10 +25,14 @@ Docelowy przepływ:
 ## Publikowanie następnej wersji
 
 1. Zwiększ `versionCode` i `versionName` w `app/build.gradle.kts`.
-2. Wyślij zmiany do GitHub.
-3. Utwórz i wyślij tag zgodny z wersją, np. `v0.9.9`.
-4. Workflow uruchomi testy, zbuduje podpisane `MagazynMobile.apk` i doda je do GitHub Releases.
-5. W telefonie wybierz `Menu → Aktualizacje → Sprawdź aktualizacje → Pobierz → Zainstaluj`.
+2. Wyślij zmiany do gałęzi `main` w GitHub.
+3. Workflow automatycznie uruchomi `test` i `assembleRelease` przy każdym pushu do `main`.
+4. Jeśli testy lub build nie przejdą, tag i Release nie zostaną utworzone.
+5. Jeśli build przejdzie, a Release dla `versionName` jeszcze nie istnieje, workflow sam utworzy tag `v<versionName>`, GitHub Release i dołączy podpisany `MagazynMobile.apk`.
+6. Jeśli dana wersja jest już opublikowana, workflow nadal sprawdzi testy i build, ale nie utworzy duplikatu wydania.
+7. W telefonie wybierz `Menu → Aktualizacje → Sprawdź aktualizacje → Pobierz → Zainstaluj`.
+
+Nie trzeba ręcznie wykonywać `git tag`, przesuwać tagów ani uruchamiać ponownie workflow dla starego commita. Każda poprawka trafiająca do `main` jest sprawdzana jako nowy build bieżącego kodu.
 
 ## Ważne ograniczenia
 

@@ -36,6 +36,7 @@ fun HomeScreen(
     onQuickIssue: () -> Unit = {},
     onPerson: (String) -> Unit = {},
     onProduct: (String) -> Unit = {},
+    onDuplicates: () -> Unit = {},
     viewModel: HomeViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -45,19 +46,20 @@ fun HomeScreen(
     val products by viewModel.products.collectAsStateWithLifecycle()
     val people by viewModel.people.collectAsStateWithLifecycle()
     val aiAnalysis by viewModel.aiAnalysis.collectAsStateWithLifecycle()
+    val duplicateDecisions by viewModel.duplicateDecisions.collectAsStateWithLifecycle()
     val query by viewModel.quickInput.collectAsStateWithLifecycle()
     var attentionDetails by remember { mutableStateOf<AttentionDetails?>(null) }
     var showNotifications by remember { mutableStateOf(false) }
-    val duplicateCandidates = remember(people, products) {
-        val employeeDuplicates = people.groupBy { pl.magazyn.mobile.domain.ImportParser.key(it.firstName + " " + it.lastName) }
-            .filterKeys(String::isNotBlank).values.filter { it.size > 1 }.flatMap { group ->
-                group.map { DuplicateCandidate("PERSON", it.id, it.listDisplayName(), "Możliwy duplikat osoby · ${group.size} podobne rekordy") }
-            }
-        val productDuplicates = products.groupBy { pl.magazyn.mobile.domain.ImportParser.key(it.name) + "|" + pl.magazyn.mobile.domain.ImportParser.key(it.variant.orEmpty()) }
-            .filterKeys { !it.startsWith("|") }.values.filter { it.size > 1 }.flatMap { group ->
+    val duplicateCandidates = remember(products, duplicateDecisions) {
+        val ignoredSignatures = duplicateDecisions.filter { it.decision in setOf("KEEP_SEPARATE", "SKIP") }.map { it.signature }.toSet()
+        val productDuplicates = products.groupBy { pl.magazyn.mobile.domain.productDuplicateKey(it.name, it.variant).signature }
+            .filterKeys { !it.startsWith("|") && it !in ignoredSignatures }.values.filter { group -> group.size > 1 && group.indices.any { left -> ((left + 1) until group.size).any { right ->
+                val a = group[left]; val b = group[right]
+                pl.magazyn.mobile.domain.isPotentialProductDuplicate(a.name, a.variant, a.groupName, a.subgroupName, a.category, b.name, b.variant, b.groupName, b.subgroupName, b.category)
+            } } }.flatMap { group ->
                 group.map { DuplicateCandidate("PRODUCT", it.id, it.name + it.variant?.let { value -> " · $value" }.orEmpty(), "Możliwy duplikat przedmiotu · ${group.size} podobne rekordy") }
             }
-        employeeDuplicates + productDuplicates
+        productDuplicates
     }
 
     LaunchedEffect(aiAnalysis.result) {
@@ -126,7 +128,7 @@ fun HomeScreen(
                             Icons.Default.ContentCopy,
                             "${duplicateCandidates.size} rekordów może być duplikatami",
                             true,
-                        ) { attentionDetails = AttentionDetails.DUPLICATES }
+                        ) { onDuplicates() }
                     } else {
                         SectionHeader("Wymaga uwagi", "")
                         Text("Nic nie wymaga uwagi", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -189,6 +191,7 @@ fun ParsedNoteReviewScreen(
     val people by viewModel.people.collectAsStateWithLifecycle()
     val products by viewModel.products.collectAsStateWithLifecycle()
     val shipyards by viewModel.shipyards.collectAsStateWithLifecycle()
+    val taskPlaces by viewModel.taskPlaces.collectAsStateWithLifecycle()
     val current = review
     if (current == null) {
         LaunchedEffect(Unit) { onBack() }
@@ -227,7 +230,19 @@ fun ParsedNoteReviewScreen(
             }
         }
         Box(Modifier.weight(1f)) {
-            ParsedNoteReviewContent(
+            if (note.kind == ParsedInputKind.TASK && note.taskDraft != null) {
+                TaskDraftReviewContent(
+                    rawText = current.rawText,
+                    initial = note.taskDraft,
+                    people = people,
+                    places = taskPlaces,
+                    onSave = { draft ->
+                        viewModel.saveTaskDraft(current.rawText, draft)
+                        viewModel.closeReview(completed = true)
+                        onBack()
+                    },
+                )
+            } else ParsedNoteReviewContent(
                 rawText = current.rawText,
                 note = note,
                 matchedPersonName = matchedPerson?.fullName,
@@ -290,11 +305,11 @@ private fun SmartInput(
                 minLines = 3,
                 maxLines = Int.MAX_VALUE,
                 label = { Text("Szybkie pole") },
-                placeholder = { Text("Wpisz osobę, przedmiot, stocznię albo wklej zamówienie…") },
+                placeholder = { Text("Wklej zamówienie, zadanie albo wpisz osobę, miejsce lub przedmiot…") },
             )
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onRecognizeLocal, enabled = value.isNotBlank() && !aiLoading, modifier = Modifier.weight(1f)) {
-                    Text("Offline")
+                    Text(if (pl.magazyn.mobile.domain.TaskTextParser().looksLikeTask(value)) "Utwórz zadanie z tekstu" else "Offline")
                 }
                 Button(onClick = onRecognizeAi, enabled = value.isNotBlank() && !aiLoading, modifier = Modifier.weight(1f)) {
                     if (aiLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -448,7 +463,7 @@ private fun AttentionDetailsSheet(
                     val item = negativeItems[index]
                     DetailLine(
                         item.name + item.variant?.let { " · $it" }.orEmpty(),
-                        "${item.warehouseName} · ${formatWholeQuantity(item.quantity)} ${item.unit}",
+                        listOf(productSecondaryLine(item.groupName, item.subgroupName), item.warehouseName, "${formatWholeQuantity(item.quantity)} ${item.unit}").filter(String::isNotBlank).joinToString(" · "),
                     ) { selectedNegative = item }
                 }
             } else if (kind == AttentionDetails.PENDING_IMPORT) {
@@ -502,7 +517,7 @@ private fun AttentionDetailsSheet(
             title = { Text("Popraw stan") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(item.name + item.variant?.let { " · $it" }.orEmpty(), fontWeight = FontWeight.SemiBold)
+                    ProductInfo(item.name, item.variant, item.groupName, item.subgroupName)
                     Text("Obecny stan: ${formatWholeQuantity(item.quantity)} ${item.unit}")
                     OutlinedTextField(
                         value,
@@ -565,10 +580,7 @@ private fun PendingMappingDialog(
                             modifier = Modifier.fillMaxWidth(),
                             colors = if (selectedProductId == product.id) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.outlinedCardColors(),
                         ) {
-                            Row(Modifier.fillMaxWidth().padding(9.dp), Arrangement.SpaceBetween) {
-                                Text(product.name + product.variant?.let { " · $it" }.orEmpty(), Modifier.weight(1f))
-                                Text("${formatWholeQuantity(product.stockQuantity)} ${product.unit}", style = MaterialTheme.typography.labelMedium)
-                            }
+                    ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.fillMaxWidth().padding(9.dp), stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit)
                         }
                     }
                 } else {
@@ -711,7 +723,10 @@ private fun ParsedNoteReviewContent(
                         Text(item.name, fontWeight = FontWeight.SemiBold)
                         Text(details, style = MaterialTheme.typography.labelMedium)
                         if (productMatch == null) Text("Nie rozpoznano przedmiotu", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                        else Text("Propozycja: ${productMatch.name}${productMatch.variant?.let { " · $it" }.orEmpty()}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                        else {
+                            Text("Proponowany przedmiot", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                            ProductInfo(productMatch.name, productMatch.variant, productMatch.groupName, productMatch.subgroupName)
+                        }
                         when {
                             recipientQuery.isBlank() && recognizedShipyard != null -> Text("Odbiorca domyślny: stocznia ${recognizedShipyard.name}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                             recipientQuery.isBlank() -> Text("Brak odbiorcy przy tej pozycji", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
@@ -765,7 +780,7 @@ private fun ParsedNoteReviewContent(
                             Text("Proponowane przedmioty", style = MaterialTheme.typography.labelMedium)
                             productMatches.take(5).forEach { product ->
                                 OutlinedButton(onClick = { editedItems[index] = item.copy(name = product.name, variant = product.variant, unit = product.unit) }, Modifier.fillMaxWidth()) {
-                                    Text(product.name + product.variant?.let { " · $it" }.orEmpty(), Modifier.weight(1f)); Text("${formatWholeQuantity(product.stockQuantity)} ${product.unit}")
+                                    ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.weight(1f), stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit)
                                 }
                             }
                         }
@@ -862,6 +877,79 @@ private fun ParsedNoteReviewContent(
             dismissButton = { TextButton(onClick = { showPlannedDatePicker = false }) { Text("Anuluj") } },
         ) { DatePicker(state) }
     }
+}
+
+@Composable
+private fun TaskDraftReviewContent(
+    rawText: String,
+    initial: pl.magazyn.mobile.domain.ParsedTaskDraft,
+    people: List<pl.magazyn.mobile.data.EmployeeSummary>,
+    places: List<pl.magazyn.mobile.data.TaskPlaceView>,
+    onSave: (pl.magazyn.mobile.domain.ParsedTaskDraft) -> Unit,
+) {
+    var title by remember(initial) { mutableStateOf(initial.title) }
+    var date by remember(initial) { mutableStateOf(initial.date.orEmpty()) }
+    var description by remember(initial) { mutableStateOf(initial.description) }
+    val steps = remember(initial) { mutableStateListOf<pl.magazyn.mobile.domain.ParsedTaskStep>().apply { addAll(initial.steps) } }
+    Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) { Text("Oryginalna wiadomość", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge); Text(rawText) } }
+        Text("Podgląd zadania", style = MaterialTheme.typography.titleLarge)
+        Text("Elementy oznaczone kolorem wymagają sprawdzenia. Nic nie zostanie zapisane przed zatwierdzeniem.", style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("Tytuł") }, singleLine = true)
+        OutlinedTextField(date, { date = it }, Modifier.fillMaxWidth(), label = { Text("Data (RRRR-MM-DD, opcjonalnie)") }, singleLine = true)
+        OutlinedTextField(description, { description = it }, Modifier.fillMaxWidth(), label = { Text("Opis / nierozstrzygnięte informacje") }, minLines = 2)
+        steps.forEachIndexed { stepIndex, step ->
+            OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Etap ${stepIndex + 1}", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    ConfidenceLabel(step.confidence)
+                    IconButton(onClick = { steps.removeAt(stepIndex) }) { Icon(Icons.Default.DeleteOutline, "Usuń") }
+                }
+                OutlinedTextField(step.time.orEmpty(), { steps[stepIndex] = step.copy(time = it.ifBlank { null }) }, Modifier.fillMaxWidth(), label = { Text("Godzina") }, singleLine = true)
+                var placeQuery by remember(initial, stepIndex) { mutableStateOf(step.placeText) }
+                OutlinedTextField(placeQuery, { placeQuery = it; steps[stepIndex] = step.copy(placeId = null, placeText = it, confidence = pl.magazyn.mobile.domain.ParseConfidence.REVIEW) }, Modifier.fillMaxWidth(), label = { Text("Miejsce lub alias") }, singleLine = true)
+                if (step.placeId == null && placeQuery.isNotBlank()) {
+                    val placeMatches = places.filter { place -> (listOf(place.name) + place.aliases.split(',')).any { pl.magazyn.mobile.domain.ImportParser.key(it).contains(pl.magazyn.mobile.domain.ImportParser.key(placeQuery)) } }.take(4)
+                    placeMatches.forEach { place -> TextButton(onClick = { placeQuery = place.name; steps[stepIndex] = step.copy(placeId = place.id, placeText = place.name, confidence = pl.magazyn.mobile.domain.ParseConfidence.CERTAIN) }, Modifier.fillMaxWidth()) { Text("${place.name}${place.aliases.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()}") } }
+                    if (placeMatches.isEmpty()) Text("Nie znaleziono miejsca — po zatwierdzeniu zostanie dodane jako nowe.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                }
+                OutlinedTextField(step.note, { steps[stepIndex] = step.copy(note = it) }, Modifier.fillMaxWidth(), label = { Text("Notatka etapu") })
+                step.people.forEachIndexed { personIndex, person ->
+                    Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(person.displayText, { value ->
+                                val updated = step.people.toMutableList(); updated[personIndex] = person.copy(employeeId = null, displayText = value, confidence = pl.magazyn.mobile.domain.ParseConfidence.REVIEW); steps[stepIndex] = step.copy(people = updated)
+                            }, Modifier.weight(1f), label = { Text("Osoba") }, singleLine = true)
+                            ConfidenceLabel(person.confidence)
+                        }
+                        if (person.employeeId == null) {
+                            Text("Nie znaleziono pracownika", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                            matchingPeople(person.displayText, people).take(4).forEach { employee ->
+                                TextButton(onClick = {
+                                    val updated = step.people.toMutableList(); updated[personIndex] = person.copy(employeeId = employee.id, displayText = employee.listDisplayName(), confidence = pl.magazyn.mobile.domain.ParseConfidence.CERTAIN); steps[stepIndex] = step.copy(people = updated)
+                                }, Modifier.fillMaxWidth()) { Text(employee.listDisplayName()) }
+                            }
+                        }
+                        OutlinedTextField(person.note, { value -> val updated = step.people.toMutableList(); updated[personIndex] = person.copy(note = value); steps[stepIndex] = step.copy(people = updated) }, Modifier.fillMaxWidth(), label = { Text("Notatka osoby") })
+                    }
+                }
+                OutlinedButton(onClick = { steps[stepIndex] = step.copy(people = step.people + pl.magazyn.mobile.domain.ParsedTaskPerson(null, "", confidence = pl.magazyn.mobile.domain.ParseConfidence.REVIEW)) }, Modifier.fillMaxWidth()) { Icon(Icons.Default.PersonAdd, null); Text("Dodaj osobę / podpunkt") }
+            } }
+        }
+        OutlinedButton(onClick = { steps += pl.magazyn.mobile.domain.ParsedTaskStep(confidence = pl.magazyn.mobile.domain.ParseConfidence.REVIEW) }, Modifier.fillMaxWidth()) { Icon(Icons.Default.Add, null); Text("Dodaj etap") }
+        Button(onClick = { onSave(initial.copy(title = title.trim(), date = date.trim().ifBlank { null }, description = description.trim(), steps = steps.toList())) }, enabled = title.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Utwórz zadanie") }
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+@Composable
+private fun ConfidenceLabel(confidence: pl.magazyn.mobile.domain.ParseConfidence) {
+    val text = when (confidence) {
+        pl.magazyn.mobile.domain.ParseConfidence.CERTAIN -> "Pewny"
+        pl.magazyn.mobile.domain.ParseConfidence.LIKELY -> "Prawdopodobny"
+        pl.magazyn.mobile.domain.ParseConfidence.REVIEW -> "Sprawdź"
+    }
+    Text(text, color = if (confidence == pl.magazyn.mobile.domain.ParseConfidence.REVIEW) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
 }
 
 private fun matchingProducts(item: pl.magazyn.mobile.domain.ParsedItem, products: List<pl.magazyn.mobile.data.ProductWithStock>): List<pl.magazyn.mobile.data.ProductWithStock> {

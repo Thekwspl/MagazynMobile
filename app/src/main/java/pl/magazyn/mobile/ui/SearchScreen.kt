@@ -94,11 +94,11 @@ fun SearchScreen(
                     OutlinedCard(onClick = { onProduct(product.id) }, modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Inventory2, null)
-                            Column(Modifier.padding(start = 10.dp).weight(1f)) {
-                                Text(product.name + product.variant?.let { " · $it" }.orEmpty(), fontWeight = FontWeight.SemiBold)
-                                Text(listOf(product.groupName, product.subgroupName, product.category).filter(String::isNotBlank).joinToString(" · "), style = MaterialTheme.typography.labelMedium)
-                            }
-                            Text(if (product.stockKnown) "${formatWholeQuantity(product.stockQuantity)} ${product.unit}" else "stan ?", fontWeight = FontWeight.SemiBold)
+                            ProductInfo(
+                                product.name, product.variant, product.groupName, product.subgroupName,
+                                modifier = Modifier.padding(start = 10.dp).weight(1f),
+                                stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit,
+                            )
                         }
                     }
                 }

@@ -1,4 +1,4 @@
-name: Build and publish Android APK
+name: Test, build and publish Android APK
 
 on:
   push:
@@ -8,13 +8,19 @@ on:
 permissions:
   contents: write
 
-jobs:
-  release:
-    runs-on: ubuntu-latest
+concurrency:
+  group: magazyn-mobile-main-release
+  cancel-in-progress: false
 
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Pobierz kod
+      - name: Pobierz kod i tagi
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Ustaw Java 17
         uses: actions/setup-java@v4
@@ -27,34 +33,59 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Odczytaj wersję aplikacji
-        id: version
-        shell: bash
-        run: |
-          APP_VERSION=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts)
-
-          if [ -z "$APP_VERSION" ]; then
-            echo "Nie udało się odczytać versionName z app/build.gradle.kts"
-            exit 1
-          fi
-
-          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$APP_VERSION" >> "$GITHUB_OUTPUT"
-
-          echo "Wersja aplikacji: $APP_VERSION"
-          echo "Tag wydania: v$APP_VERSION"
-
       - name: Ustaw Android SDK
         uses: android-actions/setup-android@v4
 
       - name: Upewnij się, że Android SDK 35 jest dostępne
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Odczytaj wersję i sprawdź publikację
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          test -n "$APP_VERSION" || { echo "Nie znaleziono versionName w app/build.gradle.kts"; exit 1; }
+          TAG="v$APP_VERSION"
+
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            CREATE_TAG=false
+          else
+            CREATE_TAG=true
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            PUBLISH_RELEASE=false
+          else
+            PUBLISH_RELEASE=true
+          fi
+
+          echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "create_tag=$CREATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "publish_release=$PUBLISH_RELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Sprawdź sekrety podpisu
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+
       - name: Odtwórz prywatny klucz podpisujący
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/magazyn-release.jks"
+        shell: bash
+        run: printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/magazyn-release.jks"
 
       - name: Testy i podpisany build
         env:
@@ -64,48 +95,36 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle test assembleRelease --no-daemon
 
+      - name: Sprawdź podpis APK
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
+
       - name: Przygotuj plik wydania
+        if: steps.release.outputs.publish_release == 'true'
         run: cp app/build/outputs/apk/release/app-release.apk MagazynMobile.apk
 
-      - name: Sprawdź, czy tag już istnieje
-        id: tag_check
+      - name: Utwórz tag wersji
+        if: steps.release.outputs.create_tag == 'true'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
         shell: bash
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
-
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag $TAG już istnieje."
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Tag $TAG nie istnieje."
-          fi
-
-      - name: Utwórz tag wydania
-        if: steps.tag_check.outputs.exists == 'false'
-        shell: bash
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git tag "$TAG"
+          git tag -a "$TAG" "$GITHUB_SHA" -m "Magazyn Mobile $TAG"
           git push origin "$TAG"
 
       - name: Opublikuj GitHub Release
-        if: steps.tag_check.outputs.exists == 'false'
+        if: steps.release.outputs.publish_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: gh release create "$TAG" MagazynMobile.apk --verify-tag --generate-notes --title "Magazyn Mobile $TAG"
 
-          gh release create "$TAG" MagazynMobile.apk \
-            --generate-notes \
-            --title "Magazyn Mobile $TAG"
-
-      - name: Informacja o istniejącym wydaniu
-        if: steps.tag_check.outputs.exists == 'true'
-        run: |
-          echo "Build zakończony poprawnie."
-          echo "Wydanie ${{ steps.version.outputs.tag }} już istnieje, więc nie utworzono nowego Release."
+      - name: Podsumowanie bez nowej publikacji
+        if: steps.release.outputs.publish_release != 'true'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: echo "Testy i build zakończone. Wydanie $TAG już istnieje, więc nie utworzono duplikatu."

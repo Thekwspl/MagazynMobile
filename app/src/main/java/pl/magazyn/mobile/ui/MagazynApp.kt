@@ -24,12 +24,13 @@ fun MagazynApp(modifier: Modifier = Modifier) {
     val homeViewModel: HomeViewModel = viewModel()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route.orEmpty()
-    val isFocusedScreen = currentRoute == "note-review" || currentRoute == "tasks-new" || currentRoute.startsWith("shipyards/")
+    val isFocusedScreen = currentRoute == "note-review" || currentRoute == "tasks-new" || currentRoute == "product-duplicates" || currentRoute.startsWith("shipyards/")
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showQuickAdd by remember { mutableStateOf(false) }
     val drawerDestinations = listOf(
         Destination("tasks", "Zadania", Icons.Default.TaskAlt),
+        Destination("places", "Miejsca", Icons.Default.Place),
         Destination("orders", "Zamówienia", Icons.Default.Checklist),
         Destination("operations", "Operacje", Icons.Default.SwapVert),
         Destination("inventory", "Inwentaryzacja", Icons.Default.FactCheck),
@@ -150,6 +151,7 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
                 onQuickIssue = { navController.navigate("find-issue") },
                 onPerson = { navController.navigate("people/view/$it") },
                 onProduct = { navController.navigate("products/view/$it") },
+                onDuplicates = { navController.navigate("product-duplicates") },
                 viewModel = homeViewModel,
             )
         }
@@ -166,11 +168,19 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
         composable("orders") { OrdersScreen(contentPadding = padding) }
         composable("tasks") { TasksScreen(contentPadding = padding, onNewTask = { navController.navigate("tasks-new") }) }
         composable("tasks-new") { TasksScreen(contentPadding = padding, startAdding = true, onCloseEditor = { navController.popBackStack() }) }
+        composable("places") { PlacesScreen(contentPadding = padding) }
         composable("operations") { OperationsScreen(contentPadding = padding) }
         composable("inventory") { InventoryScreen(contentPadding = padding) }
         composable("products") { ProductsScreen(contentPadding = padding) }
         composable("products/new") { ProductsScreen(contentPadding = padding, startAdding = true) }
         composable("products/view/{productId}") { entry -> ProductsScreen(contentPadding = padding, initialProductId = entry.arguments?.getString("productId")) }
+        composable("product-duplicates") {
+            ProductDuplicatesScreen(
+                contentPadding = padding,
+                onBack = { navController.popBackStack() },
+                onEditProduct = { navController.navigate("products/view/$it") },
+            )
+        }
         composable("people") { PeopleScreen(contentPadding = padding) }
         composable("people/new") { PeopleScreen(contentPadding = padding, startAdding = true) }
         composable("people/view/{personId}") { entry -> PeopleScreen(contentPadding = padding, initialPersonId = entry.arguments?.getString("personId")) }

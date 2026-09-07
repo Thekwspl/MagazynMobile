@@ -56,10 +56,7 @@ fun ShipyardStockScreen(
                         if (stock.isEmpty()) Text("Brak przedmiotów na stanie.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         stock.forEach { item ->
                             HorizontalDivider()
-                            Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), Arrangement.SpaceBetween) {
-                                Text(item.name + item.variant?.let { " · $it" }.orEmpty(), Modifier.weight(1f))
-                                Text("${formatWholeQuantity(item.quantity)} ${item.unit}", fontWeight = FontWeight.SemiBold)
-                            }
+                            ProductInfo(item.name, item.variant, item.groupName, item.subgroupName, Modifier.fillMaxWidth(), stockQuantity = item.quantity, unit = item.unit)
                         }
                         Button(onClick = onIssue, modifier = Modifier.fillMaxWidth()) { Text("Przejdź do wydania stoczni") }
                     }

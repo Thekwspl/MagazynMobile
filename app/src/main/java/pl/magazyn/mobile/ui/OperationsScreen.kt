@@ -221,13 +221,9 @@ private fun OperationProductLine(
                     onChange(line.copy(productId = product.id, query = product.name + product.variant?.let { " · $it" }.orEmpty(), suggestionsVisible = false))
                 }, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.fillMaxWidth().padding(8.dp), Arrangement.SpaceBetween) {
-                        Text(product.name + product.variant?.let { " · $it" }.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.weight(1f), stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit)
                         val yardQuantity = yardStock.firstOrNull { it.productId == product.id }?.quantity
-                        Text(
-                            if (yardQuantity != null) "stocznia: ${formatWholeQuantity(yardQuantity)} ${product.unit}"
-                            else if (product.stockKnown) "${formatWholeQuantity(product.stockQuantity)} ${product.unit}" else "stan ?",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+                        if (yardQuantity != null) Text("stocznia: ${formatWholeQuantity(yardQuantity)} ${product.unit}", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }

@@ -213,7 +213,7 @@ private fun HistoryDetails(entry: HistoryEntry, lines: List<HistoryLine>, onClos
         }
         lines.forEach { line ->
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(line.productName + line.variant?.let { " · $it" }.orEmpty(), Modifier.weight(1f))
+                ProductInfo(line.productName, line.variant, line.groupName, line.subgroupName, Modifier.weight(1f))
                 val positive = line.quantityDelta >= 0
                 Text(
                     (if (positive) "+" else "") + formatWholeQuantity(line.quantityDelta) + " " + line.unit,

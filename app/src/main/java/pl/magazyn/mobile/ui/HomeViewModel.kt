@@ -41,6 +41,13 @@ import pl.magazyn.mobile.domain.normalizePersonName
 import pl.magazyn.mobile.domain.normalizeFirstName
 import pl.magazyn.mobile.domain.normalizeFullPersonName
 import pl.magazyn.mobile.domain.normalizePhoneNumbers
+import pl.magazyn.mobile.domain.TaskTextParser
+import pl.magazyn.mobile.domain.TaskPlaceLookup
+import pl.magazyn.mobile.domain.TaskEmployeeLookup
+import pl.magazyn.mobile.domain.ParsedTaskDraft
+import pl.magazyn.mobile.data.NotebookTaskStepEntity
+import pl.magazyn.mobile.data.NotebookTaskStepPersonEntity
+import pl.magazyn.mobile.data.TaskPlaceEntity
 
 data class HomeUiState(
     val employeeCount: Int = 0,
@@ -64,6 +71,7 @@ data class NoteReviewUiState(
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val database = (application as MagazynApplication).database
     private val parser = NoteParser()
+    private val taskParser = TaskTextParser()
     private val aiKeyStore = AiKeyStore(application)
     private val aiAnalyzer = GeminiNoteAnalyzer()
     private val _aiAnalysis = MutableStateFlow(AiAnalysisUiState())
@@ -84,10 +92,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val shipyards = database.shipyardDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val taskPlaces = database.taskStructureDao().observePlaces()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val shipyardLeaderLinks = database.shipyardDao().observeAllLeaderLinks()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val learningRules = database.learningRuleDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val duplicateDecisions = database.productMergeDao().observeDecisions()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val uiState = combine(
         database.employeeDao().observeActiveCount(),
@@ -131,6 +143,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun recognize(text: String): ParsedNote {
         val parsed = parser.parse(text)
+        if (taskParser.looksLikeTask(text)) {
+            val draft = taskParser.parse(
+                text = text,
+                places = taskPlaces.value.map { place -> TaskPlaceLookup(place.id, place.name, place.aliases.split(',').map(String::trim).filter(String::isNotBlank)) },
+                employees = people.value.map { TaskEmployeeLookup(it.id, it.firstName, it.lastName) },
+            )
+            return parsed.copy(kind = ParsedInputKind.TASK, tasks = emptyList(), taskDraft = draft)
+        }
         val activeRules = learningRules.value.filter { it.isEnabled }
         val learnedItems = parsed.items.map { item ->
             item.copy(recipientName = item.recipientName?.let(::normalizeFullPersonName))
@@ -198,11 +218,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         if (leaders.isBlank()) yard.name else "${yard.name} | prowadzący: $leaders"
                     },
+                    taskPlaces = taskPlaces.value.map { place ->
+                        TaskPlaceLookup(place.id, place.name, place.aliases.split(',').map(String::trim).filter(String::isNotBlank))
+                    },
+                    employees = people.value.map { employee ->
+                        TaskEmployeeLookup(employee.id, employee.firstName, employee.lastName)
+                    },
                     redactPhoneNumbers = aiKeyStore.redactPhoneNumbers,
                 )
             }.onSuccess {
                 aiKeyStore.recordConnection(true, aiAnalyzer.lastModel, "Analiza zakończona powodzeniem")
-                _aiAnalysis.value = AiAnalysisUiState(result = it)
+                // W razie niepełnego TASK z AI zachowujemy bezpieczny, istniejący parser lokalny jako
+                // plan awaryjny do podglądu — AI nadal jest jedynym analizatorem wywoływanym z Szybkiego Pola.
+                val result = if (it.kind == ParsedInputKind.TASK && it.taskDraft == null) {
+                    recognize(text).copy(analyzedByAi = true)
+                } else it
+                _aiAnalysis.value = AiAnalysisUiState(result = result)
             }.onFailure {
                 aiKeyStore.recordConnection(false, aiAnalyzer.lastModel, it.message ?: "Nieznany błąd")
                 _aiAnalysis.value = AiAnalysisUiState(error = it.message ?: "Nie udało się przeanalizować notatki.")
@@ -249,6 +280,72 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     NotebookTaskEntity(java.util.UUID.randomUUID().toString(), notebookId, task, false, index)
                 },
             )
+        }
+    }
+
+    fun saveTaskDraft(rawText: String, draft: ParsedTaskDraft) {
+        val title = draft.title.trim()
+        if (title.isBlank()) return
+        viewModelScope.launch {
+            database.withTransaction {
+                val notebookId = UUID.randomUUID().toString()
+                val taskId = UUID.randomUUID().toString()
+                database.notebookDao().insertNotebook(
+                    OrderNotebookEntity(notebookId, rawText, "ACTIVE", "TASK", System.currentTimeMillis()),
+                )
+                database.notebookDao().insertTasks(
+                    listOf(
+                        NotebookTaskEntity(
+                            id = taskId,
+                            notebookId = notebookId,
+                            text = title,
+                            isCompleted = false,
+                            position = 0,
+                            dueDate = draft.date,
+                            description = draft.description.trim(),
+                        ),
+                    ),
+                )
+                val knownPlaces = database.taskStructureDao().getPlacesNow().toMutableList()
+                val knownAliases = database.taskStructureDao().getAliasesNow()
+                draft.steps.forEachIndexed { stepIndex, step ->
+                    val placeKey = ImportParser.key(step.placeText)
+                    val resolvedPlaceId = step.placeId
+                        ?: knownPlaces.firstOrNull { ImportParser.key(it.name) == placeKey }?.id
+                        ?: knownAliases.firstOrNull { it.normalizedAlias == placeKey }?.placeId
+                        ?: database.taskStructureDao().findPlaceByName(step.placeText)?.let { archived ->
+                            database.taskStructureDao().restorePlace(archived.id)
+                            knownPlaces += archived.copy(isArchived = false)
+                            archived.id
+                        }
+                        ?: step.placeText.trim().takeIf(String::isNotBlank)?.let { name ->
+                            val newPlace = TaskPlaceEntity(UUID.randomUUID().toString(), normalizeDisplayName(name))
+                            database.taskStructureDao().insertPlace(newPlace)
+                            knownPlaces += newPlace
+                            newPlace.id
+                        }
+                    val stepId = step.recordId ?: UUID.randomUUID().toString()
+                    resolvedPlaceId?.let { database.taskStructureDao().restorePlace(it) }
+                    database.taskStructureDao().insertSteps(
+                        listOf(NotebookTaskStepEntity(stepId, taskId, stepIndex, step.time, resolvedPlaceId, step.note.trim(), step.isCompleted, step.completedAtEpochMillis, step.completedBy)),
+                    )
+                    database.taskStructureDao().insertStepPeople(
+                        step.people.mapIndexed { personIndex, person ->
+                            NotebookTaskStepPersonEntity(
+                                id = person.recordId ?: UUID.randomUUID().toString(),
+                                taskStepId = stepId,
+                                position = personIndex,
+                                employeeId = person.employeeId,
+                                fallbackText = if (person.employeeId == null) person.displayText.trim() else "",
+                                note = person.note.trim(),
+                                isCompleted = person.isCompleted,
+                                completedAtEpochMillis = person.completedAtEpochMillis,
+                                completedBy = person.completedBy,
+                            )
+                        },
+                    )
+                }
+            }
         }
     }
 
@@ -351,7 +448,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setTaskCompleted(id: String, completed: Boolean) {
-        viewModelScope.launch { database.notebookDao().setTaskCompleted(id, completed) }
+        viewModelScope.launch {
+            database.withTransaction {
+                database.notebookDao().setTaskCompleted(id, completed)
+                val now = if (completed) System.currentTimeMillis() else null
+                database.taskStructureDao().getStepsForTaskNow(id).forEach { step ->
+                    database.taskStructureDao().setStepCompleted(step.id, completed, now, null)
+                    database.taskStructureDao().setAllStepPeopleCompleted(step.id, completed, now, null)
+                }
+            }
+        }
     }
 
     fun correctNegativeStock(item: NegativeStockItem, actualQuantity: Long) {

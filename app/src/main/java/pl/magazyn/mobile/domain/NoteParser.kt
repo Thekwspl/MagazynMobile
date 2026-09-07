@@ -32,6 +32,7 @@ data class ParsedNote(
     val analyzedByAi: Boolean = false,
     val shipyardName: String? = null,
     val suggestedIssueDate: String? = null,
+    val taskDraft: ParsedTaskDraft? = null,
 )
 
 /**

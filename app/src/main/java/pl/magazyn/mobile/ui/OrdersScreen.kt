@@ -142,7 +142,7 @@ private fun OrderDetails(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(line.isPrepared, { onPrepared(line.id, it) }, enabled = line.productId != null)
                 Column(Modifier.weight(1f)) {
-                    Text(line.productName?.let { it + line.productVariant?.let { variant -> " · $variant" }.orEmpty() } ?: line.rawText, fontWeight = FontWeight.SemiBold)
+                    if (line.productName != null) ProductInfo(line.productName, line.productVariant, line.groupName.orEmpty(), line.subgroupName.orEmpty()) else Text(line.rawText, fontWeight = FontWeight.SemiBold)
                     Text("${formatWholeQuantity(line.quantity)} ${line.unit} · stan ${formatWholeQuantity(line.stockQuantity)}", style = MaterialTheme.typography.labelMedium)
                     if (line.productId == null) Text("Nie rozpoznano przedmiotu — przypisz go", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                 }
@@ -344,7 +344,7 @@ private fun OrderLineDialog(line: OrderDetailLine, products: List<ProductWithSto
             }
             matches.forEach { product ->
                 OutlinedCard(onClick = { selectedId = product.id; query = product.name + product.variant?.let { " · $it" }.orEmpty() }, Modifier.fillMaxWidth(), colors = if (selectedId == product.id) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.outlinedCardColors()) {
-                    Row(Modifier.fillMaxWidth().padding(8.dp), Arrangement.SpaceBetween) { Text(product.name + product.variant?.let { " · $it" }.orEmpty(), Modifier.weight(1f)); Text("${formatWholeQuantity(product.stockQuantity)} ${product.unit}") }
+                    ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.fillMaxWidth(), stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit)
                 }
             }
             if (selectedId != null) {

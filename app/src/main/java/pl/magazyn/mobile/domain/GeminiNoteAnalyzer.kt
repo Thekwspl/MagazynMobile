@@ -9,6 +9,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
 
 data class AiCatalogItem(
     val name: String,
@@ -26,6 +27,8 @@ class GeminiNoteAnalyzer {
         rawText: String,
         catalog: List<AiCatalogItem>,
         shipyards: List<String>,
+        taskPlaces: List<TaskPlaceLookup> = emptyList(),
+        employees: List<TaskEmployeeLookup> = emptyList(),
         redactPhoneNumbers: Boolean,
     ): ParsedNote = withContext(Dispatchers.IO) {
         val textForApi = if (redactPhoneNumbers) redactPhones(rawText) else rawText
@@ -47,7 +50,10 @@ class GeminiNoteAnalyzer {
             Osoba może mieć stanowisko w nawiasie. Rozwiń potoczną formę imienia do pełnej tylko gdy jesteś pewny (np. Krzyś/Krzychu -> Krzysztof, Grześ/Grzechu -> Grzegorz, Kuba -> Jakub, Arek -> Arkadiusz). Nie zmieniaj nazwiska, nawet jeśli wygląda jak imię.
             Ilość musi być liczbą całkowitą. Gdy jej brak, wpisz 1. Nie zgaduj brakującego rozmiaru/typu.
             Jeżeli pozycja dotyczy całej ekipy, zachowaj odbiorcę opisowo. Zwrot lub wymianę dopisz do notes.
-            Zwróć WYŁĄCZNIE poprawny JSON w postaci:
+            Dla typu TASK zwróć zadanie jako dane strukturalne w polu task:
+            {"kind":"TASK","people":[],"items":[],"phoneNumbers":[],"tasks":[],"task":{"title":"Zjazd","date":"YYYY-MM-DD lub null","notes":"opis nierozstrzygniętych informacji","steps":[{"time":"09:30 lub null","place":"UL lub Kleven lub null","notes":"","people":[{"employeeName":"Piech Łukasz","note":"","confidence":0.9}],"confidence":0.9}]}}
+            Nie wymyślaj brakujących danych. Godziny lotów, linie lotnicze i niejednoznaczne fragmenty wpisz do notes zadania lub osoby. TASK nigdy nie ma automatycznie tworzyć pracownika ani miejsca.
+            Dla innych typów zwróć WYŁĄCZNIE poprawny JSON w postaci:
             {"kind":"ORDER","shipyardName":"Ulstein","suggestedIssueDate":"2026-09-05","people":[{"fullName":"Jan Kowalski","position":"spawacz","confidence":0.9}],"items":[{"recipientName":"Jan Kowalski","name":"Buty spawalnicze","variant":"44","quantity":1,"unit":"para","notes":"","confidence":0.9}],"phoneNumbers":[],"tasks":[]}
             Dozwolone jednostki: szt., para, paczka, opak., pudełko, karton, komplet. confidence od 0 do 1.
 
@@ -57,10 +63,16 @@ class GeminiNoteAnalyzer {
             STOCZNIE (wybieraj nazwę z tej listy, jeżeli pasuje):
             ${shipyards.joinToString("\n")}
 
+            MIEJSCA ZADAŃ (nazwa | aliasy; używaj ich tylko, gdy tekst faktycznie pasuje):
+            ${taskPlaces.joinToString("\n") { "${it.name} | ${it.aliases.joinToString(", ")}" }}
+
+            PRACOWNICY (tylko do rozpoznania; nie twórz nowych):
+            ${employees.joinToString("\n") { "${it.firstName} ${it.lastName}" }}
+
             NOTATKA:
             $textForApi
         """.trimIndent()
-        val parsed = parseResponse(post(apiKey, prompt))
+        val parsed = parseResponse(post(apiKey, prompt), taskPlaces, employees)
         parsed.copy(suggestedIssueDate = extractShortIssueDate(rawText) ?: parsed.suggestedIssueDate)
     }
 
@@ -128,7 +140,11 @@ class GeminiNoteAnalyzer {
         }
     }
 
-    private fun parseResponse(raw: String): ParsedNote {
+    internal fun parseResponse(
+        raw: String,
+        taskPlaces: List<TaskPlaceLookup> = emptyList(),
+        employees: List<TaskEmployeeLookup> = emptyList(),
+    ): ParsedNote {
         val clean = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         val json = JSONObject(clean)
         val kind = runCatching { ParsedInputKind.valueOf(json.optString("kind", "NOTE")) }.getOrDefault(ParsedInputKind.NOTE)
@@ -157,6 +173,7 @@ class GeminiNoteAnalyzer {
                 ).takeIf { item -> name.isNotBlank() }
             }
         }.flatMap(::expandWarehouseClothingConvention)
+        val taskDraft = if (kind == ParsedInputKind.TASK) parseTaskDraft(json.optJSONObject("task"), taskPlaces, employees) else null
         return ParsedNote(
             person = people.firstOrNull(),
             people = people,
@@ -168,7 +185,58 @@ class GeminiNoteAnalyzer {
             shipyardName = json.nullableString("shipyardName"),
             suggestedIssueDate = json.nullableString("suggestedIssueDate")
                 ?.takeIf { runCatching { java.time.LocalDate.parse(it) }.isSuccess },
+            taskDraft = taskDraft,
         )
+    }
+
+    private fun parseTaskDraft(
+        task: JSONObject?,
+        places: List<TaskPlaceLookup>,
+        employees: List<TaskEmployeeLookup>,
+    ): ParsedTaskDraft? {
+        if (task == null) return null
+        val title = task.optString("title").trim().ifBlank { "Zadanie" }
+        val date = task.nullableString("date")?.let { value ->
+            when (value.lowercase()) {
+                "dzis", "dzisiaj" -> LocalDate.now().toString()
+                "jutro" -> LocalDate.now().plusDays(1).toString()
+                else -> value.takeIf { runCatching { LocalDate.parse(it) }.isSuccess }
+            }
+        }
+        val steps = task.optJSONArray("steps")?.let { values ->
+            (0 until values.length()).mapNotNull { index -> values.optJSONObject(index)?.let { step ->
+                val rawPlace = step.nullableString("place").orEmpty()
+                val placeKey = ImportParser.key(rawPlace)
+                val place = places.firstOrNull { candidate ->
+                    ImportParser.key(candidate.name) == placeKey || candidate.aliases.any { ImportParser.key(it) == placeKey }
+                }
+                val people = step.optJSONArray("people")?.let { persons ->
+                    (0 until persons.length()).mapNotNull { personIndex -> persons.optJSONObject(personIndex)?.let { person ->
+                        val label = person.optString("employeeName").trim()
+                        if (label.isBlank()) null else {
+                            val key = ImportParser.key(label)
+                            val employee = employees.firstOrNull { candidate ->
+                                ImportParser.key("${candidate.firstName} ${candidate.lastName}") == key ||
+                                    ImportParser.key("${candidate.lastName} ${candidate.firstName}") == key
+                            }
+                            ParsedTaskPerson(employee?.id, label, person.optString("note").trim(), if (employee != null) ParseConfidence.CERTAIN else ParseConfidence.REVIEW)
+                        }
+                    } }
+                }.orEmpty()
+                val time = step.nullableString("time")?.takeIf { Regex("^\\d{1,2}:\\d{2}$").matches(it) }?.let { value ->
+                    value.substringBefore(':').padStart(2, '0') + ":" + value.substringAfter(':')
+                }
+                ParsedTaskStep(
+                    time = time,
+                    placeId = place?.id,
+                    placeText = place?.name ?: rawPlace,
+                    note = step.optString("notes").trim(),
+                    people = people,
+                    confidence = if (place != null && people.all { it.employeeId != null }) ParseConfidence.CERTAIN else ParseConfidence.REVIEW,
+                )
+            } }
+        }.orEmpty()
+        return ParsedTaskDraft(title, date, task.optString("notes").trim(), steps, if (steps.isNotEmpty()) ParseConfidence.LIKELY else ParseConfidence.REVIEW)
     }
 
     private fun JSONObject.stringList(name: String): List<String> {

@@ -26,6 +26,11 @@ import androidx.room.RoomDatabase
         OrderNotebookEntity::class,
         NotebookTaskEntity::class,
         NotebookTaskEmployeeEntity::class,
+        TaskPlaceEntity::class,
+        TaskPlaceAliasEntity::class,
+        NotebookTaskStepEntity::class,
+        NotebookTaskStepPersonEntity::class,
+        ProductDuplicateDecisionEntity::class,
         OrderEntity::class,
         OrderLineEntity::class,
         IssueAmendmentEntity::class,
@@ -33,7 +38,7 @@ import androidx.room.RoomDatabase
         ParserLearningRuleEntity::class,
         OrderChangeEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -49,4 +54,6 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun notebookDao(): NotebookDao
     abstract fun importDao(): ImportDao
     abstract fun learningRuleDao(): LearningRuleDao
+    abstract fun taskStructureDao(): TaskStructureDao
+    abstract fun productMergeDao(): ProductMergeDao
 }

@@ -75,14 +75,17 @@ fun InventoryScreen(contentPadding: PaddingValues, viewModel: InventoryViewModel
             items(visible, key = { it.id }) { product ->
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(product.name + product.variant?.let { " · $it" }.orEmpty(), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                        ProductInfo(product.name, product.variant, product.groupName, product.subgroupName)
                         val input = entered[product.id]?.toLongOrNull()
                         if (input != null) {
                             val diff = input - product.stockQuantity.toLong()
                             Text("Różnica: ${if (diff >= 0) "+" else ""}$diff", style = MaterialTheme.typography.labelSmall, color = if (diff == 0L) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
                         }
                     }
-                    Text(if (product.stockKnown) formatWholeQuantity(product.stockQuantity) else "?", Modifier.width(65.dp))
+                    Column(Modifier.width(65.dp), horizontalAlignment = Alignment.End) {
+                        Text(if (product.stockKnown) formatWholeQuantity(product.stockQuantity) else "?")
+                        product.unit.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                    }
                     OutlinedTextField(
                         entered[product.id].orEmpty(),
                         { value -> entered[product.id] = value.filter(Char::isDigit); confirmSave = false; saved = false },

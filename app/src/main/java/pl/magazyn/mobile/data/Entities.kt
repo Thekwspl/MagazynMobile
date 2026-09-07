@@ -378,6 +378,7 @@ data class NotebookTaskEntity(
     val productId: String? = null,
     val orderId: String? = null,
     @ColumnInfo(defaultValue = "''") val place: String = "",
+    @ColumnInfo(defaultValue = "''") val description: String = "",
 )
 
 @Entity(
@@ -392,6 +393,75 @@ data class NotebookTaskEntity(
 data class NotebookTaskEmployeeEntity(
     val taskId: String,
     val employeeId: String,
+)
+
+@Entity(tableName = "task_places", indices = [Index(value = ["name"], unique = true)])
+data class TaskPlaceEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val isArchived: Boolean = false,
+)
+
+@Entity(
+    tableName = "task_place_aliases",
+    foreignKeys = [
+        ForeignKey(entity = TaskPlaceEntity::class, parentColumns = ["id"], childColumns = ["placeId"], onDelete = ForeignKey.CASCADE),
+    ],
+    indices = [Index("placeId"), Index(value = ["normalizedAlias"], unique = true)],
+)
+data class TaskPlaceAliasEntity(
+    @PrimaryKey val id: String,
+    val placeId: String,
+    val alias: String,
+    val normalizedAlias: String,
+)
+
+@Entity(
+    tableName = "notebook_task_steps",
+    foreignKeys = [
+        ForeignKey(entity = NotebookTaskEntity::class, parentColumns = ["id"], childColumns = ["taskId"], onDelete = ForeignKey.CASCADE),
+        ForeignKey(entity = TaskPlaceEntity::class, parentColumns = ["id"], childColumns = ["placeId"], onDelete = ForeignKey.SET_NULL),
+    ],
+    indices = [Index("taskId"), Index("placeId")],
+)
+data class NotebookTaskStepEntity(
+    @PrimaryKey val id: String,
+    val taskId: String,
+    val position: Int,
+    val time: String? = null,
+    val placeId: String? = null,
+    val note: String = "",
+    val isCompleted: Boolean = false,
+    val completedAtEpochMillis: Long? = null,
+    val completedBy: String? = null,
+)
+
+@Entity(
+    tableName = "notebook_task_step_people",
+    foreignKeys = [
+        ForeignKey(entity = NotebookTaskStepEntity::class, parentColumns = ["id"], childColumns = ["taskStepId"], onDelete = ForeignKey.CASCADE),
+        ForeignKey(entity = EmployeeEntity::class, parentColumns = ["id"], childColumns = ["employeeId"], onDelete = ForeignKey.SET_NULL),
+    ],
+    indices = [Index("taskStepId"), Index("employeeId")],
+)
+data class NotebookTaskStepPersonEntity(
+    @PrimaryKey val id: String,
+    val taskStepId: String,
+    val position: Int,
+    val employeeId: String? = null,
+    val fallbackText: String = "",
+    val note: String = "",
+    val isCompleted: Boolean = false,
+    val completedAtEpochMillis: Long? = null,
+    val completedBy: String? = null,
+)
+
+@Entity(tableName = "product_duplicate_decisions", indices = [Index(value = ["signature"], unique = true)])
+data class ProductDuplicateDecisionEntity(
+    @PrimaryKey val id: String,
+    val signature: String,
+    val decision: String,
+    val updatedAtEpochMillis: Long,
 )
 
 @Entity(

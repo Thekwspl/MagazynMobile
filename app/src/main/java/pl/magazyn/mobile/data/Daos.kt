@@ -195,7 +195,7 @@ interface ShipyardDao {
     suspend fun upsertStock(item: ShipyardStockBalanceEntity)
 
     @Query("""
-        SELECT p.id AS productId, p.name, p.variant, p.unit, b.quantity
+        SELECT p.id AS productId, p.name, p.variant, p.unit, b.quantity, p.groupName, p.subgroupName
         FROM shipyard_stock_balances b
         JOIN products p ON p.id = b.productId
         WHERE b.shipyardId = :shipyardId AND b.quantity != 0
@@ -210,6 +210,8 @@ data class ShipyardStockItem(
     val variant: String?,
     val unit: String,
     val quantity: Double,
+    val groupName: String,
+    val subgroupName: String,
 )
 
 data class ShipyardLeaderLink(
@@ -223,7 +225,7 @@ interface StockDao {
     fun observeNegativeCount(): Flow<Int>
 
     @Query("""
-        SELECT p.id AS productId, s.warehouseId, w.name AS warehouseName, p.name, p.variant, s.quantity, p.unit
+        SELECT p.id AS productId, s.warehouseId, w.name AS warehouseName, p.name, p.variant, s.quantity, p.unit, p.groupName, p.subgroupName
         FROM stock_balances s
         JOIN products p ON p.id = s.productId
         JOIN warehouses w ON w.id = s.warehouseId
@@ -247,6 +249,8 @@ data class NegativeStockItem(
     val variant: String?,
     val quantity: Double,
     val unit: String,
+    val groupName: String,
+    val subgroupName: String,
 )
 
 @Dao
@@ -304,7 +308,7 @@ interface MovementDao {
     fun observeHistory(): Flow<List<HistoryEntry>>
 
     @Query("""
-        SELECT l.id, l.productId, p.name AS productName, p.variant, l.quantityDelta, l.unit
+        SELECT l.id, l.productId, p.name AS productName, p.variant, l.quantityDelta, l.unit, p.groupName, p.subgroupName
         FROM stock_movement_lines l
         JOIN products p ON p.id = l.productId
         WHERE l.movementId = :movementId
@@ -313,7 +317,7 @@ interface MovementDao {
     fun observeHistoryLines(movementId: String): Flow<List<HistoryLine>>
 
     @Query("""
-        SELECT c.id, p.name AS productName, p.variant, c.quantity, p.unit, c.issuedDate
+        SELECT c.id, p.name AS productName, p.variant, c.quantity, p.unit, c.issuedDate, p.groupName, p.subgroupName
         FROM custodies c
         JOIN products p ON p.id = c.productId
         WHERE c.employeeId = :employeeId AND c.returnedDate IS NULL
@@ -324,7 +328,7 @@ interface MovementDao {
     @Query("""
         SELECT l.id AS lineId, m.id AS movementId, m.type AS movementType,
                COALESCE(a.replacementProductId, l.productId) AS productId,
-               p.name AS productName, p.variant,
+               p.name AS productName, p.variant, p.groupName, p.subgroupName,
                CASE WHEN a.id IS NULL THEN -l.quantityDelta ELSE a.replacementQuantity END AS quantity,
                p.unit,
                COALESCE(a.replacementDate, m.effectiveDate) AS effectiveDate,
@@ -354,6 +358,8 @@ data class EmployeePossession(
     val quantity: Double,
     val unit: String,
     val issuedDate: String,
+    val groupName: String,
+    val subgroupName: String,
 )
 
 data class HistoryEntry(
@@ -377,6 +383,8 @@ data class HistoryLine(
     val variant: String?,
     val quantityDelta: Double,
     val unit: String,
+    val groupName: String,
+    val subgroupName: String,
 )
 
 data class EmployeeIssue(
@@ -394,6 +402,8 @@ data class EmployeeIssue(
     val isAmended: Boolean,
     val returnedQuantity: Double,
     val lastReturnedDate: String?,
+    val groupName: String,
+    val subgroupName: String,
 )
 
 @Dao
@@ -462,7 +472,7 @@ interface OrderDao {
 
     @Query("""
         SELECT l.id, l.orderId, l.productId, l.rawText, l.quantity, l.unit, l.verificationStatus, l.isPrepared,
-               p.name AS productName, p.variant AS productVariant,
+               p.name AS productName, p.variant AS productVariant, p.groupName, p.subgroupName,
                COALESCE(s.quantity, 0.0) AS stockQuantity
         FROM order_lines l
         LEFT JOIN products p ON p.id = l.productId
@@ -477,7 +487,7 @@ interface OrderDao {
 
     @Query("""
         SELECT l.id, l.orderId, l.productId, l.rawText, l.quantity, l.unit, l.verificationStatus, l.isPrepared,
-               p.name AS productName, p.variant AS productVariant,
+               p.name AS productName, p.variant AS productVariant, p.groupName, p.subgroupName,
                COALESCE(s.quantity, 0.0) AS stockQuantity
         FROM order_lines l
         LEFT JOIN products p ON p.id = l.productId
@@ -546,33 +556,35 @@ data class OrderDetailLine(
     val productName: String?,
     val productVariant: String?,
     val stockQuantity: Double,
+    val groupName: String?,
+    val subgroupName: String?,
 )
 
 @Dao
 interface NotebookDao {
     @Query("""
-        SELECT t.id, t.notebookId, t.text, t.isCompleted, t.dueDate, t.priority, t.place,
+        SELECT t.id, t.notebookId, t.text, t.isCompleted, t.dueDate, t.priority,
+               COALESCE(NULLIF((SELECT GROUP_CONCAT(DISTINCT tp.name) FROM notebook_task_steps ts LEFT JOIN task_places tp ON tp.id = ts.placeId WHERE ts.taskId = t.id), ''), t.place) AS place,
                t.employeeId, t.shipyardId, t.productId, t.orderId,
-               n.createdAtEpochMillis,
+               n.createdAtEpochMillis, t.description,
                COALESCE(
-                   GROUP_CONCAT(TRIM(COALESCE(te.lastName, '') || ' ' || COALESCE(te.firstName, ''))),
+                   NULLIF((SELECT GROUP_CONCAT(TRIM(COALESCE(se.lastName, '') || ' ' || COALESCE(se.firstName, ''))) FROM notebook_task_steps ss JOIN notebook_task_step_people sp ON sp.taskStepId = ss.id LEFT JOIN employees se ON se.id = sp.employeeId WHERE ss.taskId = t.id), ''),
+                   NULLIF((SELECT GROUP_CONCAT(TRIM(COALESCE(le.lastName, '') || ' ' || COALESCE(le.firstName, ''))) FROM notebook_task_employees lnte JOIN employees le ON le.id = lnte.employeeId WHERE lnte.taskId = t.id), ''),
                    NULLIF(TRIM(COALESCE(e.lastName, '') || ' ' || COALESCE(e.firstName, '')), '')
                ) AS employeeName,
-               COALESCE(GROUP_CONCAT(nte.employeeId), t.employeeId) AS employeeIds,
+               COALESCE(NULLIF((SELECT GROUP_CONCAT(sp.employeeId) FROM notebook_task_steps ss JOIN notebook_task_step_people sp ON sp.taskStepId = ss.id WHERE ss.taskId = t.id), ''), NULLIF((SELECT GROUP_CONCAT(lnte.employeeId) FROM notebook_task_employees lnte WHERE lnte.taskId = t.id), ''), t.employeeId) AS employeeIds,
                s.name AS shipyardName,
                TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.variant, '')) AS productName,
+               p.name AS linkedProductName, p.variant AS linkedProductVariant, p.groupName AS linkedProductGroup, p.subgroupName AS linkedProductSubgroup,
                COALESCE(NULLIF(TRIM(oe.lastName || ' ' || oe.firstName), ''), o.recipientLabel) AS orderName
         FROM notebook_tasks t
         JOIN order_notebooks n ON n.id = t.notebookId
         LEFT JOIN employees e ON e.id = t.employeeId
-        LEFT JOIN notebook_task_employees nte ON nte.taskId = t.id
-        LEFT JOIN employees te ON te.id = nte.employeeId
         LEFT JOIN shipyards s ON s.id = t.shipyardId
         LEFT JOIN products p ON p.id = t.productId
         LEFT JOIN orders o ON o.id = t.orderId
         LEFT JOIN employees oe ON oe.id = o.employeeId
         WHERE n.status != 'ARCHIVED'
-        GROUP BY t.id
         ORDER BY t.isCompleted, CASE WHEN t.dueDate IS NULL THEN 1 ELSE 0 END, t.dueDate, n.createdAtEpochMillis DESC, t.position
     """)
     fun observeTasks(): Flow<List<NotebookTaskView>>
@@ -593,11 +605,11 @@ interface NotebookDao {
     suspend fun setTaskCompleted(id: String, completed: Boolean)
 
     @Query("""
-        UPDATE notebook_tasks SET text = :text, dueDate = :dueDate, priority = :priority, place = :place,
+        UPDATE notebook_tasks SET text = :text, dueDate = :dueDate, priority = :priority, place = :place, description = :description,
             employeeId = :employeeId, shipyardId = :shipyardId, productId = :productId, orderId = :orderId
         WHERE id = :id
     """)
-    suspend fun updateTask(id: String, text: String, dueDate: String?, priority: String, place: String, employeeId: String?, shipyardId: String?, productId: String?, orderId: String?)
+    suspend fun updateTask(id: String, text: String, dueDate: String?, priority: String, place: String, description: String, employeeId: String?, shipyardId: String?, productId: String?, orderId: String?)
 
     @Query("DELETE FROM notebook_tasks WHERE id = :id")
     suspend fun deleteTask(id: String)
@@ -621,7 +633,190 @@ data class NotebookTaskView(
     val shipyardName: String?,
     val productName: String?,
     val orderName: String?,
+    val description: String = "",
+    val linkedProductName: String?,
+    val linkedProductVariant: String?,
+    val linkedProductGroup: String?,
+    val linkedProductSubgroup: String?,
 )
+
+@Dao
+interface TaskStructureDao {
+    @Query("""
+        SELECT p.id, p.name, p.isArchived, COALESCE(GROUP_CONCAT(a.alias), '') AS aliases
+        FROM task_places p
+        LEFT JOIN task_place_aliases a ON a.placeId = p.id
+        WHERE p.isArchived = 0
+        GROUP BY p.id
+        ORDER BY p.name COLLATE NOCASE
+    """)
+    fun observePlaces(): Flow<List<TaskPlaceView>>
+
+    @Query("SELECT * FROM task_places WHERE isArchived = 0 ORDER BY name COLLATE NOCASE")
+    suspend fun getPlacesNow(): List<TaskPlaceEntity>
+
+    @Query("SELECT * FROM task_place_aliases ORDER BY alias COLLATE NOCASE")
+    suspend fun getAliasesNow(): List<TaskPlaceAliasEntity>
+
+    @Query("SELECT * FROM task_place_aliases WHERE normalizedAlias = :normalized LIMIT 1")
+    suspend fun findAlias(normalized: String): TaskPlaceAliasEntity?
+
+    @Query("SELECT * FROM task_places WHERE lower(trim(name)) = lower(trim(:name)) LIMIT 1")
+    suspend fun findPlaceByName(name: String): TaskPlaceEntity?
+
+    @Insert
+    suspend fun insertPlace(item: TaskPlaceEntity)
+
+    @Insert
+    suspend fun insertAlias(item: TaskPlaceAliasEntity)
+
+    @Query("UPDATE task_places SET name = :name WHERE id = :id")
+    suspend fun renamePlace(id: String, name: String)
+
+    @Query("UPDATE task_places SET isArchived = 1 WHERE id = :id")
+    suspend fun archivePlace(id: String)
+
+    @Query("UPDATE task_places SET isArchived = 0 WHERE id = :id")
+    suspend fun restorePlace(id: String)
+
+    @Query("DELETE FROM task_place_aliases WHERE id = :id")
+    suspend fun deleteAlias(id: String)
+
+    @Query("DELETE FROM task_place_aliases WHERE placeId = :placeId AND normalizedAlias = :normalizedAlias")
+    suspend fun deleteAlias(placeId: String, normalizedAlias: String)
+
+    @Query("SELECT * FROM task_place_aliases WHERE placeId = :placeId ORDER BY alias COLLATE NOCASE")
+    fun observeAliases(placeId: String): Flow<List<TaskPlaceAliasEntity>>
+
+    @Insert
+    suspend fun insertSteps(items: List<NotebookTaskStepEntity>)
+
+    @Insert
+    suspend fun insertStepPeople(items: List<NotebookTaskStepPersonEntity>)
+
+    @Query("DELETE FROM notebook_task_steps WHERE taskId = :taskId")
+    suspend fun deleteSteps(taskId: String)
+
+    @Query("""
+        SELECT s.id, s.taskId, s.position, s.time, s.placeId, p.name AS placeName,
+               s.note, s.isCompleted, s.completedAtEpochMillis, s.completedBy
+        FROM notebook_task_steps s
+        LEFT JOIN task_places p ON p.id = s.placeId
+        ORDER BY s.taskId, s.position, s.rowid
+    """)
+    fun observeAllSteps(): Flow<List<NotebookTaskStepView>>
+
+    @Query("SELECT * FROM notebook_task_steps WHERE taskId = :taskId ORDER BY position, rowid")
+    suspend fun getStepsForTaskNow(taskId: String): List<NotebookTaskStepEntity>
+
+    @Query("""
+        SELECT sp.id, sp.taskStepId, sp.position, sp.employeeId,
+               COALESCE(NULLIF(TRIM(e.lastName || ' ' || e.firstName), ''), sp.fallbackText) AS displayName,
+               sp.fallbackText, sp.note, sp.isCompleted, sp.completedAtEpochMillis, sp.completedBy,
+               COALESCE(e.phoneNumbers, '') AS phoneNumbers
+        FROM notebook_task_step_people sp
+        LEFT JOIN employees e ON e.id = sp.employeeId
+        ORDER BY sp.taskStepId, sp.position, sp.rowid
+    """)
+    fun observeAllStepPeople(): Flow<List<NotebookTaskStepPersonView>>
+
+    @Query("UPDATE notebook_task_steps SET isCompleted = :completed, completedAtEpochMillis = :completedAt, completedBy = :completedBy WHERE id = :id")
+    suspend fun setStepCompleted(id: String, completed: Boolean, completedAt: Long?, completedBy: String?)
+
+    @Query("UPDATE notebook_task_step_people SET isCompleted = :completed, completedAtEpochMillis = :completedAt, completedBy = :completedBy WHERE taskStepId = :stepId")
+    suspend fun setAllStepPeopleCompleted(stepId: String, completed: Boolean, completedAt: Long?, completedBy: String?)
+
+    @Query("UPDATE notebook_task_step_people SET isCompleted = :completed, completedAtEpochMillis = :completedAt, completedBy = :completedBy WHERE id = :id")
+    suspend fun setStepPersonCompleted(id: String, completed: Boolean, completedAt: Long?, completedBy: String?)
+
+    @Query("SELECT taskStepId FROM notebook_task_step_people WHERE id = :id LIMIT 1")
+    suspend fun findStepIdForPerson(id: String): String?
+
+    @Query("SELECT COUNT(*) FROM notebook_task_step_people WHERE taskStepId = :stepId AND isCompleted = 0")
+    suspend fun countIncompletePeople(stepId: String): Int
+
+    @Query("SELECT COUNT(*) FROM notebook_task_step_people WHERE taskStepId = :stepId")
+    suspend fun countPeople(stepId: String): Int
+
+    @Query("SELECT taskId FROM notebook_task_steps WHERE id = :stepId LIMIT 1")
+    suspend fun findTaskIdForStep(stepId: String): String?
+
+    @Query("SELECT COUNT(*) FROM notebook_task_steps WHERE taskId = :taskId AND isCompleted = 0")
+    suspend fun countIncompleteSteps(taskId: String): Int
+}
+
+data class TaskPlaceView(
+    val id: String,
+    val name: String,
+    val isArchived: Boolean,
+    val aliases: String,
+)
+
+data class NotebookTaskStepView(
+    val id: String,
+    val taskId: String,
+    val position: Int,
+    val time: String?,
+    val placeId: String?,
+    val placeName: String?,
+    val note: String,
+    val isCompleted: Boolean,
+    val completedAtEpochMillis: Long?,
+    val completedBy: String?,
+)
+
+data class NotebookTaskStepPersonView(
+    val id: String,
+    val taskStepId: String,
+    val position: Int,
+    val employeeId: String?,
+    val displayName: String,
+    val fallbackText: String,
+    val note: String,
+    val isCompleted: Boolean,
+    val completedAtEpochMillis: Long?,
+    val completedBy: String?,
+    val phoneNumbers: String,
+)
+
+@Dao
+interface ProductMergeDao {
+    @Query("SELECT * FROM stock_balances WHERE productId = :productId")
+    suspend fun stockBalances(productId: String): List<StockBalanceEntity>
+
+    @Query("DELETE FROM stock_balances WHERE productId = :productId")
+    suspend fun deleteStockBalances(productId: String)
+
+    @Query("SELECT * FROM shipyard_stock_balances WHERE productId = :productId")
+    suspend fun shipyardBalances(productId: String): List<ShipyardStockBalanceEntity>
+
+    @Query("DELETE FROM shipyard_stock_balances WHERE productId = :productId")
+    suspend fun deleteShipyardBalances(productId: String)
+
+    @Query("UPDATE stock_movement_lines SET productId = :targetId WHERE productId = :sourceId")
+    suspend fun moveMovementLines(sourceId: String, targetId: String)
+
+    @Query("UPDATE issue_amendments SET replacementProductId = :targetId WHERE replacementProductId = :sourceId")
+    suspend fun moveAmendments(sourceId: String, targetId: String)
+
+    @Query("UPDATE custodies SET productId = :targetId WHERE productId = :sourceId")
+    suspend fun moveCustodies(sourceId: String, targetId: String)
+
+    @Query("UPDATE order_lines SET productId = :targetId WHERE productId = :sourceId")
+    suspend fun moveOrderLines(sourceId: String, targetId: String)
+
+    @Query("UPDATE notebook_tasks SET productId = :targetId WHERE productId = :sourceId")
+    suspend fun moveTaskLinks(sourceId: String, targetId: String)
+
+    @Query("UPDATE products SET isArchived = 1 WHERE id = :sourceId")
+    suspend fun archiveMergedProduct(sourceId: String)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveDecision(item: ProductDuplicateDecisionEntity)
+
+    @Query("SELECT * FROM product_duplicate_decisions")
+    fun observeDecisions(): Flow<List<ProductDuplicateDecisionEntity>>
+}
 
 @Dao
 interface ImportDao {

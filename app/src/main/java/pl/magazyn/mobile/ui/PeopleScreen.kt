@@ -271,7 +271,7 @@ private fun PossessionsTable(items: List<EmployeePossession>) {
         }
         items.forEach { item ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(item.productName + item.variant?.let { " · $it" }.orEmpty(), Modifier.weight(1.7f), style = MaterialTheme.typography.bodySmall)
+                ProductInfo(item.productName, item.variant, item.groupName, item.subgroupName, Modifier.weight(1.7f))
                 Text(formatWholeQuantity(item.quantity) + " " + item.unit, Modifier.weight(0.7f), style = MaterialTheme.typography.bodySmall)
                 Text(formatDisplayDate(item.issuedDate), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             }
@@ -308,11 +308,14 @@ private fun IssueHistoryTable(items: List<EmployeeIssue>, onEdit: (EmployeeIssue
             ) {
                 Column(Modifier.weight(1.8f)) {
                     Text(
-                        item.productName + item.variant?.let { " · $it" }.orEmpty(),
+                        item.productName + item.variant?.let { "    $it" }.orEmpty(),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (item.isDeleted) MaterialTheme.colorScheme.onSurfaceVariant else contentColor,
                         textDecoration = if (item.isDeleted) TextDecoration.LineThrough else null,
                     )
+                    productSecondaryLine(item.groupName, item.subgroupName).takeIf(String::isNotBlank)?.let {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     if (item.isDeleted) Text("Usunięte korektą", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                     else if (item.isAmended) Text("Po korekcie", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     if (item.returnedQuantity > 0) Text(
@@ -387,7 +390,7 @@ private fun IssueCorrectionDialog(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Row(Modifier.fillMaxWidth().padding(8.dp), Arrangement.SpaceBetween) {
-                            Text(product.name + product.variant?.let { " · $it" }.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.weight(1f))
                             Text("${formatWholeQuantity(product.stockQuantity)} ${product.unit}", style = MaterialTheme.typography.labelSmall)
                         }
                     }
@@ -595,7 +598,7 @@ private fun IssueLineEditor(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(product.name + product.variant?.let { " · $it" }.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.weight(1f))
                             Text(
                                 if (product.stockKnown) formatWholeQuantity(product.stockQuantity) + " " + product.unit else "stan ?",
                                 Modifier.padding(start = 8.dp),

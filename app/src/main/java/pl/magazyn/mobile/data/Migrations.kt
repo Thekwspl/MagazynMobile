@@ -489,3 +489,120 @@ val MIGRATION_18_19 = object : Migration(18, 19) {
         db.execSQL("ALTER TABLE notebook_tasks ADD COLUMN place TEXT NOT NULL DEFAULT ''")
     }
 }
+
+val MIGRATION_19_20 = object : Migration(19, 20) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE notebook_tasks ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS task_places (
+                id TEXT NOT NULL PRIMARY KEY,
+                name TEXT NOT NULL,
+                isArchived INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_task_places_name ON task_places(name)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS task_place_aliases (
+                id TEXT NOT NULL PRIMARY KEY,
+                placeId TEXT NOT NULL,
+                alias TEXT NOT NULL,
+                normalizedAlias TEXT NOT NULL,
+                FOREIGN KEY(placeId) REFERENCES task_places(id) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_task_place_aliases_placeId ON task_place_aliases(placeId)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_task_place_aliases_normalizedAlias ON task_place_aliases(normalizedAlias)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS notebook_task_steps (
+                id TEXT NOT NULL PRIMARY KEY,
+                taskId TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                time TEXT,
+                placeId TEXT,
+                note TEXT NOT NULL,
+                isCompleted INTEGER NOT NULL,
+                completedAtEpochMillis INTEGER,
+                completedBy TEXT,
+                FOREIGN KEY(taskId) REFERENCES notebook_tasks(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                FOREIGN KEY(placeId) REFERENCES task_places(id) ON UPDATE NO ACTION ON DELETE SET NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_notebook_task_steps_taskId ON notebook_task_steps(taskId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_notebook_task_steps_placeId ON notebook_task_steps(placeId)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS notebook_task_step_people (
+                id TEXT NOT NULL PRIMARY KEY,
+                taskStepId TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                employeeId TEXT,
+                fallbackText TEXT NOT NULL,
+                note TEXT NOT NULL,
+                isCompleted INTEGER NOT NULL,
+                completedAtEpochMillis INTEGER,
+                completedBy TEXT,
+                FOREIGN KEY(taskStepId) REFERENCES notebook_task_steps(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                FOREIGN KEY(employeeId) REFERENCES employees(id) ON UPDATE NO ACTION ON DELETE SET NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_notebook_task_step_people_taskStepId ON notebook_task_step_people(taskStepId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_notebook_task_step_people_employeeId ON notebook_task_step_people(employeeId)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS product_duplicate_decisions (
+                id TEXT NOT NULL PRIMARY KEY,
+                signature TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                updatedAtEpochMillis INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_product_duplicate_decisions_signature ON product_duplicate_decisions(signature)")
+
+        listOf("Mykle", "NK", "Kleven", "Ulstein", "Sandvik", "SK", "M2", "Ulstein 3", "M1", "Idar", "Bjorn Ove").forEachIndexed { index, name ->
+            db.execSQL("INSERT OR IGNORE INTO task_places(id, name, isArchived) VALUES(?, ?, 0)", arrayOf("seed-task-place-$index", name))
+        }
+        db.execSQL("INSERT OR IGNORE INTO task_place_aliases(id, placeId, alias, normalizedAlias) SELECT 'seed-task-alias-ul', id, 'UL', 'ul' FROM task_places WHERE lower(trim(name)) = 'ulstein' LIMIT 1")
+        db.execSQL("INSERT OR IGNORE INTO task_place_aliases(id, placeId, alias, normalizedAlias) SELECT 'seed-task-alias-kl', id, 'KL', 'kl' FROM task_places WHERE lower(trim(name)) = 'kleven' LIMIT 1")
+
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO task_places(id, name, isArchived)
+            SELECT 'migrated-place-' || hex(randomblob(12)), trim(place), 0
+            FROM notebook_tasks
+            WHERE trim(place) != ''
+              AND NOT EXISTS (SELECT 1 FROM task_places p WHERE lower(trim(p.name)) = lower(trim(notebook_tasks.place)))
+            GROUP BY lower(trim(place))
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO notebook_task_steps(id, taskId, position, time, placeId, note, isCompleted, completedAtEpochMillis, completedBy)
+            SELECT 'migrated-step-' || t.id, t.id, 0, NULL,
+                   (SELECT p.id FROM task_places p WHERE lower(trim(p.name)) = lower(trim(t.place)) LIMIT 1),
+                   '', t.isCompleted, NULL, NULL
+            FROM notebook_tasks t
+            WHERE trim(t.place) != '' OR t.employeeId IS NOT NULL
+               OR EXISTS (SELECT 1 FROM notebook_task_employees nte WHERE nte.taskId = t.id)
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO notebook_task_step_people(id, taskStepId, position, employeeId, fallbackText, note, isCompleted, completedAtEpochMillis, completedBy)
+            SELECT 'migrated-step-person-' || nte.taskId || '-' || nte.employeeId,
+                   'migrated-step-' || nte.taskId,
+                   0, nte.employeeId, '', '', t.isCompleted, NULL, NULL
+            FROM notebook_task_employees nte
+            JOIN notebook_tasks t ON t.id = nte.taskId
+            WHERE EXISTS (SELECT 1 FROM notebook_task_steps s WHERE s.id = 'migrated-step-' || nte.taskId)
+            """.trimIndent(),
+        )
+    }
+}

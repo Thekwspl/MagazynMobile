@@ -79,17 +79,11 @@ fun ProductsScreen(
                 OutlinedCard(onClick = { edited = product }, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
                         ProductPhoto(product.photoUri, Modifier.size(58.dp))
-                        Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                            Text(listOfNotNull(product.name, product.variant).joinToString(" · "), fontWeight = FontWeight.SemiBold)
-                            Text(
-                                listOf(product.groupName, product.subgroupName, product.category, product.unit).filter(String::isNotBlank).joinToString(" · "),
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(if (product.stockKnown) formatWholeQuantity(product.stockQuantity) else "?", style = MaterialTheme.typography.titleMedium)
-                            Text(product.unit, style = MaterialTheme.typography.labelSmall)
-                        }
+                        ProductInfo(
+                            product.name, product.variant, product.groupName, product.subgroupName,
+                            stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit,
+                            modifier = Modifier.padding(start = 12.dp).weight(1f),
+                        )
                     }
                 }
             }
