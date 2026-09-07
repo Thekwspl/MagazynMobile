@@ -18,8 +18,8 @@ android {
         applicationId = "pl.magazyn.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 36
-        versionName = "0.9.14"
+        versionCode = 37
+        versionName = "0.9.15"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -78,4 +78,6 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
+    // Android udostępnia org.json na urządzeniu, ale lokalne testy JVM potrzebują prawdziwej implementacji.
+    testImplementation("org.json:json:20240303")
 }
