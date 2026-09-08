@@ -49,6 +49,7 @@ class GeminiNoteAnalyzer {
             Firmowe reguły odzieży: „kombinezon”, „ciuchy” i „ubranie” bez wskazania konkretnej części zawsze oznaczają komplet dwóch pozycji: spodnie i bluzę. Skrót mXX dla XX >= 48 oznacza spodnie monterskie i bluzę monterską w rozmiarze XX, a sXX oznacza spodnie spawalnicze i bluzę spawalniczą. Jeżeli przed skrótem podano „spodnie” albo „bluza”, zwróć tylko tę część. Dla XX < 48 skróty oznaczają buty: mXX monterskie, sXX spawalnicze.
             Osoba może mieć stanowisko w nawiasie. Rozwiń potoczną formę imienia do pełnej tylko gdy jesteś pewny (np. Krzyś/Krzychu -> Krzysztof, Grześ/Grzechu -> Grzegorz, Kuba -> Jakub, Arek -> Arkadiusz). Nie zmieniaj nazwiska, nawet jeśli wygląda jak imię.
             Ilość musi być liczbą całkowitą. Gdy jej brak, wpisz 1. Nie zgaduj brakującego rozmiaru/typu.
+            Samo ogólne słowo „kask” oznacza „Kask Biały”. Nie stosuj tej reguły, gdy podano typ, kolor, markę lub inne doprecyzowanie (np. „kask 3M”, „kask czerwony”).
             Jeżeli pozycja dotyczy całej ekipy, zachowaj odbiorcę opisowo. Zwrot lub wymianę dopisz do notes.
             Dla typu TASK zwróć zadanie jako dane strukturalne w polu task:
             {"kind":"TASK","people":[],"items":[],"phoneNumbers":[],"tasks":[],"task":{"title":"Zjazd","date":"YYYY-MM-DD lub null","notes":"opis nierozstrzygniętych informacji","steps":[{"time":"09:30 lub null","place":"UL lub Kleven lub null","notes":"","people":[{"employeeName":"Piech Łukasz","note":"","confidence":0.9}],"confidence":0.9}]}}

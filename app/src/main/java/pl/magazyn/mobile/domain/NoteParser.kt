@@ -73,7 +73,9 @@ class NoteParser {
         val expandedSegments = parsedSegments.flatMap { (person, item) ->
             expandCompoundItem(item).flatMap(::expandWarehouseClothingConvention).map { person to it }
         }
-        val items = expandedSegments.map { it.second }
+        val items = expandedSegments.map { it.second }.map { item ->
+            if (ImportParser.key(item.name) == "kask") item.copy(name = "Kask Biały") else item
+        }
         val people = expandedSegments.mapNotNull { it.first }.distinctBy { normalizeKey(it.fullName) }
         val contactPerson = contentWithoutPhones.split(Regex("\\s+")).take(2).joinToString(" ").takeIf { it.split(' ').size >= 2 }
         val kind = when {

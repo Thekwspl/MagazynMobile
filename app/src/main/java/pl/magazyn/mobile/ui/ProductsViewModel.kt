@@ -7,6 +7,7 @@ import androidx.room.withTransaction
 import java.time.LocalDate
 import java.util.UUID
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import pl.magazyn.mobile.MagazynApplication
@@ -15,6 +16,7 @@ import pl.magazyn.mobile.data.ProductEntity
 import pl.magazyn.mobile.data.ProductGroupEntity
 import pl.magazyn.mobile.data.ProductSubgroupEntity
 import pl.magazyn.mobile.data.ProductWithStock
+import pl.magazyn.mobile.data.ProductVisibilityStore
 import pl.magazyn.mobile.data.StockBalanceEntity
 import pl.magazyn.mobile.data.StockMovementEntity
 import pl.magazyn.mobile.data.StockMovementLineEntity
@@ -36,11 +38,15 @@ data class ProductDraft(
     val lowStockThreshold: Long,
     val initialQuantity: Long,
     val repeatIssueWeeks: Int,
+    val isHidden: Boolean,
 )
 
 class ProductsViewModel(application: Application) : AndroidViewModel(application) {
     private val database = (application as MagazynApplication).database
-    val products = database.productDao().observeWithStock("warehouse-main")
+    private val visibility = ProductVisibilityStore(application)
+    val products = combine(database.productDao().observeAllWithStock("warehouse-main"), visibility.showHidden) { products, showHidden ->
+        if (showHidden) products else products.filterNot { it.isHidden }
+    }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val groups = database.productDictionaryDao().observeGroups()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -72,6 +78,7 @@ class ProductsViewModel(application: Application) : AndroidViewModel(application
                     isReturnable = draft.isReturnable,
                     lowStockThreshold = draft.lowStockThreshold.toDouble(),
                     repeatIssueWeeks = draft.repeatIssueWeeks.coerceAtLeast(0),
+                    isHidden = draft.isHidden,
                 )
                 if (existing == null) database.productDao().insert(item) else database.productDao().update(item)
                 saveDictionaryValues(group, subgroup, category)

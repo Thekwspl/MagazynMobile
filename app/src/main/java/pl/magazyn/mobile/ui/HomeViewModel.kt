@@ -48,6 +48,7 @@ import pl.magazyn.mobile.domain.ParsedTaskDraft
 import pl.magazyn.mobile.data.NotebookTaskStepEntity
 import pl.magazyn.mobile.data.NotebookTaskStepPersonEntity
 import pl.magazyn.mobile.data.TaskPlaceEntity
+import pl.magazyn.mobile.data.ProductVisibilityStore
 
 data class HomeUiState(
     val employeeCount: Int = 0,
@@ -70,6 +71,7 @@ data class NoteReviewUiState(
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val database = (application as MagazynApplication).database
+    private val visibility = ProductVisibilityStore(application)
     private val parser = NoteParser()
     private val taskParser = TaskTextParser()
     private val aiKeyStore = AiKeyStore(application)
@@ -88,7 +90,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val pendingImportDetails = database.importDao().observePendingDetails()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val products = database.productDao().observeWithStock("warehouse-main")
+    val allProducts = database.productDao().observeAllWithStock("warehouse-main")
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val products = combine(allProducts, visibility.showHidden) { products, showHidden -> if (showHidden) products else products.filterNot { it.isHidden } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val shipyards = database.shipyardDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -164,12 +168,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         val expandedItems = learnedItems.flatMap { item ->
             val itemKey = ImportParser.key(item.name)
-            val bundleMatches = products.value.filter { product ->
+            val bundleMatches = allProducts.value.filter { product ->
                 product.aliases.split(',').map { ImportParser.key(it) }.any { it.isNotBlank() && it == itemKey }
             }
             if (bundleMatches.size < 2) listOf(item) else bundleMatches.map { product ->
                 item.copy(name = product.name, variant = product.variant ?: item.variant, unit = product.unit)
             }
+        }.map { item ->
+            // Ogólny „kask” oznacza standardowy Kask Biały; doprecyzowane typy pozostają bez zmian.
+            if (ImportParser.key(item.name) == "kask") item.copy(name = "Kask Biały") else item
         }
         val learnedPeople = parsed.people.map { person ->
             val personRule = activeRules.firstOrNull { it.ruleType == "PERSON" && it.triggerKey == ImportParser.key(person.fullName) }
@@ -208,7 +215,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 aiAnalyzer.analyze(
                     apiKey = apiKey,
                     rawText = text,
-                    catalog = products.value.map {
+                    catalog = allProducts.value.map {
                         AiCatalogItem(it.name, it.variant, it.unit, it.aliases, it.tags)
                     },
                     shipyards = shipyards.value.map { yard ->
@@ -426,11 +433,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         database.orderDao().upsertLines(
                             items.map { item ->
                                 val itemKey = ImportParser.key(item.name)
-                                val product = catalog.firstOrNull {
+                                val candidates = catalog.filter {
                                     val names = listOf(it.name) + it.aliases.split(',') + it.tags.split(',')
                                     names.any { name -> ImportParser.key(name) == itemKey } &&
-                                        (item.variant.isNullOrBlank() || it.variant.equals(item.variant, true))
+                                        (item.variant.isNullOrBlank() ||
+                                            ImportParser.key(it.variant.orEmpty()) == ImportParser.key(item.variant) ||
+                                            (it.aliases.split(',') + it.tags.split(',')).any { alias -> ImportParser.key(alias) == ImportParser.key(item.variant) })
                                 }
+                                // Remis pozostaje do ręcznego mapowania; nie wybieramy przypadkowego rozmiaru.
+                                val product = candidates.singleOrNull()
                                 OrderLineEntity(
                                     id = UUID.randomUUID().toString(),
                                     orderId = orderId,

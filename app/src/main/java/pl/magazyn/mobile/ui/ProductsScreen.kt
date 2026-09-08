@@ -76,7 +76,11 @@ fun ProductsScreen(
         OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), label = { Text("Szukaj po nazwie, aliasie lub tagu") }, singleLine = true)
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(visible, key = { it.id }) { product ->
-                OutlinedCard(onClick = { edited = product }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedCard(
+                    onClick = { edited = product },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = if (product.isHidden) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)) else CardDefaults.outlinedCardColors(),
+                ) {
                     Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
                         ProductPhoto(product.photoUri, Modifier.size(58.dp))
                         ProductInfo(
@@ -84,6 +88,7 @@ fun ProductsScreen(
                             stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit,
                             modifier = Modifier.padding(start = 12.dp).weight(1f),
                         )
+                        if (product.isHidden) Text("Ukryty", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -138,6 +143,7 @@ private fun ProductEditor(
     var tags by rememberSaveable(product?.id) { mutableStateOf(product?.tags.orEmpty()) }
     var photoUri by rememberSaveable(product?.id) { mutableStateOf(product?.photoUri.orEmpty()) }
     var returnable by rememberSaveable(product?.id) { mutableStateOf(product?.isReturnable ?: false) }
+    var hidden by rememberSaveable(product?.id) { mutableStateOf(product?.isHidden ?: false) }
     var threshold by rememberSaveable(product?.id) {
         mutableStateOf(product?.lowStockThreshold?.toLong()?.takeIf { it != 0L }?.toString().orEmpty())
     }
@@ -228,6 +234,13 @@ private fun ProductEditor(
             Switch(returnable, { returnable = it })
             Text("Sprzęt powierzony — wymaga zwrotu", Modifier.padding(start = 8.dp))
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(hidden, { hidden = it })
+            Column(Modifier.padding(start = 8.dp)) {
+                Text("Ukryty przedmiot")
+                Text("Nie będzie widoczny na zwykłych listach i przy ręcznym wyborze.", style = MaterialTheme.typography.labelSmall)
+            }
+        }
         Button(
             onClick = {
                 onSave(
@@ -246,6 +259,7 @@ private fun ProductEditor(
                         lowStockThreshold = threshold.toLongOrNull() ?: 0L,
                         initialQuantity = initialQuantity.toLongOrNull() ?: 0L,
                         repeatIssueWeeks = repeatIssueWeeks.toIntOrNull() ?: 0,
+                        isHidden = hidden,
                     ),
                 )
             },

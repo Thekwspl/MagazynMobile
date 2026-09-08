@@ -7,6 +7,7 @@ import androidx.room.withTransaction
 import java.time.LocalDate
 import java.util.UUID
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import pl.magazyn.mobile.MagazynApplication
@@ -18,6 +19,7 @@ import pl.magazyn.mobile.data.OrderChangeEntity
 import pl.magazyn.mobile.data.OrderLineEntity
 import pl.magazyn.mobile.data.ProductEntity
 import pl.magazyn.mobile.data.ProductWithStock
+import pl.magazyn.mobile.data.ProductVisibilityStore
 import pl.magazyn.mobile.data.StockBalanceEntity
 import pl.magazyn.mobile.data.StockMovementEntity
 import pl.magazyn.mobile.data.StockMovementLineEntity
@@ -29,11 +31,12 @@ import pl.magazyn.mobile.domain.normalizePhoneNumbers
 
 class OrdersViewModel(application: Application) : AndroidViewModel(application) {
     private val database = (application as MagazynApplication).database
+    private val visibility = ProductVisibilityStore(application)
     val orders = database.orderDao().observeActiveSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val people = database.employeeDao().observeSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val products = database.productDao().observeWithStock("warehouse-main")
+    val products = combine(database.productDao().observeAllWithStock("warehouse-main"), visibility.showHidden) { products, showHidden -> if (showHidden) products else products.filterNot { it.isHidden } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val jobPositions = database.jobPositionDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())

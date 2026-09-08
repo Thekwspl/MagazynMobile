@@ -92,10 +92,21 @@ interface ProductDao {
         FROM products p
         LEFT JOIN stock_balances s
           ON s.productId = p.id AND s.warehouseId = :warehouseId
-        WHERE p.isArchived = 0
+        WHERE p.isArchived = 0 AND p.isHidden = 0
         ORDER BY p.name, p.variant
     """)
     fun observeWithStock(warehouseId: String): Flow<List<ProductWithStock>>
+
+    @Query("""
+        SELECT p.*, COALESCE(s.quantity, 0.0) AS stockQuantity,
+               COALESCE(s.isKnown, 0) AS stockKnown
+        FROM products p
+        LEFT JOIN stock_balances s
+          ON s.productId = p.id AND s.warehouseId = :warehouseId
+        WHERE p.isArchived = 0
+        ORDER BY p.name, p.variant
+    """)
+    fun observeAllWithStock(warehouseId: String): Flow<List<ProductWithStock>>
 
     @Query("SELECT * FROM products WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): ProductEntity?
@@ -130,6 +141,7 @@ data class ProductWithStock(
     val isArchived: Boolean,
     val stockQuantity: Double,
     val stockKnown: Boolean,
+    val isHidden: Boolean = false,
 )
 
 @Dao

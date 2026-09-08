@@ -5,6 +5,11 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class NoteParserTest {
+    @Test fun defaultsOnlyGenericHelmetToWhiteHelmet() {
+        val parser = NoteParser()
+        assertEquals("Kask Biały", parser.parse("Kask x 1").items.single().name)
+        assertEquals("Kask czerwony", parser.parse("Kask czerwony x 1").items.single().name)
+    }
     private val parser = NoteParser()
 
     @Test

@@ -189,7 +189,8 @@ fun ParsedNoteReviewScreen(
 ) {
     val review by viewModel.noteReview.collectAsStateWithLifecycle()
     val people by viewModel.people.collectAsStateWithLifecycle()
-    val products by viewModel.products.collectAsStateWithLifecycle()
+    // Rozpoznanie może wskazać archiwalnie używany, ukryty produkt; decyzję zostawia użytkownikowi.
+    val products by viewModel.allProducts.collectAsStateWithLifecycle()
     val shipyards by viewModel.shipyards.collectAsStateWithLifecycle()
     val taskPlaces by viewModel.taskPlaces.collectAsStateWithLifecycle()
     val current = review
@@ -229,6 +230,14 @@ fun ParsedNoteReviewScreen(
                 }
             }
         }
+        if (note.kind == ParsedInputKind.ORDER && current.rawText.isNotBlank()) {
+            Surface(tonalElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.heightIn(max = 112.dp).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 8.dp)) {
+                    Text("Oryginalna wiadomość", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(current.rawText, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
         Box(Modifier.weight(1f)) {
             if (note.kind == ParsedInputKind.TASK && note.taskDraft != null) {
                 TaskDraftReviewContent(
@@ -243,7 +252,7 @@ fun ParsedNoteReviewScreen(
                     },
                 )
             } else ParsedNoteReviewContent(
-                rawText = current.rawText,
+                rawText = if (note.kind == ParsedInputKind.ORDER) "" else current.rawText,
                 note = note,
                 matchedPersonName = matchedPerson?.fullName,
                 people = people,
@@ -632,6 +641,8 @@ private fun ParsedNoteReviewContent(
     var editingItem by remember(note) { mutableStateOf<Int?>(null) }
     var rememberCorrections by rememberSaveable(note.items.size) { mutableStateOf(true) }
     var shipyardName by rememberSaveable(note) { mutableStateOf(note.shipyardName) }
+    var defaultRecipientName by rememberSaveable(note) { mutableStateOf(note.shipyardName.orEmpty()) }
+    var defaultRecipientIsShipyard by rememberSaveable(note) { mutableStateOf(note.shipyardName != null) }
     var shipyardMenu by remember { mutableStateOf(false) }
     var plannedIssueDate by rememberSaveable(note) { mutableStateOf(note.suggestedIssueDate ?: java.time.LocalDate.now().toString()) }
     var showPlannedDatePicker by remember { mutableStateOf(false) }
@@ -652,6 +663,35 @@ private fun ParsedNoteReviewContent(
             ReviewRow(name, note.person?.position?.let { p -> "stanowisko: $p" } ?: "rozpoznana osoba")
         }
         if (note.kind == ParsedInputKind.ORDER) {
+            Text("Domyślny odbiorca", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !defaultRecipientIsShipyard, onClick = { defaultRecipientIsShipyard = false; defaultRecipientName = "" }, label = { Text("Osoba") }, leadingIcon = if (!defaultRecipientIsShipyard) { { Icon(Icons.Default.Person, null) } } else null)
+                FilterChip(selected = defaultRecipientIsShipyard, onClick = { defaultRecipientIsShipyard = true; defaultRecipientName = shipyardName.orEmpty() }, label = { Text("Stocznia") }, leadingIcon = if (defaultRecipientIsShipyard) { { Icon(Icons.Default.Business, null) } } else null)
+            }
+            if (defaultRecipientIsShipyard) {
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { shipyardMenu = true }, Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Business, null); Spacer(Modifier.width(7.dp))
+                        Text(defaultRecipientName.ifBlank { "Wybierz stocznię" })
+                    }
+                    DropdownMenu(expanded = shipyardMenu, onDismissRequest = { shipyardMenu = false }) {
+                        DropdownMenuItem(text = { Text("Bez domyślnego odbiorcy") }, onClick = { defaultRecipientName = ""; shipyardMenu = false })
+                        shipyards.forEach { shipyard -> DropdownMenuItem(text = { Text(shipyard.name) }, onClick = { defaultRecipientName = shipyard.name; shipyardName = shipyard.name; shipyardMenu = false }) }
+                    }
+                }
+            } else {
+                OutlinedTextField(defaultRecipientName, { defaultRecipientName = it }, Modifier.fillMaxWidth(), label = { Text("Osoba / pracownik") }, singleLine = true)
+                matchingPeople(defaultRecipientName, people).take(4).forEach { person ->
+                    TextButton(onClick = { defaultRecipientName = person.fullName }, Modifier.fillMaxWidth()) { Icon(Icons.Default.Person, null); Spacer(Modifier.width(6.dp)); Text(person.listDisplayName(), Modifier.weight(1f)) }
+                }
+            }
+            OutlinedButton(
+                onClick = {
+                    val recipient = defaultRecipientName.trim().takeIf(String::isNotBlank) ?: return@OutlinedButton
+                    editedItems.indices.filter { editedItems[it].recipientName.isNullOrBlank() }.forEach { i -> editedItems[i] = editedItems[i].copy(recipientName = recipient) }
+                },
+                enabled = defaultRecipientName.isNotBlank(), modifier = Modifier.fillMaxWidth(),
+            ) { Text("Zastosuj do wszystkich bez odbiorcy") }
             Box(Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { shipyardMenu = true }, Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Business, null)
@@ -661,7 +701,7 @@ private fun ParsedNoteReviewContent(
                 DropdownMenu(expanded = shipyardMenu, onDismissRequest = { shipyardMenu = false }) {
                     DropdownMenuItem(text = { Text("Bez przypisanej stoczni") }, onClick = { shipyardName = null; shipyardMenu = false })
                     shipyards.forEach { shipyard ->
-                        DropdownMenuItem(text = { Text(shipyard.name) }, onClick = { shipyardName = shipyard.name; shipyardMenu = false })
+                        DropdownMenuItem(text = { Text(shipyard.name) }, onClick = { shipyardName = shipyard.name; if (defaultRecipientIsShipyard) defaultRecipientName = shipyard.name; shipyardMenu = false })
                     }
                 }
             }
@@ -703,7 +743,7 @@ private fun ParsedNoteReviewContent(
         }
         editedItems.forEachIndexed { index, item ->
             val productMatches = matchingProducts(item, products)
-            val productMatch = productMatches.firstOrNull()
+            val productMatch = productMatches.singleOrNull()
             val recipientQuery = item.recipientName.orEmpty()
             val personMatches = matchingPeople(recipientQuery, people)
             val personMatch = recognizedPerson(recipientQuery, people)
@@ -722,13 +762,15 @@ private fun ParsedNoteReviewContent(
                     Column(Modifier.weight(1f)) {
                         Text(item.name, fontWeight = FontWeight.SemiBold)
                         Text(details, style = MaterialTheme.typography.labelMedium)
-                        if (productMatch == null) Text("Nie rozpoznano przedmiotu", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                        if (productMatches.isEmpty()) Text("Nie rozpoznano przedmiotu", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                        else if (productMatch == null) Text("Kilka pasujących przedmiotów — wybierz właściwy", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                         else {
                             Text("Proponowany przedmiot", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                             ProductInfo(productMatch.name, productMatch.variant, productMatch.groupName, productMatch.subgroupName)
+                            if (productMatch.isHidden) Text("Ten przedmiot jest ukryty — możesz wybrać inną aktywną pozycję.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                         }
                         when {
-                            recipientQuery.isBlank() && recognizedShipyard != null -> Text("Odbiorca domyślny: stocznia ${recognizedShipyard.name}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                            recipientQuery.isBlank() && defaultRecipientName.isNotBlank() -> Text("Odbiorca domyślny: ${defaultRecipientName}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                             recipientQuery.isBlank() -> Text("Brak odbiorcy przy tej pozycji", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                             personMatch != null -> Text("Osoba: ${personMatch.listDisplayName()}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                             recipientShipyard != null -> Text("Stocznia: ${recipientShipyard.name}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
@@ -748,7 +790,7 @@ private fun ParsedNoteReviewContent(
                             { editedItems[index] = item.copy(recipientName = it.ifBlank { null }) },
                             Modifier.fillMaxWidth().keepAboveKeyboard(),
                             label = { Text("Osoba lub stocznia") },
-                            placeholder = { recognizedShipyard?.let { Text("Domyślnie: ${it.name}") } },
+                            placeholder = { defaultRecipientName.takeIf(String::isNotBlank)?.let { Text("Domyślnie: $it") } },
                         )
                         if (recipientQuery.isBlank() && recognizedShipyard != null) {
                             Text("Bez wyboru odbiorcą będzie ${recognizedShipyard.name}.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -848,9 +890,11 @@ private fun ParsedNoteReviewContent(
             }
             Button(
                 onClick = {
-                    onSaveOrder(
-                        editedItems.mapIndexedNotNull { index, corrected ->
-                            if (approvedItems[index] == true) sourceItems.getOrNull(index)?.let { source -> source to corrected } else null
+                        onSaveOrder(
+                            editedItems.mapIndexedNotNull { index, corrected ->
+                            if (approvedItems[index] == true) sourceItems.getOrNull(index)?.let { source ->
+                                source to if (corrected.recipientName.isNullOrBlank() && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim()) else corrected
+                            } else null
                         },
                         rememberCorrections,
                         recognizedShipyard?.name,
@@ -953,11 +997,23 @@ private fun ConfidenceLabel(confidence: pl.magazyn.mobile.domain.ParseConfidence
 }
 
 private fun matchingProducts(item: pl.magazyn.mobile.domain.ParsedItem, products: List<pl.magazyn.mobile.data.ProductWithStock>): List<pl.magazyn.mobile.data.ProductWithStock> {
-    val tokens = (item.name + " " + item.variant.orEmpty()).split(Regex("\\s+")).map { pl.magazyn.mobile.domain.ImportParser.key(it) }.filter(String::isNotBlank)
-    return products.map { product ->
-        val searchable = pl.magazyn.mobile.domain.ImportParser.key(listOf(product.name, product.variant.orEmpty(), product.aliases, product.tags, product.groupName, product.subgroupName, product.category).joinToString(" "))
-        product to tokens.count { searchable.contains(it) }
-    }.filter { it.second > 0 }.sortedWith(compareByDescending<Pair<pl.magazyn.mobile.data.ProductWithStock, Int>> { it.second }.thenBy { it.first.name }).map { it.first }
+    val nameKey = pl.magazyn.mobile.domain.ImportParser.key(item.name)
+    val variantKey = pl.magazyn.mobile.domain.ImportParser.key(item.variant.orEmpty())
+    return products.mapNotNull { product ->
+        val labels = listOf(product.name) + product.aliases.split(',') + product.tags.split(',')
+        val nameScore = when {
+            pl.magazyn.mobile.domain.ImportParser.key(product.name) == nameKey -> 4
+            labels.any { pl.magazyn.mobile.domain.ImportParser.key(it) == nameKey } -> 3
+            pl.magazyn.mobile.domain.matchesSearch(item.name, product.name, product.aliases, product.tags) -> 1
+            else -> 0
+        }
+        if (nameScore == 0) null else {
+            val variantMatches = variantKey.isBlank() ||
+                pl.magazyn.mobile.domain.ImportParser.key(product.variant.orEmpty()) == variantKey ||
+                (product.aliases.split(',') + product.tags.split(',')).any { pl.magazyn.mobile.domain.ImportParser.key(it) == variantKey }
+            if (!variantMatches) null else product to nameScore
+        }
+    }.sortedWith(compareByDescending<Pair<pl.magazyn.mobile.data.ProductWithStock, Int>> { it.second }.thenBy { it.first.name }.thenBy { it.first.variant.orEmpty() }).map { it.first }
 }
 
 private fun matchingPeople(query: String, people: List<pl.magazyn.mobile.data.EmployeeSummary>): List<pl.magazyn.mobile.data.EmployeeSummary> {

@@ -72,6 +72,7 @@ data class ProductEntity(
     val lowStockThreshold: Double = 0.0,
     @ColumnInfo(defaultValue = "0") val repeatIssueWeeks: Int = 0,
     val isArchived: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val isHidden: Boolean = false,
 )
 
 @Entity(tableName = "product_groups", indices = [Index(value = ["name"], unique = true)])

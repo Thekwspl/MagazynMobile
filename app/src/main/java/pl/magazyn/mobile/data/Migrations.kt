@@ -606,3 +606,10 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
         )
     }
 }
+
+/** Ukrycie dotyczy tylko widoczności w bieżącym UI; historia i stany pozostają nietknięte. */
+val MIGRATION_20_21 = object : Migration(20, 21) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE products ADD COLUMN isHidden INTEGER NOT NULL DEFAULT 0")
+    }
+}
