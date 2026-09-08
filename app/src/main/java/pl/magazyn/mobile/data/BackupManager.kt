@@ -39,7 +39,7 @@ class BackupManager(private val application: MagazynApplication) {
         application.contentResolver.openOutputStream(uri, "w")?.use { rawOutput ->
             val output = DataOutputStream(rawOutput)
             output.write(MAGIC)
-            output.writeInt(DATABASE_VERSION)
+            output.writeInt(BACKUP_FORMAT_VERSION)
             output.write(salt)
             output.write(iv)
             CipherOutputStream(output, cipher).use { encrypted -> databaseFile.inputStream().use { it.copyTo(encrypted) } }
@@ -55,7 +55,7 @@ class BackupManager(private val application: MagazynApplication) {
                 val magic = ByteArray(MAGIC.size).also(input::readFully)
                 require(magic.contentEquals(MAGIC)) { "To nie jest kopia Magazyn Mobile" }
                 val backupFormat = input.readInt()
-                require(backupFormat == DATABASE_VERSION) { "Nieobsługiwana wersja pliku kopii" }
+                require(backupFormat == BACKUP_FORMAT_VERSION) { "Nieobsługiwana wersja pliku kopii" }
                 val salt = ByteArray(16).also(input::readFully)
                 val iv = ByteArray(12).also(input::readFully)
                 try {
@@ -92,7 +92,10 @@ class BackupManager(private val application: MagazynApplication) {
         val sqlite = SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY)
         try {
             val version = sqlite.rawQuery("PRAGMA user_version", null).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
-            require(version in 1..19) { if (version > 19) "Kopia pochodzi z nowszej wersji aplikacji" else "Kopia ma nieprawidłową wersję bazy" }
+            require(BackupCompatibility.isSupportedDatabaseVersion(version)) {
+                if (version > DATABASE_SCHEMA_VERSION) "Kopia pochodzi z nowszej, nieobsługiwanej wersji aplikacji"
+                else "Kopia ma nieprawidłową wersję bazy"
+            }
             sqlite.rawQuery("PRAGMA integrity_check", null).use { cursor ->
                 require(cursor.moveToFirst() && cursor.getString(0).equals("ok", true)) { "Kontrola spójności kopii nie powiodła się" }
             }
@@ -137,6 +140,7 @@ class BackupManager(private val application: MagazynApplication) {
 
     private companion object {
         val MAGIC = "MAGAZYN_BACKUP\u0001".toByteArray()
-        const val DATABASE_VERSION = 1
+        /** Wersja zaszyfrowanego kontenera kopii, niezależna od wersji aplikacji i Room. */
+        const val BACKUP_FORMAT_VERSION = 1
     }
 }

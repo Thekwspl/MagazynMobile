@@ -492,7 +492,9 @@ val MIGRATION_18_19 = object : Migration(18, 19) {
 
 val MIGRATION_19_20 = object : Migration(19, 20) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE notebook_tasks ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+        // Część bardzo wczesnych kompilacji rozwojowych mogła już mieć tę kolumnę
+        // przy zachowanym numerze 19. Nie blokujemy przez to aktualizacji danych.
+        ensureColumn(db, "notebook_tasks", "description", "TEXT NOT NULL DEFAULT ''")
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS task_places (
@@ -610,6 +612,41 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
 /** Ukrycie dotyczy tylko widoczności w bieżącym UI; historia i stany pozostają nietknięte. */
 val MIGRATION_20_21 = object : Migration(20, 21) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE products ADD COLUMN isHidden INTEGER NOT NULL DEFAULT 0")
+        ensureColumn(db, "products", "isHidden", "INTEGER NOT NULL DEFAULT 0")
     }
+}
+
+/**
+ * Kontrolna migracja dla instalacji z wersji rozwojowych 20/21. Nie usuwa ani nie
+ * przebudowuje tabel: uzupełnia wyłącznie kolumny, które mogły nie trafić do
+ * bazy, gdy użytkownik zainstalował krótko żyjącą kompilację z tym samym numerem
+ * schematu. Dla poprawnej bazy 21 jest bezpiecznym no-opem.
+ */
+val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        ensureColumn(db, "products", "isHidden", "INTEGER NOT NULL DEFAULT 0")
+        ensureColumn(db, "notebook_tasks", "description", "TEXT NOT NULL DEFAULT ''")
+        db.execSQL("CREATE TABLE IF NOT EXISTS task_places (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, isArchived INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS task_place_aliases (id TEXT NOT NULL PRIMARY KEY, placeId TEXT NOT NULL, alias TEXT NOT NULL, normalizedAlias TEXT NOT NULL, FOREIGN KEY(placeId) REFERENCES task_places(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS notebook_task_steps (id TEXT NOT NULL PRIMARY KEY, taskId TEXT NOT NULL, position INTEGER NOT NULL, time TEXT, placeId TEXT, note TEXT NOT NULL, isCompleted INTEGER NOT NULL, completedAtEpochMillis INTEGER, completedBy TEXT, FOREIGN KEY(taskId) REFERENCES notebook_tasks(id) ON UPDATE NO ACTION ON DELETE CASCADE, FOREIGN KEY(placeId) REFERENCES task_places(id) ON UPDATE NO ACTION ON DELETE SET NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS notebook_task_step_people (id TEXT NOT NULL PRIMARY KEY, taskStepId TEXT NOT NULL, position INTEGER NOT NULL, employeeId TEXT, fallbackText TEXT NOT NULL, note TEXT NOT NULL, isCompleted INTEGER NOT NULL, completedAtEpochMillis INTEGER, completedBy TEXT, FOREIGN KEY(taskStepId) REFERENCES notebook_task_steps(id) ON UPDATE NO ACTION ON DELETE CASCADE, FOREIGN KEY(employeeId) REFERENCES employees(id) ON UPDATE NO ACTION ON DELETE SET NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS product_duplicate_decisions (id TEXT NOT NULL PRIMARY KEY, signature TEXT NOT NULL, decision TEXT NOT NULL, updatedAtEpochMillis INTEGER NOT NULL)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_task_places_name ON task_places(name)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_task_place_aliases_placeId ON task_place_aliases(placeId)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_task_place_aliases_normalizedAlias ON task_place_aliases(normalizedAlias)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_notebook_task_steps_taskId ON notebook_task_steps(taskId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_notebook_task_steps_placeId ON notebook_task_steps(placeId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_notebook_task_step_people_taskStepId ON notebook_task_step_people(taskStepId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_notebook_task_step_people_employeeId ON notebook_task_step_people(employeeId)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_product_duplicate_decisions_signature ON product_duplicate_decisions(signature)")
+    }
+}
+
+private fun ensureColumn(db: SupportSQLiteDatabase, table: String, column: String, definition: String) {
+    val exists = db.query("PRAGMA table_info($table)").use { cursor ->
+        val nameIndex = cursor.getColumnIndex("name")
+        generateSequence { if (cursor.moveToNext()) cursor else null }
+            .any { it.getString(nameIndex).equals(column, ignoreCase = true) }
+    }
+    if (!exists) db.execSQL("ALTER TABLE $table ADD COLUMN $column $definition")
 }

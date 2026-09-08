@@ -38,7 +38,7 @@ import androidx.room.RoomDatabase
         ParserLearningRuleEntity::class,
         OrderChangeEntity::class,
     ],
-    version = 21,
+    version = DATABASE_SCHEMA_VERSION,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {

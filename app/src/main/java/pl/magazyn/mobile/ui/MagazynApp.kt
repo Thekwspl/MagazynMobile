@@ -1,11 +1,15 @@
 package pl.magazyn.mobile.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -14,12 +18,16 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import pl.magazyn.mobile.StartupDiagnostics
 
 private data class Destination(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MagazynApp(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val startupDiagnostics = remember(context) { StartupDiagnostics.from(context) }
+    var lastStartupProblem by remember { mutableStateOf(startupDiagnostics.lastProblem()) }
     val navController = rememberNavController()
     val homeViewModel: HomeViewModel = viewModel()
     val backStack by navController.currentBackStackEntryAsState()
@@ -117,6 +125,21 @@ fun MagazynApp(modifier: Modifier = Modifier) {
                 onTask = { showQuickAdd = false; navController.navigate("tasks-new") },
             )
         }
+    }
+
+    lastStartupProblem?.let { problem ->
+        AlertDialog(
+            onDismissRequest = { startupDiagnostics.clearLastProblem(); lastStartupProblem = null },
+            title = { Text("Poprzednie uruchomienie nie powiodło się") },
+            text = { Text("Aplikacja zapisała krótki opis problemu. Jeśli sytuacja się powtórzy, skopiuj go i prześlij do wsparcia.\n\n$problem") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Magazyn Mobile – diagnostyka", problem))
+                }) { Text("Kopiuj szczegóły") }
+            },
+            dismissButton = { TextButton(onClick = { startupDiagnostics.clearLastProblem(); lastStartupProblem = null }) { Text("Zamknij") } },
+        )
     }
 }
 
