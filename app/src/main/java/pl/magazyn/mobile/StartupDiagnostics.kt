@@ -22,6 +22,11 @@ class StartupDiagnostics private constructor(context: Context) {
 
         fun from(context: Context) = StartupDiagnostics(context)
 
+        fun recordProblem(context: Context, summary: String) {
+            context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+                .edit().putString(KEY_LAST_PROBLEM, summary.take(MAX_LENGTH)).apply()
+        }
+
         fun install(context: Context) {
             val appContext = context.applicationContext
             val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
@@ -31,8 +36,7 @@ class StartupDiagnostics private constructor(context: Context) {
                         append(error.javaClass.simpleName.ifBlank { "Nieznany błąd" })
                         error.message?.takeIf(String::isNotBlank)?.let { append(": ").append(it) }
                     }.take(MAX_LENGTH)
-                    appContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-                        .edit().putString(KEY_LAST_PROBLEM, summary).apply()
+                    recordProblem(appContext, summary)
                 }
                 previousHandler?.uncaughtException(thread, error)
             }

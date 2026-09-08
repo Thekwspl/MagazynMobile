@@ -41,7 +41,7 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
             _state.value = BackupUiState(working = true)
             runCatching { withContext(Dispatchers.IO) { manager.restoreEncryptedBackup(uri, password) } }
                 .onSuccess {
-                    Toast.makeText(getApplication(), "Kopia przywrócona. Uruchamiam aplikację ponownie…", Toast.LENGTH_LONG).show()
+                    Toast.makeText(getApplication(), "Kopia sprawdzona, zmigrowana i przywrócona. Uruchamiam aplikację ponownie…", Toast.LENGTH_LONG).show()
                     manager.restartApplication()
                 }
                 .onFailure { _state.value = BackupUiState(error = it.message ?: "Nie udało się przywrócić kopii") }
