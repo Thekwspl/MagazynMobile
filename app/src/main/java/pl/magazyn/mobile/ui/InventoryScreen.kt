@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -67,7 +68,7 @@ fun InventoryScreen(contentPadding: PaddingValues, viewModel: InventoryViewModel
         Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text("Przedmiot", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                Text("Stan", Modifier.width(65.dp), fontWeight = FontWeight.SemiBold)
+                Text("Obecny stan", Modifier.width(88.dp), fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
                 Text("Policzono", Modifier.width(92.dp), fontWeight = FontWeight.SemiBold)
             }
         }
@@ -82,7 +83,7 @@ fun InventoryScreen(contentPadding: PaddingValues, viewModel: InventoryViewModel
                             Text("Różnica: ${if (diff >= 0) "+" else ""}$diff", style = MaterialTheme.typography.labelSmall, color = if (diff == 0L) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
                         }
                     }
-                    Column(Modifier.width(65.dp), horizontalAlignment = Alignment.End) {
+                    Column(Modifier.width(88.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(if (product.stockKnown) formatWholeQuantity(product.stockQuantity) else "?")
                         product.unit.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
                     }

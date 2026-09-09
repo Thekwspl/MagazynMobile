@@ -10,14 +10,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -43,6 +43,8 @@ fun SettingsScreen(
     onAiSettings: () -> Unit,
     onUpdates: () -> Unit,
     onLearningRules: () -> Unit,
+    onImport: () -> Unit,
+    onExport: () -> Unit,
 ) {
     val context = LocalContext.current
     val visibilityStore = remember(context) {
@@ -52,16 +54,12 @@ fun SettingsScreen(
     var lastStartupProblem by remember { mutableStateOf(diagnostics.lastProblem()) }
     val showHidden by visibilityStore.showHidden.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Wróć") }
-            Column {
-                Text("Ustawienia", style = MaterialTheme.typography.headlineSmall)
-                Text("Aplikacja, AI i reguły lokalne", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+        BackScreenHeader("Ustawienia", "Aplikacja, AI i reguły lokalne", onBack)
         SettingsItem(Icons.Default.AutoAwesome, "Ustawienia AI", "Klucz Gemini i prywatność notatek", onAiSettings)
         SettingsItem(Icons.Default.SystemUpdate, "Aktualizacje", "Sprawdzanie i instalowanie nowej wersji", onUpdates)
         SettingsItem(Icons.Default.Psychology, "Uczenie offline", "Reguły używane bez internetu", onLearningRules)
+        SettingsItem(Icons.Default.UploadFile, "Import danych", "Wczytaj dane z pliku", onImport)
+        SettingsItem(Icons.Default.FileDownload, "Eksport danych", "Zapisz i udostępnij dane", onExport)
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Wyświetl ukryte przedmioty", fontWeight = FontWeight.SemiBold)

@@ -53,7 +53,7 @@ fun HistoryScreen(contentPadding: PaddingValues, viewModel: HistoryViewModel = v
     }
 
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
-        Text("Historia", Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.headlineSmall)
+        Text("Historia", Modifier.padding(horizontal = 16.dp, vertical = 6.dp), style = MaterialTheme.typography.headlineSmall)
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -63,7 +63,7 @@ fun HistoryScreen(contentPadding: PaddingValues, viewModel: HistoryViewModel = v
             leadingIcon = { Icon(Icons.Default.Search, null) },
             singleLine = true,
         )
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             items(HistoryFilter.entries) { choice ->
                 FilterChip(selected = filter == choice, onClick = { filterName = choice.name }, label = { Text(choice.label) })
             }
@@ -92,7 +92,7 @@ fun HistoryScreen(contentPadding: PaddingValues, viewModel: HistoryViewModel = v
                 Text("Data początkowa jest późniejsza niż końcowa.", Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
             }
         }
-        Text("${visible.size} operacji", Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("${visible.size} operacji", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         LazyColumn(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),

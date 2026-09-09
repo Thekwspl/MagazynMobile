@@ -32,7 +32,7 @@ fun MagazynApp(modifier: Modifier = Modifier) {
     val homeViewModel: HomeViewModel = viewModel()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route.orEmpty()
-    val isFocusedScreen = currentRoute == "note-review" || currentRoute == "tasks-new" || currentRoute == "product-duplicates" || currentRoute.startsWith("shipyards/")
+    val isFocusedScreen = currentRoute == "note-review" || currentRoute == "tasks-new" || currentRoute == "product-duplicates" || currentRoute.startsWith("shipyards/") || currentRoute.startsWith("products/") || currentRoute.startsWith("data-exchange/")
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showQuickAdd by remember { mutableStateOf(false) }
@@ -45,7 +45,6 @@ fun MagazynApp(modifier: Modifier = Modifier) {
         Destination("shipyards", "Stocznie", Icons.Default.Business),
         Destination("people", "Osoby", Icons.Default.People),
         Destination("products", "Przedmioty", Icons.Default.Inventory2),
-        Destination("data-exchange", "Import i eksport danych", Icons.Default.ImportExport),
         Destination("settings", "Ustawienia", Icons.Default.Settings),
     )
 
@@ -184,9 +183,15 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
         composable("places") { PlacesScreen(contentPadding = padding) }
         composable("operations") { OperationsScreen(contentPadding = padding) }
         composable("inventory") { InventoryScreen(contentPadding = padding) }
-        composable("products") { ProductsScreen(contentPadding = padding) }
-        composable("products/new") { ProductsScreen(contentPadding = padding, startAdding = true) }
-        composable("products/view/{productId}") { entry -> ProductsScreen(contentPadding = padding, initialProductId = entry.arguments?.getString("productId")) }
+        composable("products") {
+            ProductsScreen(
+                contentPadding = padding,
+                onProduct = { navController.navigate("products/view/$it") },
+                onAdd = { navController.navigate("products/new") },
+            )
+        }
+        composable("products/new") { ProductsScreen(contentPadding = padding, startAdding = true, onBack = { navController.popBackStack() }) }
+        composable("products/view/{productId}") { entry -> ProductsScreen(contentPadding = padding, initialProductId = entry.arguments?.getString("productId"), onBack = { navController.popBackStack() }) }
         composable("product-duplicates") {
             ProductDuplicatesScreen(
                 contentPadding = padding,
@@ -199,7 +204,8 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
         composable("people/view/{personId}") { entry -> PeopleScreen(contentPadding = padding, initialPersonId = entry.arguments?.getString("personId")) }
         composable("people/issue/{personId}") { entry -> PeopleScreen(contentPadding = padding, initialPersonId = entry.arguments?.getString("personId"), startIssuing = true) }
         composable("history") { HistoryScreen(contentPadding = padding) }
-        composable("data-exchange") { DataExchangeScreen(contentPadding = padding) }
+        composable("data-exchange/import") { DataExchangeScreen(contentPadding = padding, initialTab = 0, onBack = { navController.popBackStack() }) }
+        composable("data-exchange/export") { DataExchangeScreen(contentPadding = padding, initialTab = 1, onBack = { navController.popBackStack() }) }
         composable("shipyards") {
             ShipyardsScreen(contentPadding = padding, onShipyard = { navController.navigate("shipyards/$it") })
         }
@@ -218,6 +224,8 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
                 onAiSettings = { navController.navigate("ai-settings") },
                 onUpdates = { navController.navigate("updates") },
                 onLearningRules = { navController.navigate("learning-rules") },
+                onImport = { navController.navigate("data-exchange/import") },
+                onExport = { navController.navigate("data-exchange/export") },
             )
         }
         composable("ai-settings") { AiSettingsScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }

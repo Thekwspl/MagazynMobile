@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
@@ -44,6 +45,9 @@ fun ProductsScreen(
     contentPadding: PaddingValues,
     startAdding: Boolean = false,
     initialProductId: String? = null,
+    onProduct: (String) -> Unit = {},
+    onAdd: () -> Unit = {},
+    onBack: () -> Unit = {},
     viewModel: ProductsViewModel = viewModel(),
 ) {
     val products by viewModel.products.collectAsStateWithLifecycle()
@@ -51,72 +55,70 @@ fun ProductsScreen(
     val subgroups by viewModel.subgroups.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
-    var edited by remember { mutableStateOf<ProductWithStock?>(null) }
-    var initialProductOpened by rememberSaveable(initialProductId) { mutableStateOf(false) }
-    var showNew by rememberSaveable { mutableStateOf(startAdding) }
     val listState = rememberLazyListState()
-    val editorSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val searchTokens = ImportParser.key(query).split(Regex("\\s+")).filter(String::isNotBlank)
     val visible = products.filter { product ->
         searchTokens.isEmpty() || matchesSearch(
             query, product.name, product.variant.orEmpty(), product.aliases, product.tags, product.category, product.groupName, product.subgroupName,
         )
     }
-    LaunchedEffect(initialProductId, products) {
-        if (initialProductId != null && !initialProductOpened) {
-            products.firstOrNull { it.id == initialProductId }?.let {
-                edited = it
-                initialProductOpened = true
+    if (startAdding || initialProductId != null) {
+        val edited = initialProductId?.let { id -> products.firstOrNull { it.id == id } }
+        Column(Modifier.fillMaxSize().padding(contentPadding)) {
+            BackScreenHeader(
+                title = if (startAdding) "Nowy przedmiot" else "Karta przedmiotu",
+                subtitle = if (startAdding) null else "Dane, stan i ustawienia przedmiotu",
+                onBack = onBack,
+            )
+            if (initialProductId != null && edited == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            } else {
+                Box(Modifier.weight(1f)) { ProductEditor(
+                    product = edited,
+                    groups = groups,
+                    subgroups = subgroups,
+                    categories = categories,
+                    units = (listOf("szt.", "para", "opak.", "paczka", "kpl.", "metr", "rolka") + products.map { it.unit })
+                        .filter(String::isNotBlank).distinctBy { it.lowercase() },
+                    onCancel = onBack,
+                    onSave = { existing, draft -> viewModel.saveProduct(existing, draft); onBack() },
+                    onCorrectStock = { product, counted -> viewModel.correctStock(product, counted) },
+                    onRemove = { product -> viewModel.removeProduct(product.id); onBack() },
+                ) }
             }
         }
+        return
     }
 
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
-        ScreenHeader("Przedmioty", "Dodaj", { showNew = true })
+        ScreenHeader("Przedmioty", "Dodaj", onAdd)
         OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), label = { Text("Szukaj po nazwie, aliasie lub tagu") }, singleLine = true)
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(visible, key = { it.id }) { product ->
                 OutlinedCard(
-                    onClick = { edited = product },
+                    onClick = { onProduct(product.id) },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = if (product.isHidden) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)) else CardDefaults.outlinedCardColors(),
+                    colors = if (product.isHidden) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)) else CardDefaults.outlinedCardColors(),
                 ) {
-                    Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ProductPhoto(product.photoUri, Modifier.size(58.dp))
-                        ProductInfo(
-                            product.name, product.variant, product.groupName, product.subgroupName,
-                            stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit,
-                            modifier = Modifier.padding(start = 12.dp).weight(1f),
+                    Column {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Inventory2, null)
+                            ProductInfo(
+                                product.name, product.variant, product.groupName, product.subgroupName,
+                                stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit,
+                                modifier = Modifier.padding(start = 10.dp).weight(1f),
+                            )
+                        }
+                        if (product.isHidden) Text(
+                            "Ukryty",
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 7.dp),
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        if (product.isHidden) Text("Ukryty", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
-        }
-    }
-    if (showNew || edited != null) {
-        ModalBottomSheet(sheetState = editorSheetState, onDismissRequest = { showNew = false; edited = null }) {
-            ProductEditor(
-                product = edited,
-                groups = groups,
-                subgroups = subgroups,
-                categories = categories,
-                units = (listOf("szt.", "para", "opak.", "paczka", "kpl.", "metr", "rolka") + products.map { it.unit })
-                    .filter(String::isNotBlank).distinctBy { it.lowercase() },
-                onCancel = { showNew = false; edited = null },
-                onSave = { existing, draft ->
-                    viewModel.saveProduct(existing, draft)
-                    showNew = false; edited = null
-                },
-                onCorrectStock = { product, counted ->
-                    viewModel.correctStock(product, counted)
-                    showNew = false; edited = null
-                },
-                onRemove = { product ->
-                    viewModel.removeProduct(product.id)
-                    showNew = false; edited = null
-                },
-            )
         }
     }
 }
@@ -162,20 +164,21 @@ private fun ProductEditor(
     }
 
     Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Text(if (product == null) "Nowy przedmiot" else "Karta przedmiotu", style = MaterialTheme.typography.titleLarge)
         if (product != null) {
             Text("Stan magazynowy", style = MaterialTheme.typography.titleMedium)
             Text(if (product.stockKnown) "Aktualnie: ${formatWholeQuantity(product.stockQuantity)} ${product.unit}" else "Aktualnie: stan nieustalony")
-            OutlinedTextField(
-                counted,
-                { value -> counted = value.filterIndexed { index, character -> character.isDigit() || (character == '-' && index == 0) } },
-                Modifier.fillMaxWidth().keepAboveKeyboard(),
-                label = { Text("Faktycznie policzony stan") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            )
-            Button(onClick = { counted.toLongOrNull()?.let { onCorrectStock(product, it) } }, enabled = counted.toLongOrNull() != null, modifier = Modifier.fillMaxWidth()) {
-                Text("Zapisz korektę stanu")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    counted,
+                    { value -> counted = value.filterIndexed { index, character -> character.isDigit() || (character == '-' && index == 0) } },
+                    Modifier.weight(0.8f).keepAboveKeyboard(),
+                    label = { Text("Stan") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                Button(onClick = { counted.toLongOrNull()?.let { onCorrectStock(product, it) } }, enabled = counted.toLongOrNull() != null, modifier = Modifier.weight(1.2f)) {
+                    Text("Zapisz korektę stanu", textAlign = TextAlign.Center)
+                }
             }
             HorizontalDivider(Modifier.padding(vertical = 5.dp))
         }
@@ -201,35 +204,42 @@ private fun ProductEditor(
             ChoiceField(unit, { unit = it }, "Jednostka *", units, Modifier.weight(1f))
         }
         Text("Klasyfikacja jest opcjonalna. Możesz wybrać istniejącą wartość albo wpisać nową.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        EditableChoiceField(groupName, { groupName = it }, "Grupa", groups)
-        EditableChoiceField(
-            subgroupName,
-            { subgroupName = it },
-            "Podgrupa",
-            subgroups.filter { groupName.isBlank() || it.groupName.isBlank() || it.groupName.equals(groupName, true) }.map { it.name }.distinct(),
-        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            EditableChoiceField(groupName, { groupName = it }, "Grupa", groups, Modifier.weight(1f))
+            EditableChoiceField(
+                subgroupName,
+                { subgroupName = it },
+                "Podgrupa",
+                subgroups.filter { groupName.isBlank() || it.groupName.isBlank() || it.groupName.equals(groupName, true) }.map { it.name }.distinct(),
+                Modifier.weight(1f),
+            )
+        }
         EditableChoiceField(category, { category = it }, "Kategoria", categories)
         OutlinedTextField(aliases, { aliases = it }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Aliasy, oddzielone przecinkami") })
+        RemovableValueChips(aliases.split(','), onRemove = { removed -> aliases = aliases.split(',').map(String::trim).filter { !it.equals(removed, true) && it.isNotBlank() }.joinToString(", ") })
         OutlinedTextField(tags, { tags = it }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Tagi, oddzielone przecinkami") })
-        OutlinedTextField(
-            threshold,
-            { value -> threshold = value.filter(Char::isDigit) },
-            Modifier.fillMaxWidth().keepAboveKeyboard(),
-            label = { Text("Próg niskiego stanu") },
-            placeholder = { Text("0") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        )
-        OutlinedTextField(
-            repeatIssueWeeks,
-            { value -> repeatIssueWeeks = value.filter(Char::isDigit) },
-            Modifier.fillMaxWidth().keepAboveKeyboard(),
-            label = { Text("Ponowne wydanie po (tygodnie)") },
-            placeholder = { Text("0") },
-            supportingText = { Text("0 oznacza brak ograniczenia") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        )
+        RemovableValueChips(tags.split(','), onRemove = { removed -> tags = tags.split(',').map(String::trim).filter { !it.equals(removed, true) && it.isNotBlank() }.joinToString(", ") })
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                threshold,
+                { value -> threshold = value.filter(Char::isDigit) },
+                Modifier.weight(1f).keepAboveKeyboard(),
+                label = { Text("Próg niskiego stanu") },
+                placeholder = { Text("0") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            OutlinedTextField(
+                repeatIssueWeeks,
+                { value -> repeatIssueWeeks = value.filter(Char::isDigit) },
+                Modifier.weight(1f).keepAboveKeyboard(),
+                label = { Text("Ponowne wydanie (tyg.)") },
+                placeholder = { Text("0") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+        }
+        Text("0 tygodni oznacza brak ograniczenia", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(returnable, { returnable = it })
             Text("Sprzęt powierzony — wymaga zwrotu", Modifier.padding(start = 8.dp))
@@ -323,10 +333,11 @@ private fun EditableChoiceField(
     onValueChange: (String) -> Unit,
     label: String,
     options: List<String>,
+    modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val suggestions = options.filter { value.isBlank() || it.contains(value, true) }.take(8)
-    ExposedDropdownMenuBox(expanded = expanded && suggestions.isNotEmpty(), onExpandedChange = { expanded = it }) {
+    ExposedDropdownMenuBox(expanded = expanded && suggestions.isNotEmpty(), onExpandedChange = { expanded = it }, modifier = modifier) {
         OutlinedTextField(
             value = value,
             onValueChange = { onValueChange(it); expanded = true },

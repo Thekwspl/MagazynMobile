@@ -19,6 +19,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -158,14 +159,20 @@ private fun OrderDetails(
     Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Kompletowanie zamówienia", style = MaterialTheme.typography.titleLarge)
         order.siteLabel?.takeIf(String::isNotBlank)?.let { Text("Stocznia: $it", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary) }
-        OutlinedButton(onClick = { showPersonPicker = true }, Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.Person, null)
-            Spacer(Modifier.width(7.dp))
-            Text(people.firstOrNull { it.id == employeeId }?.listDisplayName() ?: "Wyszukaj i przypisz osobę")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { showPersonPicker = true }, Modifier.weight(1f)) {
+                Icon(Icons.Default.Person, null)
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    people.firstOrNull { it.id == employeeId }?.listDisplayName() ?: "Wyszukaj i przypisz osobę",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            OutlinedButton(onClick = { showDatePicker = true }) { Text(formatDisplayDate(date), maxLines = 1) }
         }
         if (employeeId == null && order.siteLabel.isNullOrBlank()) Text("Nie rozpoznano osoby z notatki. Wybierz ją z bazy przed realizacją.", color = MaterialTheme.colorScheme.error)
         if (employeeId == null && !order.siteLabel.isNullOrBlank()) Text("To zamówienie zostanie wydane na stan stoczni.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-        OutlinedButton(onClick = { showDatePicker = true }, Modifier.fillMaxWidth()) { Text("Data wydania: ${formatDisplayDate(date)}") }
         HorizontalDivider()
         lines.forEach { line ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -372,7 +379,15 @@ private fun OrderLineDialog(line: OrderDetailLine, products: List<ProductWithSto
             }
             matches.forEach { product ->
                 OutlinedCard(onClick = { selectedId = product.id; query = product.name + product.variant?.let { " · $it" }.orEmpty() }, Modifier.fillMaxWidth(), colors = if (selectedId == product.id) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.outlinedCardColors()) {
-                    ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.fillMaxWidth(), stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit)
+                    ProductInfo(
+                        product.name,
+                        product.variant,
+                        product.groupName,
+                        product.subgroupName,
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                        stockQuantity = product.stockQuantity.takeIf { product.stockKnown },
+                        unit = product.unit,
+                    )
                 }
             }
             if (selectedId != null) {

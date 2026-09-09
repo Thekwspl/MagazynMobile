@@ -12,11 +12,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun DataExchangeScreen(contentPadding: PaddingValues) {
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+fun DataExchangeScreen(contentPadding: PaddingValues, initialTab: Int = 0, onBack: (() -> Unit)? = null) {
+    var selectedTab by rememberSaveable(initialTab) { mutableIntStateOf(initialTab) }
 
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
-        Text("Import i eksport danych", Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.headlineSmall)
+        onBack?.let { BackScreenHeader("Import i eksport danych", onBack = it) }
+            ?: Text("Import i eksport danych", Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.headlineSmall)
         TabRow(selectedTabIndex = selectedTab) {
             Tab(
                 selected = selectedTab == 0,

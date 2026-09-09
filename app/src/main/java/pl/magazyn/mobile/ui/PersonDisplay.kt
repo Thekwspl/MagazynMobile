@@ -2,7 +2,9 @@ package pl.magazyn.mobile.ui
 
 import pl.magazyn.mobile.data.EmployeeSummary
 
-fun EmployeeSummary.listDisplayName(): String = listOf(lastName, firstName)
+fun personDisplayName(lastName: String, firstName: String, fallback: String = ""): String = listOf(lastName, firstName)
     .filter(String::isNotBlank)
     .joinToString(" ")
-    .ifBlank { fullName }
+    .ifBlank { fallback }
+
+fun EmployeeSummary.listDisplayName(): String = personDisplayName(lastName, firstName, fullName)

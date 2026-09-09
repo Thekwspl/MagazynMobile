@@ -255,7 +255,7 @@ fun ParsedNoteReviewScreen(
             } else ParsedNoteReviewContent(
                 rawText = if (note.kind == ParsedInputKind.ORDER) "" else current.rawText,
                 note = note,
-                matchedPersonName = matchedPerson?.fullName,
+                matchedPersonName = matchedPerson?.listDisplayName(),
                 people = people,
                 products = products,
                 shipyards = shipyards,
@@ -688,7 +688,7 @@ private fun ParsedNoteReviewContent(
             } else {
                 OutlinedTextField(defaultRecipientName, { defaultRecipientName = it }, Modifier.fillMaxWidth(), label = { Text("Osoba / pracownik") }, singleLine = true)
                 matchingPeople(defaultRecipientName, people).take(4).forEach { person ->
-                    TextButton(onClick = { defaultRecipientName = person.fullName }, Modifier.fillMaxWidth()) { Icon(Icons.Default.Person, null); Spacer(Modifier.width(6.dp)); Text(person.listDisplayName(), Modifier.weight(1f)) }
+                    TextButton(onClick = { defaultRecipientName = person.listDisplayName() }, Modifier.fillMaxWidth()) { Icon(Icons.Default.Person, null); Spacer(Modifier.width(6.dp)); Text(person.listDisplayName(), Modifier.weight(1f)) }
                 }
             }
             OutlinedButton(
@@ -742,7 +742,7 @@ private fun ParsedNoteReviewContent(
             val shipyardMatches = matchingShipyards(recipientQuery, shipyards)
             val recipientShipyard = recognizedRecipientShipyard(recipientQuery, shipyards)
             val details = listOfNotNull(
-                item.recipientName?.let { name -> "dla: $name" }
+                item.recipientName?.let { name -> "dla: ${personMatch?.listDisplayName() ?: recipientShipyard?.name ?: name}" }
                     ?: recognizedShipyard?.let { "dla stoczni: ${it.name} (domyślnie)" },
                 item.variant?.let { v -> "rozmiar $v" },
                 formatWholeQuantity(item.quantity) + " " + item.unit,
@@ -797,7 +797,7 @@ private fun ParsedNoteReviewContent(
                         if (personMatches.isNotEmpty()) {
                             Text("Proponowane osoby", style = MaterialTheme.typography.labelMedium)
                             personMatches.take(4).forEach { person ->
-                                OutlinedButton(onClick = { editedItems[index] = item.copy(recipientName = person.fullName) }, Modifier.fillMaxWidth()) {
+                                OutlinedButton(onClick = { editedItems[index] = item.copy(recipientName = person.listDisplayName()) }, Modifier.fillMaxWidth()) {
                                     Icon(Icons.Default.Person, null)
                                     Spacer(Modifier.width(6.dp))
                                     Text(person.listDisplayName() + person.positions.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty(), Modifier.weight(1f))
@@ -892,7 +892,9 @@ private fun ParsedNoteReviewContent(
                         onSaveOrder(
                             editedItems.mapIndexedNotNull { index, corrected ->
                             if (approvedItems[index] == true) sourceItems.getOrNull(index)?.let { source ->
-                                source to if (corrected.recipientName.isNullOrBlank() && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim()) else corrected
+                                val withDefault = if (corrected.recipientName.isNullOrBlank() && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim()) else corrected
+                                val storageRecipient = withDefault.recipientName?.let { recipient -> recognizedPerson(recipient, people)?.fullName ?: recipient }
+                                source to withDefault.copy(recipientName = storageRecipient)
                             } else null
                         },
                         rememberCorrections,
@@ -929,7 +931,7 @@ private fun ParsedNoteReviewContent(
             onCreate = { first, last, phones, positions, aliases ->
                 onCreatePerson(first, last, phones, positions, aliases) { _, fullName ->
                     editedItems.getOrNull(index)?.let { current ->
-                        editedItems[index] = current.copy(recipientName = fullName)
+                        editedItems[index] = current.copy(recipientName = personDisplayName(last, first, fullName))
                     }
                     newPersonItemIndex = null
                 }

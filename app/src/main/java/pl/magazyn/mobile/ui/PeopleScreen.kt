@@ -188,7 +188,7 @@ private fun PersonProfile(
             return@Column
         }
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-            Text(person.fullName, style = MaterialTheme.typography.titleLarge)
+            Text(person.listDisplayName(), style = MaterialTheme.typography.titleLarge)
             if (person.phoneNumbers.isNotBlank()) PhoneNumbersInline(person.phoneNumbers)
         }
         if (person.positions.isNotBlank()) Text(person.positions, style = MaterialTheme.typography.titleMedium)

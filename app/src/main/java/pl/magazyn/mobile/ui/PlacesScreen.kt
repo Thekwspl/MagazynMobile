@@ -32,16 +32,24 @@ fun PlacesScreen(contentPadding: PaddingValues, viewModel: TasksViewModel = view
         OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), label = { Text("Szukaj nazwy lub aliasu") }, singleLine = true)
         LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(visible, key = { it.id }) { place ->
-                OutlinedCard(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text(place.name); Text(place.aliases.takeIf(String::isNotBlank)?.let { "Aliasy: $it" } ?: "Brak aliasów", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    IconButton(onClick = { edited = place }) { Icon(Icons.Default.Edit, "Edytuj") }
-                    IconButton(onClick = { viewModel.archivePlace(place.id) }) { Icon(Icons.Default.DeleteOutline, "Usuń") }
+                OutlinedCard(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) { Text(place.name); place.aliases.takeIf(String::isNotBlank)?.let { Text("Aliasy: $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1) } }
+                    IconButton(onClick = { edited = place }, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.Edit, "Edytuj") }
                 } }
             }
         }
     }
     if (adding) SimpleNewPlaceDialog({ adding = false }) { name, aliases, result -> viewModel.createPlace(name, aliases) { error -> result(error); if (error == null) adding = false } }
-    edited?.let { place -> PlaceManagementDialog(place, { edited = null }, viewModel::renamePlace, viewModel::addPlaceAlias, viewModel::removePlaceAlias) }
+    edited?.let { place ->
+        PlaceManagementDialog(
+            place,
+            { edited = null },
+            viewModel::renamePlace,
+            viewModel::addPlaceAlias,
+            viewModel::removePlaceAlias,
+            onDelete = { viewModel.archivePlace(place.id); edited = null },
+        )
+    }
 }
 
 @Composable
@@ -51,13 +59,13 @@ private fun SimpleNewPlaceDialog(onDismiss: () -> Unit, onSave: (String, List<St
 }
 
 @Composable
-private fun PlaceManagementDialog(place: TaskPlaceView, onDismiss: () -> Unit, onRename: (String, String, (String?) -> Unit) -> Unit, onAddAlias: (String, String, (String?) -> Unit) -> Unit, onRemoveAlias: (String, String) -> Unit) {
+private fun PlaceManagementDialog(place: TaskPlaceView, onDismiss: () -> Unit, onRename: (String, String, (String?) -> Unit) -> Unit, onAddAlias: (String, String, (String?) -> Unit) -> Unit, onRemoveAlias: (String, String) -> Unit, onDelete: () -> Unit) {
     var name by remember(place.id) { mutableStateOf(place.name) }; var alias by remember(place.id) { mutableStateOf("") }; var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Miejsce → Aliasy") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(name, { name = it }, label = { Text("Nazwa główna") })
-        place.aliases.split(',').map(String::trim).filter(String::isNotBlank).forEach { current -> Row(verticalAlignment = Alignment.CenterVertically) { Text(current, Modifier.weight(1f)); IconButton(onClick = { onRemoveAlias(place.id, current) }) { Icon(Icons.Default.DeleteOutline, "Usuń alias") } } }
+        RemovableValueChips(place.aliases.split(','), onRemove = { onRemoveAlias(place.id, it) }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(alias, { alias = it }, label = { Text("Nowy alias") })
         OutlinedButton(onClick = { onAddAlias(place.id, alias) { error = it; if (it == null) alias = "" } }, enabled = alias.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Dodaj alias") }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-    } }, confirmButton = { Button(onClick = { onRename(place.id, name) { error = it; if (it == null) onDismiss() } }) { Text("Zapisz") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Anuluj") } })
+    } }, confirmButton = { Button(onClick = { onRename(place.id, name) { error = it; if (it == null) onDismiss() } }) { Text("Zapisz") } }, dismissButton = { Row { TextButton(onClick = onDelete, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Icon(Icons.Default.DeleteOutline, null); Text("Usuń") }; TextButton(onClick = onDismiss) { Text("Anuluj") } } })
 }
