@@ -5,9 +5,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 import java.util.UUID
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import pl.magazyn.mobile.MagazynApplication
@@ -29,6 +33,22 @@ import pl.magazyn.mobile.domain.normalizePersonName
 import pl.magazyn.mobile.domain.normalizeFirstName
 import pl.magazyn.mobile.domain.normalizePhoneNumbers
 
+data class OrderIssueWarningItem(
+    val productName: String,
+    val productVariant: String?,
+    val previousIssueDate: String,
+    val sameDay: Boolean,
+    val repeatIssueWeeks: Int,
+    val remainingWeeks: Long,
+)
+
+data class OrderIssueWarning(
+    val orderId: String,
+    val employeeId: String,
+    val issueDate: String,
+    val items: List<OrderIssueWarningItem>,
+)
+
 class OrdersViewModel(application: Application) : AndroidViewModel(application) {
     private val database = (application as MagazynApplication).database
     private val visibility = ProductVisibilityStore(application)
@@ -40,6 +60,8 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val jobPositions = database.jobPositionDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val _issueWarning = MutableStateFlow<OrderIssueWarning?>(null)
+    val issueWarning = _issueWarning.asStateFlow()
 
     fun lines(orderId: String) = database.orderDao().observeLines(orderId)
     fun changes(orderId: String) = database.orderDao().observeChanges(orderId)
@@ -152,8 +174,47 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun realize(orderId: String, selectedEmployeeId: String?, selectedDate: String) {
+    fun realize(orderId: String, selectedEmployeeId: String?, selectedDate: String, ignoreWarnings: Boolean = false) {
         viewModelScope.launch {
+            val issueDate = runCatching { LocalDate.parse(selectedDate) }.getOrNull() ?: return@launch
+            val linesBeforeIssue = database.orderDao().getLinesNow(orderId)
+            if (!ignoreWarnings && selectedEmployeeId != null && linesBeforeIssue.isNotEmpty()) {
+                val history = database.movementDao().observeEmployeeIssues(selectedEmployeeId).first()
+                    .filterNot { it.isDeleted }
+                val warnings = linesBeforeIssue.mapNotNull { line ->
+                    val productId = line.productId ?: return@mapNotNull null
+                    val product = database.productDao().findById(productId) ?: return@mapNotNull null
+                    val previous = history.asSequence()
+                        .filter { it.productId == productId }
+                        .mapNotNull { entry ->
+                            runCatching { LocalDate.parse(entry.effectiveDate) }.getOrNull()?.let { entry to it }
+                        }
+                        .filter { (_, date) -> !date.isAfter(issueDate) }
+                        .maxByOrNull { (_, date) -> date }
+                        ?: return@mapNotNull null
+                    val previousDate = previous.second
+                    val sameDay = previousDate == issueDate
+                    val nextAllowed = previousDate.plusWeeks(product.repeatIssueWeeks.toLong())
+                    val tooEarly = product.repeatIssueWeeks > 0 && issueDate.isBefore(nextAllowed)
+                    if (!sameDay && !tooEarly) return@mapNotNull null
+                    val remainingDays = if (tooEarly) {
+                        ChronoUnit.DAYS.between(issueDate, nextAllowed).coerceAtLeast(0)
+                    } else 0L
+                    OrderIssueWarningItem(
+                        productName = product.name,
+                        productVariant = product.variant,
+                        previousIssueDate = previousDate.toString(),
+                        sameDay = sameDay,
+                        repeatIssueWeeks = product.repeatIssueWeeks,
+                        remainingWeeks = if (remainingDays == 0L) 0 else (remainingDays + 6) / 7,
+                    )
+                }.distinctBy { it.productName to it.productVariant }
+                if (warnings.isNotEmpty()) {
+                    _issueWarning.value = OrderIssueWarning(orderId, selectedEmployeeId, selectedDate, warnings)
+                    return@launch
+                }
+            }
+            _issueWarning.value = null
             database.withTransaction {
                 val order = database.orderDao().findById(orderId) ?: return@withTransaction
                 database.orderDao().updateOrder(orderId, selectedEmployeeId, order.recipientLabel, selectedDate)
@@ -162,7 +223,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 } else null
                 if (selectedEmployeeId == null && shipyard == null) return@withTransaction
                 val lines = database.orderDao().getLinesNow(orderId)
-                if (lines.isEmpty() || lines.any { it.productId == null || !it.isPrepared }) return@withTransaction
+                if (lines.isEmpty() || lines.any { it.productId == null }) return@withTransaction
                 val movementId = UUID.randomUUID().toString()
                 database.movementDao().insertMovement(
                     StockMovementEntity(
@@ -198,6 +259,16 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 log(orderId, "ISSUE", "Zrealizowano zamówienie i wydano ${lines.size} pozycji")
             }
         }
+    }
+
+    fun confirmIssueDespiteWarning() {
+        val warning = _issueWarning.value ?: return
+        _issueWarning.value = null
+        realize(warning.orderId, warning.employeeId, warning.issueDate, ignoreWarnings = true)
+    }
+
+    fun dismissIssueWarning() {
+        _issueWarning.value = null
     }
 
     private suspend fun log(orderId: String, action: String, description: String) {

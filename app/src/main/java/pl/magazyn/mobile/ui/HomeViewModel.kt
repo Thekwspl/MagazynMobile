@@ -19,6 +19,8 @@ import pl.magazyn.mobile.data.OrderNotebookEntity
 import pl.magazyn.mobile.data.OrderEntity
 import pl.magazyn.mobile.data.OrderLineEntity
 import pl.magazyn.mobile.data.EmployeeEntity
+import pl.magazyn.mobile.data.EmployeeJobPositionEntity
+import pl.magazyn.mobile.data.JobPositionEntity
 import pl.magazyn.mobile.data.PendingImportDetail
 import pl.magazyn.mobile.data.ProductEntity
 import pl.magazyn.mobile.data.ShipyardEntity
@@ -45,6 +47,7 @@ import pl.magazyn.mobile.domain.TaskTextParser
 import pl.magazyn.mobile.domain.TaskPlaceLookup
 import pl.magazyn.mobile.domain.TaskEmployeeLookup
 import pl.magazyn.mobile.domain.ParsedTaskDraft
+import pl.magazyn.mobile.domain.offlineProductMatchScore
 import pl.magazyn.mobile.data.NotebookTaskStepEntity
 import pl.magazyn.mobile.data.NotebookTaskStepPersonEntity
 import pl.magazyn.mobile.data.TaskPlaceEntity
@@ -83,6 +86,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _noteReview = MutableStateFlow<NoteReviewUiState?>(null)
     val noteReview: StateFlow<NoteReviewUiState?> = _noteReview.asStateFlow()
     val people = database.employeeDao().observeSummaries()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val jobPositions = database.jobPositionDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val tasks = database.notebookDao().observeTasks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -160,7 +165,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             item.copy(recipientName = item.recipientName?.let(::normalizeFullPersonName))
         }.map { item ->
             activeRules.firstOrNull { it.ruleType == "PRODUCT" && it.triggerKey == ImportParser.key(item.name) }?.let { rule ->
-                item.copy(name = rule.learnedName, variant = rule.learnedVariant ?: item.variant, unit = rule.learnedUnit)
+                // Wariant jawnie odczytany z bieżącej wiadomości ma pierwszeństwo
+                // przed wariantem zapamiętanym wcześniej dla samej nazwy produktu.
+                item.copy(name = rule.learnedName, variant = item.variant ?: rule.learnedVariant, unit = rule.learnedUnit)
             } ?: item
         }.map { item ->
             val personRule = item.recipientName?.let { name -> activeRules.firstOrNull { it.ruleType == "PERSON" && it.triggerKey == ImportParser.key(name) } }
@@ -172,7 +179,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 product.aliases.split(',').map { ImportParser.key(it) }.any { it.isNotBlank() && it == itemKey }
             }
             if (bundleMatches.size < 2) listOf(item) else bundleMatches.map { product ->
-                item.copy(name = product.name, variant = product.variant ?: item.variant, unit = product.unit)
+                item.copy(name = product.name, variant = item.variant ?: product.variant, unit = product.unit)
             }
         }.map { item ->
             // Ogólny „kask” oznacza standardowy Kask Biały; doprecyzowane typy pozostają bez zmian.
@@ -432,13 +439,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         database.orderDao().upsertLines(
                             items.map { item ->
-                                val itemKey = ImportParser.key(item.name)
-                                val candidates = catalog.filter {
-                                    val names = listOf(it.name) + it.aliases.split(',') + it.tags.split(',')
-                                    names.any { name -> ImportParser.key(name) == itemKey } &&
-                                        (item.variant.isNullOrBlank() ||
-                                            ImportParser.key(it.variant.orEmpty()) == ImportParser.key(item.variant) ||
-                                            (it.aliases.split(',') + it.tags.split(',')).any { alias -> ImportParser.key(alias) == ImportParser.key(item.variant) })
+                                val candidates = if (note.analyzedByAi) {
+                                    val itemKey = ImportParser.key(item.name)
+                                    val variantKey = ImportParser.key(item.variant.orEmpty())
+                                    catalog.filter { product ->
+                                        val labels = listOf(product.name) + product.aliases.split(',') + product.tags.split(',')
+                                        labels.any { ImportParser.key(it) == itemKey } &&
+                                            (variantKey.isBlank() || ImportParser.key(product.variant.orEmpty()) == variantKey ||
+                                                (product.aliases.split(',') + product.tags.split(',')).any { ImportParser.key(it) == variantKey })
+                                    }
+                                } else {
+                                    val scoredCandidates = catalog.mapNotNull { product ->
+                                        offlineProductMatchScore(item.name, item.variant, product.name, product.variant, product.aliases, product.tags)
+                                            ?.let { score -> product to score }
+                                    }
+                                    val bestScore = scoredCandidates.maxOfOrNull { it.second }
+                                    scoredCandidates.filter { it.second == bestScore }.map { it.first }
                                 }
                                 // Remis pozostaje do ręcznego mapowania; nie wybieramy przypadkowego rozmiaru.
                                 val product = candidates.singleOrNull()
@@ -455,6 +471,42 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
             }
+        }
+    }
+
+    fun createPersonForRecognizedOrder(
+        firstName: String,
+        lastName: String,
+        phones: String,
+        positions: String,
+        aliases: String,
+        onCreated: (String, String) -> Unit,
+    ) {
+        val first = normalizeFirstName(firstName)
+        val last = normalizePersonName(lastName)
+        if (first.isBlank() || last.isBlank()) return
+        viewModelScope.launch {
+            val fullName = "$first $last"
+            val existing = database.employeeDao().getAllNow().firstOrNull {
+                ImportParser.key(it.fullName) == ImportParser.key(fullName)
+            }
+            if (existing != null) {
+                onCreated(existing.id, existing.fullName)
+                return@launch
+            }
+            val id = UUID.randomUUID().toString()
+            database.withTransaction {
+                database.employeeDao().insert(
+                    EmployeeEntity(id, fullName, first, last, normalizePhoneNumbers(phones), pl.magazyn.mobile.domain.normalizeCommaSeparated(aliases)),
+                )
+                positions.split(',').map(String::trim).filter(String::isNotBlank).distinctBy(String::lowercase).forEach { position ->
+                    val normalized = normalizeDisplayName(position)
+                    val positionId = "position-" + normalized.lowercase().replace(Regex("[^a-ząćęłńóśźż0-9]+"), "-").trim('-')
+                    database.jobPositionDao().upsert(listOf(JobPositionEntity(positionId, normalized)))
+                    database.jobPositionDao().link(listOf(EmployeeJobPositionEntity(id, positionId)))
+                }
+            }
+            onCreated(id, fullName)
         }
     }
 

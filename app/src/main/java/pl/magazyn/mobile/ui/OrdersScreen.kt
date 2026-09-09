@@ -39,6 +39,7 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
     val people by viewModel.people.collectAsStateWithLifecycle()
     val products by viewModel.products.collectAsStateWithLifecycle()
     val jobPositions by viewModel.jobPositions.collectAsStateWithLifecycle()
+    val issueWarning by viewModel.issueWarning.collectAsStateWithLifecycle()
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = orders.firstOrNull { it.id == selectedId }
 
@@ -84,9 +85,37 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
                 onCreatePerson = viewModel::createPerson,
                 onCreateProduct = viewModel::createProduct,
                 onCancelOrder = { viewModel.cancelOrder(order.id); selectedId = null },
-                onRealize = { employeeId, date -> viewModel.realize(order.id, employeeId, date); selectedId = null },
+                onRealize = { employeeId, date -> viewModel.realize(order.id, employeeId, date) },
             )
         }
+    }
+    issueWarning?.let { warning ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissIssueWarning,
+            title = { Text("Uwaga przed wydaniem") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    warning.items.forEach { item ->
+                        val label = item.productName + item.productVariant?.let { " · $it" }.orEmpty()
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(label, fontWeight = FontWeight.SemiBold)
+                            if (item.sameDay) {
+                                Text("• Ten przedmiot został już wydany tej osobie w dniu ${formatDisplayDate(item.previousIssueDate)}.")
+                            }
+                            if (item.repeatIssueWeeks > 0 && item.remainingWeeks > 0) {
+                                Text("• Nie upłynął jeszcze czas ponownego wydania.")
+                                Text("Ostatnie wydanie: ${formatDisplayDate(item.previousIssueDate)}", style = MaterialTheme.typography.bodySmall)
+                                Text("Ponowne wydanie po: ${item.repeatIssueWeeks} tyg.", style = MaterialTheme.typography.bodySmall)
+                                Text("Pozostało: około ${item.remainingWeeks} tyg.", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            },
+            confirmButton = { Button(onClick = viewModel::confirmIssueDespiteWarning) { Text("Wydaj mimo to") } },
+            dismissButton = { TextButton(onClick = viewModel::dismissIssueWarning) { Text("Anuluj") } },
+        )
     }
 }
 
@@ -124,7 +153,7 @@ private fun OrderDetails(
     val createsNegative = lines.filter { it.productId != null }.groupBy { it.productId }.any { (_, grouped) ->
         grouped.first().stockQuantity - grouped.sumOf { it.quantity } < 0
     }
-    val ready = (employeeId != null || !order.siteLabel.isNullOrBlank()) && lines.isNotEmpty() && lines.all { it.productId != null && it.isPrepared }
+    val ready = (employeeId != null || !order.siteLabel.isNullOrBlank()) && lines.isNotEmpty() && lines.all { it.productId != null }
 
     Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Kompletowanie zamówienia", style = MaterialTheme.typography.titleLarge)
@@ -184,7 +213,6 @@ private fun OrderDetails(
                 }
             }
         }
-        if (lines.any { !it.isPrepared }) Text("Zaznacz przygotowanie każdej pozycji przed realizacją.", style = MaterialTheme.typography.bodySmall)
         Button(onClick = { onRealize(employeeId, date) }, enabled = ready && (!createsNegative || confirmNegative), modifier = Modifier.fillMaxWidth()) { Text(if (employeeId == null && !order.siteLabel.isNullOrBlank()) "Zrealizuj i wydaj stoczni" else "Zrealizuj i wydaj") }
         TextButton(onClick = { confirmCancel = true }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Anuluj całe zamówienie") }
         Spacer(Modifier.height(16.dp))
@@ -298,7 +326,7 @@ private fun OrderPersonPickerDialog(
 }
 
 @Composable
-private fun NewOrderPersonDialog(jobPositions: List<pl.magazyn.mobile.data.JobPositionEntity>, initialRecipient: String, onDismiss: () -> Unit, onCreate: (String, String, String, String, String) -> Unit) {
+internal fun NewOrderPersonDialog(jobPositions: List<pl.magazyn.mobile.data.JobPositionEntity>, initialRecipient: String, onDismiss: () -> Unit, onCreate: (String, String, String, String, String) -> Unit) {
     val suggestedParts = remember(initialRecipient) { initialRecipient.trim().split(Regex("\\s+")).filter(String::isNotBlank) }
     var first by rememberSaveable(initialRecipient) { mutableStateOf(suggestedParts.firstOrNull().orEmpty()) }
     var last by rememberSaveable(initialRecipient) { mutableStateOf(suggestedParts.drop(1).joinToString(" ")) }

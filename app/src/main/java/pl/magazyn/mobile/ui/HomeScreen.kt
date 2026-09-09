@@ -45,6 +45,7 @@ fun HomeScreen(
     val pendingImportDetails by viewModel.pendingImportDetails.collectAsStateWithLifecycle()
     val products by viewModel.products.collectAsStateWithLifecycle()
     val people by viewModel.people.collectAsStateWithLifecycle()
+    val jobPositions by viewModel.jobPositions.collectAsStateWithLifecycle()
     val aiAnalysis by viewModel.aiAnalysis.collectAsStateWithLifecycle()
     val duplicateDecisions by viewModel.duplicateDecisions.collectAsStateWithLifecycle()
     val query by viewModel.quickInput.collectAsStateWithLifecycle()
@@ -258,8 +259,10 @@ fun ParsedNoteReviewScreen(
                 people = people,
                 products = products,
                 shipyards = shipyards,
+                jobPositions = jobPositions,
                 onAddPhone = { number -> matchedPerson?.let { viewModel.addPhoneNumber(it.id, number) } },
                 onAddProductTags = viewModel::addProductTags,
+                onCreatePerson = viewModel::createPersonForRecognizedOrder,
                 onSaveTasks = {
                     viewModel.saveTasks(current.rawText, note.tasks)
                     viewModel.closeReview(completed = true)
@@ -627,8 +630,10 @@ private fun ParsedNoteReviewContent(
     people: List<pl.magazyn.mobile.data.EmployeeSummary>,
     products: List<pl.magazyn.mobile.data.ProductWithStock>,
     shipyards: List<pl.magazyn.mobile.data.ShipyardEntity>,
+    jobPositions: List<pl.magazyn.mobile.data.JobPositionEntity>,
     onAddPhone: (String) -> Unit,
     onAddProductTags: (String, String) -> Unit,
+    onCreatePerson: (String, String, String, String, String, (String, String) -> Unit) -> Unit,
     onSaveTasks: () -> Unit,
     onSaveOrder: (List<Pair<pl.magazyn.mobile.domain.ParsedItem, pl.magazyn.mobile.domain.ParsedItem>>, Boolean, String?, String) -> Unit,
 ) {
@@ -639,6 +644,7 @@ private fun ParsedNoteReviewContent(
     val quantityTexts = remember(note) { mutableStateMapOf<Int, String>().apply { note.items.forEachIndexed { index, item -> put(index, item.quantity.toString()) } } }
     val tagTexts = remember(note) { mutableStateMapOf<Int, String>() }
     var editingItem by remember(note) { mutableStateOf<Int?>(null) }
+    var newPersonItemIndex by remember(note) { mutableStateOf<Int?>(null) }
     var rememberCorrections by rememberSaveable(note.items.size) { mutableStateOf(true) }
     var shipyardName by rememberSaveable(note) { mutableStateOf(note.shipyardName) }
     var defaultRecipientName by rememberSaveable(note) { mutableStateOf(note.shipyardName.orEmpty()) }
@@ -692,20 +698,6 @@ private fun ParsedNoteReviewContent(
                 },
                 enabled = defaultRecipientName.isNotBlank(), modifier = Modifier.fillMaxWidth(),
             ) { Text("Zastosuj do wszystkich bez odbiorcy") }
-            Box(Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { shipyardMenu = true }, Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Business, null)
-                    Spacer(Modifier.width(7.dp))
-                    Text(recognizedShipyard?.let { "Stocznia: ${it.name}" } ?: shipyardName?.let { "Nierozpoznana stocznia: $it" } ?: "Przypisz stocznię (opcjonalnie)")
-                }
-                DropdownMenu(expanded = shipyardMenu, onDismissRequest = { shipyardMenu = false }) {
-                    DropdownMenuItem(text = { Text("Bez przypisanej stoczni") }, onClick = { shipyardName = null; shipyardMenu = false })
-                    shipyards.forEach { shipyard ->
-                        DropdownMenuItem(text = { Text(shipyard.name) }, onClick = { shipyardName = shipyard.name; if (defaultRecipientIsShipyard) defaultRecipientName = shipyard.name; shipyardMenu = false })
-                    }
-                }
-            }
-            if (shipyardName != null && recognizedShipyard == null) Text("Nie znaleziono tej stoczni w bazie — wybierz właściwą z listy.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
             OutlinedButton(onClick = { showPlannedDatePicker = true }, Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.CalendarMonth, null)
                 Spacer(Modifier.width(7.dp))
@@ -742,7 +734,7 @@ private fun ParsedNoteReviewContent(
             Button(onClick = onSaveTasks, modifier = Modifier.fillMaxWidth()) { Text("Zapisz listę zadań") }
         }
         editedItems.forEachIndexed { index, item ->
-            val productMatches = matchingProducts(item, products)
+            val productMatches = matchingProducts(item, products, strictOfflineMatching = !note.analyzedByAi)
             val productMatch = productMatches.singleOrNull()
             val recipientQuery = item.recipientName.orEmpty()
             val personMatches = matchingPeople(recipientQuery, people)
@@ -774,7 +766,14 @@ private fun ParsedNoteReviewContent(
                             recipientQuery.isBlank() -> Text("Brak odbiorcy przy tej pozycji", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                             personMatch != null -> Text("Osoba: ${personMatch.listDisplayName()}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                             recipientShipyard != null -> Text("Stocznia: ${recipientShipyard.name}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                            else -> Text("Nie rozpoznano odbiorcy w bazie", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                            else -> {
+                                Text("Nie rozpoznano odbiorcy w bazie", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                                TextButton(onClick = { newPersonItemIndex = index }) {
+                                    Icon(Icons.Default.PersonAdd, null)
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("Dodaj nową osobę")
+                                }
+                            }
                         }
                     }
                     TextButton(onClick = { editingItem = if (editingItem == index) null else index }) {
@@ -921,6 +920,22 @@ private fun ParsedNoteReviewContent(
             dismissButton = { TextButton(onClick = { showPlannedDatePicker = false }) { Text("Anuluj") } },
         ) { DatePicker(state) }
     }
+    newPersonItemIndex?.let { index ->
+        val recognizedName = editedItems.getOrNull(index)?.recipientName.orEmpty()
+        NewOrderPersonDialog(
+            jobPositions = jobPositions,
+            initialRecipient = recognizedName,
+            onDismiss = { newPersonItemIndex = null },
+            onCreate = { first, last, phones, positions, aliases ->
+                onCreatePerson(first, last, phones, positions, aliases) { _, fullName ->
+                    editedItems.getOrNull(index)?.let { current ->
+                        editedItems[index] = current.copy(recipientName = fullName)
+                    }
+                    newPersonItemIndex = null
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -996,24 +1011,39 @@ private fun ConfidenceLabel(confidence: pl.magazyn.mobile.domain.ParseConfidence
     Text(text, color = if (confidence == pl.magazyn.mobile.domain.ParseConfidence.REVIEW) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
 }
 
-private fun matchingProducts(item: pl.magazyn.mobile.domain.ParsedItem, products: List<pl.magazyn.mobile.data.ProductWithStock>): List<pl.magazyn.mobile.data.ProductWithStock> {
-    val nameKey = pl.magazyn.mobile.domain.ImportParser.key(item.name)
-    val variantKey = pl.magazyn.mobile.domain.ImportParser.key(item.variant.orEmpty())
-    return products.mapNotNull { product ->
-        val labels = listOf(product.name) + product.aliases.split(',') + product.tags.split(',')
-        val nameScore = when {
-            pl.magazyn.mobile.domain.ImportParser.key(product.name) == nameKey -> 4
-            labels.any { pl.magazyn.mobile.domain.ImportParser.key(it) == nameKey } -> 3
-            pl.magazyn.mobile.domain.matchesSearch(item.name, product.name, product.aliases, product.tags) -> 1
-            else -> 0
-        }
-        if (nameScore == 0) null else {
-            val variantMatches = variantKey.isBlank() ||
-                pl.magazyn.mobile.domain.ImportParser.key(product.variant.orEmpty()) == variantKey ||
-                (product.aliases.split(',') + product.tags.split(',')).any { pl.magazyn.mobile.domain.ImportParser.key(it) == variantKey }
-            if (!variantMatches) null else product to nameScore
-        }
-    }.sortedWith(compareByDescending<Pair<pl.magazyn.mobile.data.ProductWithStock, Int>> { it.second }.thenBy { it.first.name }.thenBy { it.first.variant.orEmpty() }).map { it.first }
+private fun matchingProducts(
+    item: pl.magazyn.mobile.domain.ParsedItem,
+    products: List<pl.magazyn.mobile.data.ProductWithStock>,
+    strictOfflineMatching: Boolean,
+): List<pl.magazyn.mobile.data.ProductWithStock> {
+    if (!strictOfflineMatching) {
+        val nameKey = pl.magazyn.mobile.domain.ImportParser.key(item.name)
+        val variantKey = pl.magazyn.mobile.domain.ImportParser.key(item.variant.orEmpty())
+        return products.mapNotNull { product ->
+            val labels = listOf(product.name) + product.aliases.split(',') + product.tags.split(',')
+            val nameScore = when {
+                pl.magazyn.mobile.domain.ImportParser.key(product.name) == nameKey -> 4
+                labels.any { pl.magazyn.mobile.domain.ImportParser.key(it) == nameKey } -> 3
+                pl.magazyn.mobile.domain.matchesSearch(item.name, product.name, product.aliases, product.tags) -> 1
+                else -> 0
+            }
+            if (nameScore == 0) null else {
+                val variantMatches = variantKey.isBlank() ||
+                    pl.magazyn.mobile.domain.ImportParser.key(product.variant.orEmpty()) == variantKey ||
+                    (product.aliases.split(',') + product.tags.split(',')).any { pl.magazyn.mobile.domain.ImportParser.key(it) == variantKey }
+                if (!variantMatches) null else product to nameScore
+            }
+        }.sortedWith(compareByDescending<Pair<pl.magazyn.mobile.data.ProductWithStock, Int>> { it.second }.thenBy { it.first.name }.thenBy { it.first.variant.orEmpty() }).map { it.first }
+    }
+    val scored = products.mapNotNull { product ->
+        pl.magazyn.mobile.domain.offlineProductMatchScore(
+            item.name, item.variant, product.name, product.variant, product.aliases, product.tags,
+        )?.let { score -> product to score }
+    }
+    val bestScore = scored.maxOfOrNull { it.second } ?: return emptyList()
+    return scored.filter { it.second == bestScore }
+        .sortedWith(compareBy<Pair<pl.magazyn.mobile.data.ProductWithStock, Int>> { it.first.name }.thenBy { it.first.variant.orEmpty() })
+        .map { it.first }
 }
 
 private fun matchingPeople(query: String, people: List<pl.magazyn.mobile.data.EmployeeSummary>): List<pl.magazyn.mobile.data.EmployeeSummary> {
