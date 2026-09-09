@@ -568,12 +568,6 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
         )
         db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_product_duplicate_decisions_signature ON product_duplicate_decisions(signature)")
 
-        listOf("Mykle", "NK", "Kleven", "Ulstein", "Sandvik", "SK", "M2", "Ulstein 3", "M1", "Idar", "Bjorn Ove").forEachIndexed { index, name ->
-            db.execSQL("INSERT OR IGNORE INTO task_places(id, name, isArchived) VALUES(?, ?, 0)", arrayOf("seed-task-place-$index", name))
-        }
-        db.execSQL("INSERT OR IGNORE INTO task_place_aliases(id, placeId, alias, normalizedAlias) SELECT 'seed-task-alias-ul', id, 'UL', 'ul' FROM task_places WHERE lower(trim(name)) = 'ulstein' LIMIT 1")
-        db.execSQL("INSERT OR IGNORE INTO task_place_aliases(id, placeId, alias, normalizedAlias) SELECT 'seed-task-alias-kl', id, 'KL', 'kl' FROM task_places WHERE lower(trim(name)) = 'kleven' LIMIT 1")
-
         db.execSQL(
             """
             INSERT OR IGNORE INTO task_places(id, name, isArchived)

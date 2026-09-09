@@ -122,7 +122,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
     init {
-        viewModelScope.launch { SeedData(database).ensureCreated() }
+        viewModelScope.launch { SeedData(database).ensureMainWarehouseCreated() }
     }
 
     fun updateQuickInput(value: String) {
