@@ -23,6 +23,7 @@ fun PlacesScreen(contentPadding: PaddingValues, viewModel: TasksViewModel = view
     var query by remember { mutableStateOf("") }
     var adding by remember { mutableStateOf(false) }
     var edited by remember { mutableStateOf<TaskPlaceView?>(null) }
+    val editedPlace = edited?.let { selected -> places.firstOrNull { it.id == selected.id } ?: selected }
     val visible = places.filter { place -> query.isBlank() || (listOf(place.name) + place.aliases.split(',')).any { ImportParser.key(it).contains(ImportParser.key(query)) } }
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -40,7 +41,7 @@ fun PlacesScreen(contentPadding: PaddingValues, viewModel: TasksViewModel = view
         }
     }
     if (adding) SimpleNewPlaceDialog({ adding = false }) { name, aliases, result -> viewModel.createPlace(name, aliases) { error -> result(error); if (error == null) adding = false } }
-    edited?.let { place ->
+    editedPlace?.let { place ->
         PlaceManagementDialog(
             place,
             { edited = null },
@@ -60,12 +61,16 @@ private fun SimpleNewPlaceDialog(onDismiss: () -> Unit, onSave: (String, List<St
 
 @Composable
 private fun PlaceManagementDialog(place: TaskPlaceView, onDismiss: () -> Unit, onRename: (String, String, (String?) -> Unit) -> Unit, onAddAlias: (String, String, (String?) -> Unit) -> Unit, onRemoveAlias: (String, String) -> Unit, onDelete: () -> Unit) {
-    var name by remember(place.id) { mutableStateOf(place.name) }; var alias by remember(place.id) { mutableStateOf("") }; var error by remember { mutableStateOf<String?>(null) }
+    var name by remember(place.id) { mutableStateOf(place.name) }; var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Miejsce → Aliasy") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(name, { name = it }, label = { Text("Nazwa główna") })
-        RemovableValueChips(place.aliases.split(','), onRemove = { onRemoveAlias(place.id, it) }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(alias, { alias = it }, label = { Text("Nowy alias") })
-        OutlinedButton(onClick = { onAddAlias(place.id, alias) { error = it; if (it == null) alias = "" } }, enabled = alias.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Dodaj alias") }
+        EditableChipInput(
+            items = place.aliases.split(','),
+            label = "Nowy alias",
+            onAdd = { alias, done -> onAddAlias(place.id, alias) { error = it; done(it == null) } },
+            onRemove = { onRemoveAlias(place.id, it) },
+            modifier = Modifier.fillMaxWidth(),
+        )
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     } }, confirmButton = { Button(onClick = { onRename(place.id, name) { error = it; if (it == null) onDismiss() } }) { Text("Zapisz") } }, dismissButton = { Row { TextButton(onClick = onDelete, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Icon(Icons.Default.DeleteOutline, null); Text("Usuń") }; TextButton(onClick = onDismiss) { Text("Anuluj") } } })
 }

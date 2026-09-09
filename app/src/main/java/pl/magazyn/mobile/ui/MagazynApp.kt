@@ -32,7 +32,7 @@ fun MagazynApp(modifier: Modifier = Modifier) {
     val homeViewModel: HomeViewModel = viewModel()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route.orEmpty()
-    val isFocusedScreen = currentRoute == "note-review" || currentRoute == "tasks-new" || currentRoute == "product-duplicates" || currentRoute.startsWith("shipyards/") || currentRoute.startsWith("products/") || currentRoute.startsWith("data-exchange/")
+    val isFocusedScreen = currentRoute == "note-review" || currentRoute == "tasks-new" || currentRoute == "product-duplicates" || currentRoute == "data-exchange" || currentRoute.startsWith("shipyards/") || currentRoute.startsWith("products/")
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showQuickAdd by remember { mutableStateOf(false) }
@@ -204,8 +204,7 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
         composable("people/view/{personId}") { entry -> PeopleScreen(contentPadding = padding, initialPersonId = entry.arguments?.getString("personId")) }
         composable("people/issue/{personId}") { entry -> PeopleScreen(contentPadding = padding, initialPersonId = entry.arguments?.getString("personId"), startIssuing = true) }
         composable("history") { HistoryScreen(contentPadding = padding) }
-        composable("data-exchange/import") { DataExchangeScreen(contentPadding = padding, initialTab = 0, onBack = { navController.popBackStack() }) }
-        composable("data-exchange/export") { DataExchangeScreen(contentPadding = padding, initialTab = 1, onBack = { navController.popBackStack() }) }
+        composable("data-exchange") { DataExchangeScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
         composable("shipyards") {
             ShipyardsScreen(contentPadding = padding, onShipyard = { navController.navigate("shipyards/$it") })
         }
@@ -224,8 +223,7 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
                 onAiSettings = { navController.navigate("ai-settings") },
                 onUpdates = { navController.navigate("updates") },
                 onLearningRules = { navController.navigate("learning-rules") },
-                onImport = { navController.navigate("data-exchange/import") },
-                onExport = { navController.navigate("data-exchange/export") },
+                onDataExchange = { navController.navigate("data-exchange") },
             )
         }
         composable("ai-settings") { AiSettingsScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }

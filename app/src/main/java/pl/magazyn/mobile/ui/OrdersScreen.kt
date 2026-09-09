@@ -82,7 +82,6 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
                 onUpdateLine = viewModel::updateLine,
                 onAddLine = { viewModel.addLine(order.id) },
                 onDeleteLine = viewModel::deleteLine,
-                onAddProductTags = viewModel::addProductTags,
                 onCreatePerson = viewModel::createPerson,
                 onCreateProduct = viewModel::createProduct,
                 onCancelOrder = { viewModel.cancelOrder(order.id); selectedId = null },
@@ -134,7 +133,6 @@ private fun OrderDetails(
     onUpdateLine: (String, String?, String, Long, String) -> Unit,
     onAddLine: () -> Unit,
     onDeleteLine: (String) -> Unit,
-    onAddProductTags: (String, String) -> Unit,
     onCreatePerson: (String, String, String, String, String, (String, String) -> Unit) -> Unit,
     onCreateProduct: (String, String, String, Long, String, (ProductWithStock) -> Unit) -> Unit,
     onCancelOrder: () -> Unit,
@@ -225,7 +223,7 @@ private fun OrderDetails(
         Spacer(Modifier.height(16.dp))
     }
     editingLine?.let { line ->
-        OrderLineDialog(line, products, onAddProductTags, onCreateProduct, { editingLine = null }) { product, quantity ->
+        OrderLineDialog(line, products, onCreateProduct, { editingLine = null }) { product, quantity ->
             onUpdateLine(line.id, product?.id, product?.let { it.name + it.variant?.let { v -> " · $v" }.orEmpty() } ?: line.rawText, quantity, product?.unit ?: line.unit)
             editingLine = null
         }
@@ -356,11 +354,10 @@ internal fun NewOrderPersonDialog(jobPositions: List<pl.magazyn.mobile.data.JobP
 }
 
 @Composable
-private fun OrderLineDialog(line: OrderDetailLine, products: List<ProductWithStock>, onAddProductTags: (String, String) -> Unit, onCreateProduct: (String, String, String, Long, String, (ProductWithStock) -> Unit) -> Unit, onDismiss: () -> Unit, onSave: (ProductWithStock?, Long) -> Unit) {
+private fun OrderLineDialog(line: OrderDetailLine, products: List<ProductWithStock>, onCreateProduct: (String, String, String, Long, String, (ProductWithStock) -> Unit) -> Unit, onDismiss: () -> Unit, onSave: (ProductWithStock?, Long) -> Unit) {
     var query by rememberSaveable(line.id) { mutableStateOf(line.productName ?: line.rawText) }
     var selectedId by rememberSaveable(line.id) { mutableStateOf(line.productId) }
     var quantity by rememberSaveable(line.id) { mutableStateOf(line.quantity.toLong().toString()) }
-    var tags by rememberSaveable(line.id) { mutableStateOf("") }
     var addingProduct by remember { mutableStateOf(false) }
     var createdProduct by remember { mutableStateOf<ProductWithStock?>(null) }
     val availableProducts = createdProduct?.let { products + it } ?: products
@@ -389,10 +386,6 @@ private fun OrderLineDialog(line: OrderDetailLine, products: List<ProductWithSto
                         unit = product.unit,
                     )
                 }
-            }
-            if (selectedId != null) {
-                OutlinedTextField(tags, { tags = it }, Modifier.fillMaxWidth(), label = { Text("Dopisz tagi do przedmiotu") })
-                TextButton(onClick = { selectedId?.let { onAddProductTags(it, tags) }; tags = "" }, enabled = tags.isNotBlank()) { Text("Zapisz tagi") }
             }
             OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), label = { Text("Ilość") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
         } },

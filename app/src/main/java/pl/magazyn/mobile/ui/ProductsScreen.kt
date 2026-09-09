@@ -215,10 +215,28 @@ private fun ProductEditor(
             )
         }
         EditableChoiceField(category, { category = it }, "Kategoria", categories)
-        OutlinedTextField(aliases, { aliases = it }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Aliasy, oddzielone przecinkami") })
-        RemovableValueChips(aliases.split(','), onRemove = { removed -> aliases = aliases.split(',').map(String::trim).filter { !it.equals(removed, true) && it.isNotBlank() }.joinToString(", ") })
-        OutlinedTextField(tags, { tags = it }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Tagi, oddzielone przecinkami") })
-        RemovableValueChips(tags.split(','), onRemove = { removed -> tags = tags.split(',').map(String::trim).filter { !it.equals(removed, true) && it.isNotBlank() }.joinToString(", ") })
+        EditableChipInput(
+            items = aliases.split(','),
+            label = "Nowy alias",
+            onAdd = { value, done ->
+                val current = aliases.split(',').map(String::trim).filter(String::isNotBlank)
+                val canAdd = value.isNotBlank() && current.none { it.equals(value, ignoreCase = true) }
+                if (canAdd) aliases = (current + value).joinToString(", ")
+                done(canAdd)
+            },
+            onRemove = { removed -> aliases = aliases.split(',').map(String::trim).filter { !it.equals(removed, true) && it.isNotBlank() }.joinToString(", ") },
+        )
+        EditableChipInput(
+            items = tags.split(','),
+            label = "Nowy tag",
+            onAdd = { value, done ->
+                val current = tags.split(',').map(String::trim).filter(String::isNotBlank)
+                val canAdd = value.isNotBlank() && current.none { it.equals(value, ignoreCase = true) }
+                if (canAdd) tags = (current + value).joinToString(", ")
+                done(canAdd)
+            },
+            onRemove = { removed -> tags = tags.split(',').map(String::trim).filter { !it.equals(removed, true) && it.isNotBlank() }.joinToString(", ") },
+        )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 threshold,

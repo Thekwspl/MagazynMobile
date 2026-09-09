@@ -14,8 +14,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.ImportExport
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,8 +42,7 @@ fun SettingsScreen(
     onAiSettings: () -> Unit,
     onUpdates: () -> Unit,
     onLearningRules: () -> Unit,
-    onImport: () -> Unit,
-    onExport: () -> Unit,
+    onDataExchange: () -> Unit,
 ) {
     val context = LocalContext.current
     val visibilityStore = remember(context) {
@@ -58,8 +56,7 @@ fun SettingsScreen(
         SettingsItem(Icons.Default.AutoAwesome, "Ustawienia AI", "Klucz Gemini i prywatność notatek", onAiSettings)
         SettingsItem(Icons.Default.SystemUpdate, "Aktualizacje", "Sprawdzanie i instalowanie nowej wersji", onUpdates)
         SettingsItem(Icons.Default.Psychology, "Uczenie offline", "Reguły używane bez internetu", onLearningRules)
-        SettingsItem(Icons.Default.UploadFile, "Import danych", "Wczytaj dane z pliku", onImport)
-        SettingsItem(Icons.Default.FileDownload, "Eksport danych", "Zapisz i udostępnij dane", onExport)
+        SettingsItem(Icons.Default.ImportExport, "Import i Eksport danych", "Import, eksport i kopie zapasowe", onDataExchange)
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Wyświetl ukryte przedmioty", fontWeight = FontWeight.SemiBold)
