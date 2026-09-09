@@ -45,7 +45,6 @@ fun HomeScreen(
     val pendingImportDetails by viewModel.pendingImportDetails.collectAsStateWithLifecycle()
     val products by viewModel.products.collectAsStateWithLifecycle()
     val people by viewModel.people.collectAsStateWithLifecycle()
-    val jobPositions by viewModel.jobPositions.collectAsStateWithLifecycle()
     val aiAnalysis by viewModel.aiAnalysis.collectAsStateWithLifecycle()
     val duplicateDecisions by viewModel.duplicateDecisions.collectAsStateWithLifecycle()
     val query by viewModel.quickInput.collectAsStateWithLifecycle()
@@ -190,6 +189,7 @@ fun ParsedNoteReviewScreen(
 ) {
     val review by viewModel.noteReview.collectAsStateWithLifecycle()
     val people by viewModel.people.collectAsStateWithLifecycle()
+    val jobPositions by viewModel.jobPositions.collectAsStateWithLifecycle()
     // Rozpoznanie może wskazać archiwalnie używany, ukryty produkt; decyzję zostawia użytkownikowi.
     val products by viewModel.allProducts.collectAsStateWithLifecycle()
     val shipyards by viewModel.shipyards.collectAsStateWithLifecycle()
