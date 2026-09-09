@@ -87,13 +87,39 @@ jobs:
         shell: bash
         run: printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/magazyn-release.jks"
 
-      - name: Testy i podpisany build
+      - name: Testy
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/magazyn-release.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle test assembleRelease --no-daemon
+        # Warianty KSP eksportują schemat Room do wspólnego app/schemas.
+        # Jeden worker zapobiega równoczesnemu zapisowi częściowego pliku JSON.
+        run: gradle test --no-daemon --max-workers=1
+
+      - name: Sprawdź eksportowane schematy Room
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          schemas = sorted(Path("app/schemas").rglob("*.json"))
+          if not schemas:
+              raise SystemExit("Nie znaleziono eksportowanych schematów Room")
+          for schema in schemas:
+              with schema.open(encoding="utf-8") as source:
+                  json.load(source)
+              print(f"Poprawny JSON: {schema}")
+          PY
+
+      - name: Podpisany build release
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/magazyn-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon --max-workers=1
 
       - name: Sprawdź podpis APK
         run: |
