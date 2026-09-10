@@ -336,7 +336,7 @@ private fun ShipyardReturnDialog(
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 540.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(shipyard.name, fontWeight = FontWeight.SemiBold)
-                OutlinedButton(onClick = { showDatePicker = true }, Modifier.fillMaxWidth()) { Text("Data zwrotu: ${formatDisplayDate(date)}") }
+                OutlinedButton(onClick = { showDatePicker = true }, Modifier.fillMaxWidth()) { Text(formatDisplayDate(date)) }
                 stock.forEach { item ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -445,7 +445,7 @@ private fun ShipyardLeadersDialog(
         text = { Column(Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
             OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Wyszukaj osobę") }, singleLine = true)
             Text("Możesz przypisać więcej niż jedną osobę.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 6.dp))
-            LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).suggestionMenuHeight()) {
                 items(visible, key = { it.id }) { person ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(chosen[person.id] == true, { chosen[person.id] = it })
@@ -476,7 +476,7 @@ private fun ShipyardProductLine(
             line.query, product.name, product.variant.orEmpty(), product.aliases,
             product.tags, product.category, product.groupName, product.subgroupName,
         )
-    }.take(4)
+    }
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -490,7 +490,7 @@ private fun ShipyardProductLine(
                 label = { Text("Nazwa lub wariant") },
                 singleLine = true,
             )
-            if (line.showSuggestions) suggestions.forEach { product ->
+            if (line.showSuggestions) SuggestionList(suggestions, key = { it.id }) { product ->
                 OutlinedCard(onClick = {
                     onChange(line.copy(productId = product.id, query = product.name + product.variant?.let { " · $it" }.orEmpty(), showSuggestions = false))
                 }, modifier = Modifier.fillMaxWidth()) {

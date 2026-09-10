@@ -50,13 +50,22 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { database.employeeDao().archive(employeeId) }
     }
 
-    fun savePerson(existing: EmployeeSummary?, firstName: String, lastName: String, phoneNumbers: String, positionNames: String, aliases: String, tags: String) {
+    fun savePerson(
+        existing: EmployeeSummary?,
+        firstName: String,
+        lastName: String,
+        phoneNumbers: String,
+        positionNames: String,
+        aliases: String,
+        tags: String,
+        onSaved: (String) -> Unit = {},
+    ) {
         val normalizedFirstName = normalizeFirstName(firstName)
         val normalizedLastName = normalizePersonName(lastName)
         if (normalizedFirstName.isBlank() || normalizedLastName.isBlank()) return
+        val employeeId = existing?.id ?: UUID.randomUUID().toString()
         viewModelScope.launch {
             database.withTransaction {
-                val employeeId = existing?.id ?: UUID.randomUUID().toString()
                 val employee = EmployeeEntity(
                     id = employeeId,
                     fullName = "$normalizedFirstName $normalizedLastName",
@@ -82,6 +91,7 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
             }
+            onSaved(employeeId)
         }
     }
 

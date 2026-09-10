@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -127,18 +128,33 @@ private fun TaskCard(
     onDelete: () -> Unit,
 ) {
     val context = LocalContext.current
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(10.dp)) {
-            Row(verticalAlignment = Alignment.Top) {
-                Checkbox(task.isCompleted, onCompleted)
-                Column(Modifier.weight(1f).padding(top = 8.dp)) {
+    var expanded by rememberSaveable(task.id) { mutableStateOf(!task.isCompleted) }
+    LaunchedEffect(task.isCompleted) { expanded = !task.isCompleted }
+    val collapsed = task.isCompleted && !expanded
+    StructuredWorkCard(
+        expanded = !collapsed,
+        onClick = { if (task.isCompleted) expanded = !expanded },
+        header = {
+                if (!collapsed) Checkbox(task.isCompleted, onCompleted)
+                Column(Modifier.weight(1f).padding(top = if (collapsed) 2.dp else 8.dp)) {
                     Text(task.text, fontWeight = FontWeight.SemiBold, color = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
                     task.dueDate?.let { Text(formatDisplayDate(it), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
-                    task.description.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    task.description.takeIf(String::isNotBlank)?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = if (collapsed) 2 else Int.MAX_VALUE,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
-                IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Edytuj") }
-                IconButton(onClick = onDelete) { Icon(Icons.Default.DeleteOutline, "Usuń") }
-            }
+                if (!collapsed) {
+                    IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Edytuj") }
+                    IconButton(onClick = onDelete) { Icon(Icons.Default.DeleteOutline, "Usuń") }
+                }
+        },
+    ) {
             steps.forEach { step ->
                 Column(Modifier.fillMaxWidth().padding(start = 22.dp, top = 4.dp).alpha(if (step.isCompleted) 0.55f else 1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -165,7 +181,6 @@ private fun TaskCard(
             task.linkedProductName?.let { ProductInfo(it, task.linkedProductVariant, task.linkedProductGroup.orEmpty(), task.linkedProductSubgroup.orEmpty(), Modifier.padding(start = 48.dp, top = 6.dp)) }
             task.shipyardName?.let { Text("Stocznia: $it", Modifier.padding(start = 48.dp), style = MaterialTheme.typography.bodySmall) }
             task.orderName?.let { Text("Zamówienie: $it", Modifier.padding(start = 48.dp), style = MaterialTheme.typography.bodySmall) }
-        }
     }
 }
 
@@ -252,9 +267,9 @@ private fun PlacePicker(step: ParsedTaskStep, places: List<TaskPlaceView>, onCha
     var query by remember(step.placeId, step.placeText) { mutableStateOf(step.placeText) }
     var showNew by remember { mutableStateOf(false) }; var showAlias by remember { mutableStateOf(false) }
     val key = ImportParser.key(query)
-    val matches = if (query.isBlank()) places.take(6) else places.filter { place -> (listOf(place.name) + place.aliases.split(',')).any { ImportParser.key(it).contains(key) } }.take(6)
+    val matches = if (query.isBlank()) places else places.filter { place -> (listOf(place.name) + place.aliases.split(',')).any { ImportParser.key(it).contains(key) } }
     OutlinedTextField(query, { query = it; onChange(step.copy(placeId = null, placeText = it)) }, Modifier.fillMaxWidth(), label = { Text("Miejsce") }, leadingIcon = { Icon(Icons.Default.LocationOn, null) }, trailingIcon = { Row { if (step.placeId != null) IconButton(onClick = { showAlias = true }) { Icon(Icons.Default.Edit, "Edytuj aliasy") }; IconButton(onClick = { showNew = true }) { Icon(Icons.Default.AddLocation, "Dodaj miejsce") } } }, singleLine = true)
-    if (step.placeId == null) matches.forEach { place -> Surface(Modifier.fillMaxWidth().clickable { query = place.name; onChange(step.copy(placeId = place.id, placeText = place.name)) }, color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) { Column(Modifier.padding(9.dp)) { Text(place.name); place.aliases.takeIf(String::isNotBlank)?.let { Text("Aliasy: $it", style = MaterialTheme.typography.labelSmall) } } } }
+    if (step.placeId == null) SuggestionList(matches, key = { it.id }) { place -> Surface(Modifier.fillMaxWidth().clickable { query = place.name; onChange(step.copy(placeId = place.id, placeText = place.name)) }, color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) { Column(Modifier.padding(9.dp)) { Text(place.name); place.aliases.takeIf(String::isNotBlank)?.let { Text("Aliasy: $it", style = MaterialTheme.typography.labelSmall) } } } }
     if (showNew) PlaceDialog(query, { showNew = false }) { name, aliases, result -> onCreatePlace(name, aliases) { error -> result(error); if (error == null) { query = normalizeDisplayName(name); showNew = false } } }
     if (showAlias && step.placeId != null) AliasDialog({ showAlias = false }) { alias, result -> onAddAlias(step.placeId, alias) { error -> result(error); if (error == null) showAlias = false } }
 }
@@ -274,27 +289,27 @@ private fun AliasDialog(onDismiss: () -> Unit, onSave: (String, (String?) -> Uni
 @Composable
 private fun PeoplePicker(people: List<EmployeeSummary>, selected: List<ParsedTaskPerson>, onSelected: (List<ParsedTaskPerson>) -> Unit) {
     var query by remember { mutableStateOf("") }
-    val matches = if (query.isBlank()) emptyList() else people.filter { matchesSearch(query, it.fullName, it.aliases, it.tags) && selected.none { chosen -> chosen.employeeId == it.id } }.take(5)
+    val matches = if (query.isBlank()) emptyList() else people.filter { matchesSearch(query, it.fullName, it.aliases, it.tags) && selected.none { chosen -> chosen.employeeId == it.id } }
     selected.forEachIndexed { index, person -> Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(person.displayText); person.note.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.labelSmall) } }; IconButton(onClick = { onSelected(selected.toMutableList().also { it.removeAt(index) }) }) { Icon(Icons.Default.Clear, "Usuń") } } }
     OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("Wyszukaj osobę") }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true)
-    matches.forEach { person -> Surface(Modifier.fillMaxWidth().clickable { onSelected(selected + ParsedTaskPerson(person.id, person.listDisplayName(), confidence = ParseConfidence.CERTAIN)); query = "" }, color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) { Text(person.listDisplayName(), Modifier.padding(10.dp)) } }
+    SuggestionList(matches, key = { it.id }) { person -> Surface(Modifier.fillMaxWidth().clickable { onSelected(selected + ParsedTaskPerson(person.id, person.listDisplayName(), confidence = ParseConfidence.CERTAIN)); query = "" }, color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) { Text(person.listDisplayName(), Modifier.padding(10.dp)) } }
 }
 
 @Composable
 private fun <T> RelationPicker(label: String, selectedId: String?, choices: List<T>, id: (T) -> String, title: (T) -> String, onSelected: (String?) -> Unit) {
     var query by remember(selectedId, choices) { mutableStateOf(choices.firstOrNull { id(it) == selectedId }?.let(title).orEmpty()) }
-    val matches = if (query.isBlank()) emptyList() else choices.filter { ImportParser.key(title(it)).contains(ImportParser.key(query)) }.take(4)
+    val matches = if (query.isBlank()) emptyList() else choices.filter { ImportParser.key(title(it)).contains(ImportParser.key(query)) }
     OutlinedTextField(query, { query = it; onSelected(null) }, Modifier.fillMaxWidth(), label = { Text("$label (opcjonalnie)") }, singleLine = true)
-    if (selectedId == null) matches.forEach { choice -> Surface(Modifier.fillMaxWidth().clickable { query = title(choice); onSelected(id(choice)) }, color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) { Text(title(choice), Modifier.padding(8.dp)) } }
+    if (selectedId == null) SuggestionList(matches, key = id) { choice -> Surface(Modifier.fillMaxWidth().clickable { query = title(choice); onSelected(id(choice)) }, color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) { Text(title(choice), Modifier.padding(8.dp)) } }
 }
 
 @Composable
 private fun ProductRelationPicker(selectedId: String?, products: List<ProductWithStock>, onSelected: (String?) -> Unit) {
     val selected = products.firstOrNull { it.id == selectedId }
     var query by remember(selectedId, products) { mutableStateOf(selected?.let { it.name + " " + it.variant.orEmpty() }.orEmpty()) }
-    val matches = if (query.isBlank()) emptyList() else products.filter { matchesSearch(query, it.name, it.variant.orEmpty(), it.groupName, it.subgroupName, it.aliases, it.tags) }.take(5)
+    val matches = if (query.isBlank()) emptyList() else products.filter { matchesSearch(query, it.name, it.variant.orEmpty(), it.groupName, it.subgroupName, it.aliases, it.tags) }
     OutlinedTextField(query, { query = it; onSelected(null) }, Modifier.fillMaxWidth(), label = { Text("Przedmiot (opcjonalnie)") }, singleLine = true)
-    if (selectedId == null) matches.forEach { product ->
+    if (selectedId == null) SuggestionList(matches, key = { it.id }) { product ->
         Surface(Modifier.fillMaxWidth().clickable { query = product.name + " " + product.variant.orEmpty(); onSelected(product.id) }, color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) {
             ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.padding(8.dp))
         }

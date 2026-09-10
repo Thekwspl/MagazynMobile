@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -32,6 +33,8 @@ fun MagazynApp(modifier: Modifier = Modifier) {
     val homeViewModel: HomeViewModel = viewModel()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route.orEmpty()
+    val density = LocalDensity.current
+    val isImeVisible = WindowInsets.ime.getBottom(density) > 0
     val isFocusedScreen = currentRoute == "note-review" || currentRoute == "tasks-new" || currentRoute == "product-duplicates" || currentRoute == "data-exchange" || currentRoute.startsWith("shipyards/") || currentRoute.startsWith("products/")
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -81,7 +84,7 @@ fun MagazynApp(modifier: Modifier = Modifier) {
         Scaffold(
             modifier = modifier,
             bottomBar = {
-                if (!isFocusedScreen) NavigationBar {
+                if (!isFocusedScreen && !isImeVisible) NavigationBar {
                     NavigationBarItem(
                         selected = backStack?.destination?.route == "home",
                         onClick = { goTo("home") },
@@ -161,6 +164,7 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
                 onTasks = { navController.navigate("tasks") },
                 onReview = { navController.navigate("note-review") },
                 onQuickIssue = { navController.navigate("find-issue") },
+                onNewEmployee = { navController.navigate("people/new-issue") },
                 onPerson = { navController.navigate("people/view/$it") },
                 onProduct = { navController.navigate("products/view/$it") },
                 onDuplicates = { navController.navigate("product-duplicates") },
@@ -201,6 +205,7 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
         }
         composable("people") { PeopleScreen(contentPadding = padding) }
         composable("people/new") { PeopleScreen(contentPadding = padding, startAdding = true) }
+        composable("people/new-issue") { PeopleScreen(contentPadding = padding, startAdding = true, startIssuingAfterCreate = true) }
         composable("people/view/{personId}") { entry -> PeopleScreen(contentPadding = padding, initialPersonId = entry.arguments?.getString("personId")) }
         composable("people/issue/{personId}") { entry -> PeopleScreen(contentPadding = padding, initialPersonId = entry.arguments?.getString("personId"), startIssuing = true) }
         composable("history") { HistoryScreen(contentPadding = padding) }

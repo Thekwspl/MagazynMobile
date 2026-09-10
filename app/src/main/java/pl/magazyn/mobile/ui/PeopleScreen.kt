@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -43,6 +44,7 @@ fun PeopleScreen(
     startAdding: Boolean = false,
     initialPersonId: String? = null,
     startIssuing: Boolean = false,
+    startIssuingAfterCreate: Boolean = false,
     viewModel: PeopleViewModel = viewModel(),
 ) {
     val people by viewModel.people.collectAsStateWithLifecycle()
@@ -82,8 +84,10 @@ fun PeopleScreen(
     if (showNew) {
         ModalBottomSheet(sheetState = newPersonSheetState, onDismissRequest = { showNew = false }) {
             PersonEditor(null, jobPositions, { showNew = false }) { existing, firstName, lastName, phones, positions, aliases, tags ->
-                viewModel.savePerson(existing, firstName, lastName, phones, positions, aliases, tags)
-                showNew = false
+                viewModel.savePerson(existing, firstName, lastName, phones, positions, aliases, tags) { createdId ->
+                    showNew = false
+                    if (startIssuingAfterCreate) selectedId = createdId
+                }
             }
         }
     }
@@ -98,7 +102,7 @@ fun PeopleScreen(
                 possessions = possessions,
                 history = history,
                 jobPositions = jobPositions,
-                startIssuing = startIssuing,
+                startIssuing = startIssuing || startIssuingAfterCreate,
                 onClose = { selectedId = null },
                 onSave = { existing, firstName, lastName, phones, positions, aliases, tags -> viewModel.savePerson(existing, firstName, lastName, phones, positions, aliases, tags) },
                 onIssue = { items, date -> viewModel.issueToPerson(person.id, items, date) },
@@ -363,7 +367,7 @@ private fun IssueCorrectionDialog(
     val tokens = query.split(Regex("\\s+")).filter(String::isNotBlank)
     val suggestions = products.filter { product ->
         tokens.isNotEmpty() && matchesSearch(query, product.name, product.variant.orEmpty(), product.aliases, product.tags)
-    }.take(6)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -380,7 +384,7 @@ private fun IssueCorrectionDialog(
                     enabled = issue.returnedQuantity == 0.0,
                 )
                 if (issue.returnedQuantity > 0) Text("Po zapisanym zwrocie można zmienić ilość i datę, ale nie rodzaj przedmiotu.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (showSuggestions && issue.returnedQuantity == 0.0) suggestions.forEach { product ->
+                if (showSuggestions && issue.returnedQuantity == 0.0) SuggestionList(suggestions, key = { it.id }) { product ->
                     OutlinedCard(
                         onClick = {
                             productId = product.id
@@ -403,7 +407,7 @@ private fun IssueCorrectionDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                 )
-                OutlinedButton(onClick = { showDatePicker = true }, Modifier.fillMaxWidth()) { Text("Data operacji: ${formatDisplayDate(date)}") }
+                OutlinedButton(onClick = { showDatePicker = true }, Modifier.fillMaxWidth()) { Text(formatDisplayDate(date)) }
                 HorizontalDivider()
                 OutlinedTextField(
                     returnQuantity,
@@ -508,14 +512,16 @@ private fun IssueForm(products: List<ProductWithStock>, history: List<EmployeeIs
                     }
                 }
             }
-            OutlinedButton(
-                onClick = { lines.add(NewIssueLine()); confirmNegative = false },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Default.Add, null)
-                Text("Dodaj kolejny przedmiot")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { lines.add(NewIssueLine()); confirmNegative = false },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.Add, null)
+                    Text("Dodaj kolejny przedmiot", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                OutlinedButton(onClick = { showDatePicker = true }) { Text(formatDisplayDate(date), maxLines = 1) }
             }
-            OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth()) { Text("Data wydania: " + formatDisplayDate(date)) }
             if (createsNegative) {
                 Text("Co najmniej jedna pozycja utworzy stan ujemny.", color = MaterialTheme.colorScheme.error)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -568,7 +574,7 @@ private fun IssueLineEditor(
             line.productQuery, product.name, product.variant.orEmpty(), product.aliases, product.tags,
             product.category, product.groupName, product.subgroupName,
         )
-    }.take(4)
+    }
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -584,7 +590,7 @@ private fun IssueLineEditor(
                 singleLine = true,
             )
             if (line.suggestionsVisible && suggestions.isNotEmpty()) {
-                suggestions.forEach { product ->
+                SuggestionList(suggestions, key = { it.id }) { product ->
                     OutlinedCard(
                         onClick = {
                             onChange(

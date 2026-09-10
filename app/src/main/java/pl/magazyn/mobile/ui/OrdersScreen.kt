@@ -13,6 +13,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -52,39 +54,9 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
         } else {
             LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 items(orders, key = { it.id }) { order ->
-                    OutlinedCard(onClick = {
+                    ApprovedOrderCard(order, viewModel::lines) {
                         selectedId = order.id
                         selectedPartId = order.parts.singleOrNull()?.id
-                    }, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                                Text(
-                                    if (order.parts.size == 1) order.parts.first().recipient.ifBlank { "Nieprzypisany odbiorca" }
-                                    else "Zamówienie · ${order.parts.size} odbiorców",
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                Text(formatDisplayDate(order.plannedIssueDate), style = MaterialTheme.typography.labelMedium)
-                            }
-                            LinearProgressIndicator(
-                                progress = { if (order.lineCount == 0) 0f else order.preparedCount.toFloat() / order.lineCount },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Text("Przygotowano ${order.preparedCount} z ${order.lineCount}", style = MaterialTheme.typography.bodySmall)
-                            if (order.parts.size > 1) {
-                                Text(
-                                    order.parts.joinToString(" · ") { it.recipient.ifBlank { "Bez odbiorcy" } },
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            } else {
-                                val part = order.parts.first()
-                                if (part.employeeId == null && part.siteLabel.isNullOrBlank()) Text("Nie rozpoznano osoby — otwórz i przypisz", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
-                                part.siteLabel?.takeIf(String::isNotBlank)?.let { Text("Stocznia: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
-                            }
-                            if (order.unmappedCount > 0) Text("${order.unmappedCount} pozycji wymaga przypisania produktu", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
-                        }
                     }
                 }
             }
@@ -153,6 +125,80 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
             },
             confirmButton = { Button(onClick = viewModel::confirmIssueDespiteWarning) { Text("Wydaj mimo to") } },
             dismissButton = { TextButton(onClick = viewModel::dismissIssueWarning) { Text("Anuluj") } },
+        )
+    }
+}
+
+@Composable
+private fun ApprovedOrderCard(
+    order: OrderGroupSummary,
+    linesFlow: (String) -> kotlinx.coroutines.flow.Flow<List<OrderDetailLine>>,
+    onOpen: () -> Unit,
+) {
+    val expandedRecipients = remember(order.id) { mutableStateListOf<String>() }
+    val hasPeople = order.parts.any { it.employeeId != null }
+    val showRecipientGroups = hasPeople || order.parts.size > 1
+    StructuredWorkCard(
+        expanded = true,
+        onClick = onOpen,
+        header = {
+            Column(Modifier.weight(1f)) {
+                Text("Zamówienie", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Przygotowano ${order.preparedCount} z ${order.lineCount}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(formatDisplayDate(order.plannedIssueDate), style = MaterialTheme.typography.labelMedium)
+        },
+    ) {
+        LinearProgressIndicator(
+            progress = { if (order.lineCount == 0) 0f else order.preparedCount.toFloat() / order.lineCount },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        )
+        order.parts.forEach { part ->
+            key(part.id) {
+                val lines by remember(part.id) { linesFlow(part.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
+                if (showRecipientGroups) {
+                    val expanded = part.id in expandedRecipients
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            if (expanded) expandedRecipients.remove(part.id) else expandedRecipients.add(part.id)
+                        },
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(part.recipient.ifBlank { "Bez odbiorcy" }, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                            Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "Zwiń" else "Rozwiń")
+                        }
+                    }
+                    if (expanded) lines.forEach { line -> OrderProductLine(line) }
+                } else {
+                    lines.forEach { line -> OrderProductLine(line) }
+                }
+            }
+        }
+        if (order.unmappedCount > 0) {
+            Text("${order.unmappedCount} pozycji wymaga przypisania produktu", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable
+private fun OrderProductLine(line: OrderDetailLine) {
+    Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(line.isPrepared, onCheckedChange = null)
+        if (line.productName != null) {
+            ProductInfo(line.productName, line.productVariant, line.groupName.orEmpty(), line.subgroupName.orEmpty(), Modifier.weight(1f))
+        } else {
+            Text(line.rawText, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+        }
+        Text(
+            "${formatWholeQuantity(line.quantity)} ${line.unit}",
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
         )
     }
 }
@@ -388,7 +434,7 @@ private fun OrderPersonPickerDialog(
                 if (matches.isEmpty()) {
                     Text("Nie znaleziono osoby. Możesz dodać ją bez wychodzenia z zamówienia.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 } else {
-                    LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    LazyColumn(Modifier.suggestionMenuHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         items(matches, key = { it.id }) { person ->
                             OutlinedCard(
                                 onClick = { onSelect(person) },
@@ -444,7 +490,7 @@ private fun OrderLineDialog(line: OrderDetailLine, products: List<ProductWithSto
     val tokens = query.split(Regex("\\s+")).filter(String::isNotBlank)
     val matches = availableProducts.map { product ->
         product to tokens.count { token -> pl.magazyn.mobile.domain.matchesSearch(token, product.name, product.variant.orEmpty(), product.aliases, product.tags, product.groupName, product.subgroupName, product.category) }
-    }.filter { it.second > 0 }.sortedByDescending { it.second }.map { it.first }.take(8)
+    }.filter { it.second > 0 }.sortedByDescending { it.second }.map { it.first }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Popraw pozycję") },
@@ -454,7 +500,7 @@ private fun OrderLineDialog(line: OrderDetailLine, products: List<ProductWithSto
                 Text("Nie rozpoznano przedmiotu.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = { addingProduct = true }) { Text("+ Dodaj nowy przedmiot bez wychodzenia") }
             }
-            matches.forEach { product ->
+            SuggestionList(matches, key = { it.id }) { product ->
                 OutlinedCard(onClick = { selectedId = product.id; query = product.name + product.variant?.let { " · $it" }.orEmpty() }, Modifier.fillMaxWidth(), colors = if (selectedId == product.id) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.outlinedCardColors()) {
                     ProductInfo(
                         product.name,

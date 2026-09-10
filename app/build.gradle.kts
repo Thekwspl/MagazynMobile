@@ -18,8 +18,8 @@ android {
         applicationId = "pl.magazyn.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 51
-        versionName = "0.9.29"
+        versionCode = 52
+        versionName = "0.9.30"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

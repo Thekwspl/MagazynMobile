@@ -114,12 +114,14 @@ fun OperationsScreen(contentPadding: PaddingValues, viewModel: OperationsViewMod
             )
         }
         item {
-            OutlinedButton(onClick = { lines.add(OperationDraftLine()) }, Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Add, null)
-                Text("Dodaj kolejny przedmiot")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { lines.add(OperationDraftLine()) }, Modifier.weight(1f)) {
+                    Icon(Icons.Default.Add, null)
+                    Text("Dodaj kolejny przedmiot", maxLines = 1)
+                }
+                OutlinedButton(onClick = { showDatePicker = true }) { Text(formatDisplayDate(date), maxLines = 1) }
             }
         }
-        item { OutlinedButton(onClick = { showDatePicker = true }, Modifier.fillMaxWidth()) { Text("Data operacji: ${formatDisplayDate(date)}") } }
         if (createsNegative) item {
             Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
                 Column(Modifier.padding(10.dp)) {
@@ -204,7 +206,7 @@ private fun OperationProductLine(
             line.query, product.name, product.variant.orEmpty(), product.aliases,
             product.tags, product.groupName, product.subgroupName,
         )
-    }.take(5)
+    }
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -216,7 +218,7 @@ private fun OperationProductLine(
                 { onChange(line.copy(query = it, productId = "", suggestionsVisible = true)) },
                 Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Przedmiot") }, singleLine = true,
             )
-            if (line.suggestionsVisible) matches.forEach { product ->
+            if (line.suggestionsVisible) SuggestionList(matches, key = { it.id }) { product ->
                 OutlinedCard(onClick = {
                     onChange(line.copy(productId = product.id, query = product.name + product.variant?.let { " · $it" }.orEmpty(), suggestionsVisible = false))
                 }, modifier = Modifier.fillMaxWidth()) {

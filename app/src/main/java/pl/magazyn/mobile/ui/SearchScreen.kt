@@ -91,13 +91,14 @@ fun SearchScreen(
                 item { Text("Przedmioty", style = MaterialTheme.typography.titleMedium) }
                 items(matchingProducts.size, key = { matchingProducts[it].id }) { index ->
                     val product = matchingProducts[index]
-                    OutlinedCard(onClick = { onProduct(product.id) }, modifier = Modifier.fillMaxWidth()) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedCard(onClick = { onProduct(product.id) }, modifier = Modifier.fillMaxWidth(), colors = productListCardColors(product.isHidden)) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = if (product.isHidden) 7.dp else 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Inventory2, null)
                             ProductInfo(
                                 product.name, product.variant, product.groupName, product.subgroupName,
                                 modifier = Modifier.padding(start = 10.dp).weight(1f),
                                 stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit,
+                                isHidden = product.isHidden,
                             )
                         }
                     }

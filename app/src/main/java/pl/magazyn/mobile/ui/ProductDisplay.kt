@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.CardColors
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -29,6 +31,13 @@ fun productRowText(name: String, variant: String?, groupName: String, subgroupNa
     )
 
 @Composable
+fun productListCardColors(isHidden: Boolean): CardColors = if (isHidden) {
+    CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f))
+} else {
+    CardDefaults.outlinedCardColors()
+}
+
+@Composable
 fun ProductInfo(
     name: String,
     variant: String?,
@@ -38,6 +47,7 @@ fun ProductInfo(
     /** Stan tylko dla ekranów, które znają właściwy magazyn/kontekst. */
     stockQuantity: Double? = null,
     unit: String? = null,
+    isHidden: Boolean = false,
 ) {
     Row(modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -45,8 +55,10 @@ fun ProductInfo(
                 val title = listOf(name.trim(), variant?.trim().orEmpty()).filter(String::isNotBlank).joinToString(" • ")
                 Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
-            productSecondaryLine(groupName, subgroupName).takeIf(String::isNotBlank)?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            val secondary = productSecondaryLine(groupName, subgroupName)
+            if (secondary.isNotBlank() || isHidden) Row(Modifier.fillMaxWidth()) {
+                if (secondary.isNotBlank()) Text(secondary, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                if (isHidden) Text("Ukryty", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
         }
         if (stockQuantity != null) {

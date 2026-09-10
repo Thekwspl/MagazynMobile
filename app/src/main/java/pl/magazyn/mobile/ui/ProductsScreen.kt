@@ -98,24 +98,18 @@ fun ProductsScreen(
                 OutlinedCard(
                     onClick = { onProduct(product.id) },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = if (product.isHidden) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)) else CardDefaults.outlinedCardColors(),
+                    colors = productListCardColors(product.isHidden),
                 ) {
                     Column {
-                        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = if (product.isHidden) 6.dp else 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Inventory2, null)
                             ProductInfo(
                                 product.name, product.variant, product.groupName, product.subgroupName,
                                 stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit,
+                                isHidden = product.isHidden,
                                 modifier = Modifier.padding(start = 10.dp).weight(1f),
                             )
                         }
-                        if (product.isHidden) Text(
-                            "Ukryty",
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 7.dp),
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
             }
@@ -354,7 +348,7 @@ private fun EditableChoiceField(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val suggestions = options.filter { value.isBlank() || it.contains(value, true) }.take(8)
+    val suggestions = options.filter { value.isBlank() || it.contains(value, true) }
     ExposedDropdownMenuBox(expanded = expanded && suggestions.isNotEmpty(), onExpandedChange = { expanded = it }, modifier = modifier) {
         OutlinedTextField(
             value = value,
@@ -364,7 +358,7 @@ private fun EditableChoiceField(
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             singleLine = true,
         )
-        ExposedDropdownMenu(expanded = expanded && suggestions.isNotEmpty(), onDismissRequest = { expanded = false }) {
+        ExposedDropdownMenu(expanded = expanded && suggestions.isNotEmpty(), onDismissRequest = { expanded = false }, modifier = Modifier.suggestionMenuHeight()) {
             suggestions.forEach { option ->
                 DropdownMenuItem(text = { Text(option) }, onClick = { onValueChange(option); expanded = false })
             }
