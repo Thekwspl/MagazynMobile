@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import pl.magazyn.mobile.MagazynApplication
@@ -53,6 +54,11 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     private val database = (application as MagazynApplication).database
     private val visibility = ProductVisibilityStore(application)
     val orders = database.orderDao().observeActiveSummaries()
+        .map { parts ->
+            parts.groupBy { it.notebookId ?: it.id }.map { (mainId, groupedParts) ->
+                OrderGroupSummary(mainId, groupedParts.sortedBy { it.createdAtEpochMillis })
+            }.sortedWith(compareBy<OrderGroupSummary> { it.plannedIssueDate }.thenBy { it.createdAtEpochMillis })
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val people = database.employeeDao().observeSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -276,4 +282,17 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun quantityLabel(value: Double): String = if (value % 1.0 == 0.0) value.toLong().toString() else value.toString()
+}
+
+/** Jedno logiczne zamówienie (notatnik) z istniejącymi sekcjami odbiorców. */
+data class OrderGroupSummary(
+    val id: String,
+    val parts: List<pl.magazyn.mobile.data.OrderSummary>,
+) {
+    val originalText: String = parts.firstNotNullOfOrNull { it.originalText }.orEmpty()
+    val plannedIssueDate: String = parts.minOfOrNull { it.plannedIssueDate }.orEmpty()
+    val createdAtEpochMillis: Long = parts.minOfOrNull { it.createdAtEpochMillis } ?: 0L
+    val lineCount: Int = parts.sumOf { it.lineCount }
+    val preparedCount: Int = parts.sumOf { it.preparedCount }
+    val unmappedCount: Int = parts.sumOf { it.unmappedCount }
 }

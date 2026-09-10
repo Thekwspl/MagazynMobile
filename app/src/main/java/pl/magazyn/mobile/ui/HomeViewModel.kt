@@ -121,7 +121,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             employeeCount = employees,
             productCount = products,
             negativeStockCount = negative,
-            openOrderCount = orders.size,
+            // Jedna wiadomość jest jednym zamówieniem głównym. Rekordy OrderEntity
+            // pod tym samym notebookId są wyłącznie sekcjami odbiorców.
+            openOrderCount = orders.distinctBy { it.notebookId ?: it.id }.size,
             pendingImportCount = pendingImports,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
@@ -297,7 +299,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun saveTaskDraft(rawText: String, draft: ParsedTaskDraft) {
+    fun saveTaskDraft(rawText: String, draft: ParsedTaskDraft, onSaved: () -> Unit = {}) {
         val title = draft.title.trim()
         if (title.isBlank()) return
         viewModelScope.launch {
@@ -360,10 +362,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
+            onSaved()
         }
     }
 
-    fun saveDraftOrder(rawText: String, note: ParsedNote, approvedPairs: List<Pair<ParsedItem, ParsedItem>>, rememberCorrections: Boolean) {
+    fun saveDraftOrder(
+        rawText: String,
+        note: ParsedNote,
+        approvedPairs: List<Pair<ParsedItem, ParsedItem>>,
+        rememberCorrections: Boolean,
+        onSaved: () -> Unit = {},
+    ) {
         if (approvedPairs.isEmpty()) return
         viewModelScope.launch {
             database.withTransaction {
@@ -471,6 +480,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
             }
+            // Powrót do Start następuje dopiero po zatwierdzeniu transakcji. Room Flow
+            // ma wtedy już nowe dane i kafel „Do zrobienia” odświeża się reaktywnie.
+            onSaved()
         }
     }
 

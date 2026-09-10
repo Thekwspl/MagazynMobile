@@ -42,6 +42,7 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
     val jobPositions by viewModel.jobPositions.collectAsStateWithLifecycle()
     val issueWarning by viewModel.issueWarning.collectAsStateWithLifecycle()
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedPartId by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = orders.firstOrNull { it.id == selectedId }
 
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
@@ -51,10 +52,17 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
         } else {
             LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 items(orders, key = { it.id }) { order ->
-                    OutlinedCard(onClick = { selectedId = order.id }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedCard(onClick = {
+                        selectedId = order.id
+                        selectedPartId = order.parts.singleOrNull()?.id
+                    }, modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                                Text(order.recipient.ifBlank { "Nieprzypisana osoba" }, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (order.parts.size == 1) order.parts.first().recipient.ifBlank { "Nieprzypisany odbiorca" }
+                                    else "Zamówienie · ${order.parts.size} odbiorców",
+                                    fontWeight = FontWeight.SemiBold,
+                                )
                                 Text(formatDisplayDate(order.plannedIssueDate), style = MaterialTheme.typography.labelMedium)
                             }
                             LinearProgressIndicator(
@@ -62,8 +70,19 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Text("Przygotowano ${order.preparedCount} z ${order.lineCount}", style = MaterialTheme.typography.bodySmall)
-                            if (order.employeeId == null && order.siteLabel.isNullOrBlank()) Text("Nie rozpoznano osoby — otwórz i przypisz", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
-                            order.siteLabel?.takeIf(String::isNotBlank)?.let { Text("Stocznia: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
+                            if (order.parts.size > 1) {
+                                Text(
+                                    order.parts.joinToString(" · ") { it.recipient.ifBlank { "Bez odbiorcy" } },
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                val part = order.parts.first()
+                                if (part.employeeId == null && part.siteLabel.isNullOrBlank()) Text("Nie rozpoznano osoby — otwórz i przypisz", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+                                part.siteLabel?.takeIf(String::isNotBlank)?.let { Text("Stocznia: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
+                            }
                             if (order.unmappedCount > 0) Text("${order.unmappedCount} pozycji wymaga przypisania produktu", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
                         }
                     }
@@ -71,22 +90,41 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
             }
         }
     }
-    selected?.let { order ->
-        ModalBottomSheet(onDismissRequest = { selectedId = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-            OrderDetails(
-                order, people, products, jobPositions,
-                linesFlow = { viewModel.lines(order.id) },
-                changesFlow = { viewModel.changes(order.id) },
-                onUpdateOrder = viewModel::updateOrder,
-                onPrepared = viewModel::setPrepared,
-                onUpdateLine = viewModel::updateLine,
-                onAddLine = { viewModel.addLine(order.id) },
-                onDeleteLine = viewModel::deleteLine,
-                onCreatePerson = viewModel::createPerson,
-                onCreateProduct = viewModel::createProduct,
-                onCancelOrder = { viewModel.cancelOrder(order.id); selectedId = null },
-                onRealize = { employeeId, date -> viewModel.realize(order.id, employeeId, date) },
-            )
+    selected?.let { group ->
+        ModalBottomSheet(onDismissRequest = { selectedId = null; selectedPartId = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            val part = group.parts.firstOrNull { it.id == selectedPartId }
+            if (part == null) {
+                OrderGroupOverview(
+                    group = group,
+                    linesFlow = viewModel::lines,
+                    onSelectPart = { selectedPartId = it },
+                )
+            } else {
+                Column {
+                    if (group.parts.size > 1) {
+                        TextButton(onClick = { selectedPartId = null }, Modifier.padding(horizontal = 10.dp)) {
+                            Text("← Wszyscy odbiorcy")
+                        }
+                    }
+                    OrderDetails(
+                        part, people, products, jobPositions,
+                        linesFlow = { viewModel.lines(part.id) },
+                        changesFlow = { viewModel.changes(part.id) },
+                        onUpdateOrder = viewModel::updateOrder,
+                        onPrepared = viewModel::setPrepared,
+                        onUpdateLine = viewModel::updateLine,
+                        onAddLine = { viewModel.addLine(part.id) },
+                        onDeleteLine = viewModel::deleteLine,
+                        onCreatePerson = viewModel::createPerson,
+                        onCreateProduct = viewModel::createProduct,
+                        onCancelOrder = {
+                            viewModel.cancelOrder(part.id)
+                            selectedPartId = null
+                        },
+                        onRealize = { employeeId, date -> viewModel.realize(part.id, employeeId, date) },
+                    )
+                }
+            }
         }
     }
     issueWarning?.let { warning ->
@@ -116,6 +154,48 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
             confirmButton = { Button(onClick = viewModel::confirmIssueDespiteWarning) { Text("Wydaj mimo to") } },
             dismissButton = { TextButton(onClick = viewModel::dismissIssueWarning) { Text("Anuluj") } },
         )
+    }
+}
+
+@Composable
+private fun OrderGroupOverview(
+    group: OrderGroupSummary,
+    linesFlow: (String) -> kotlinx.coroutines.flow.Flow<List<OrderDetailLine>>,
+    onSelectPart: (String) -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("Kompletowanie zamówienia", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "Jedno zamówienie · ${group.parts.size} sekcje odbiorców · ${formatDisplayDate(group.plannedIssueDate)}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OriginalMessagePanel(group.originalText)
+        group.parts.forEach { part ->
+            key(part.id) {
+                val lines by remember(part.id) { linesFlow(part.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
+                OutlinedCard(onClick = { onSelectPart(part.id) }, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(part.recipient.ifBlank { "Bez odbiorcy" }, fontWeight = FontWeight.SemiBold)
+                            Text("${part.preparedCount}/${part.lineCount}", style = MaterialTheme.typography.labelMedium)
+                        }
+                        lines.forEach { line ->
+                            if (line.productName != null) {
+                                ProductInfo(line.productName, line.productVariant, line.groupName.orEmpty(), line.subgroupName.orEmpty())
+                            } else {
+                                Text(line.rawText, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                        Text("Otwórz sekcję odbiorcy", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(18.dp))
     }
 }
 

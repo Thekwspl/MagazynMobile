@@ -465,12 +465,14 @@ interface OrderDao {
     fun observeOpenOrders(): Flow<List<OrderEntity>>
 
     @Query("""
-        SELECT o.id, o.employeeId, COALESCE(NULLIF(TRIM(e.lastName || ' ' || e.firstName), ''), o.recipientLabel) AS recipient, o.siteLabel,
+        SELECT o.id, o.notebookId, n.rawText AS originalText,
+               o.employeeId, COALESCE(NULLIF(TRIM(e.lastName || ' ' || e.firstName), ''), o.recipientLabel) AS recipient, o.siteLabel,
                o.status, o.plannedIssueDate, o.createdAtEpochMillis,
                COUNT(l.id) AS lineCount,
                COALESCE(SUM(CASE WHEN l.isPrepared = 1 THEN 1 ELSE 0 END), 0) AS preparedCount,
                COALESCE(SUM(CASE WHEN l.productId IS NULL THEN 1 ELSE 0 END), 0) AS unmappedCount
         FROM orders o
+        LEFT JOIN order_notebooks n ON n.id = o.notebookId
         LEFT JOIN employees e ON e.id = o.employeeId
         LEFT JOIN order_lines l ON l.orderId = o.id
         WHERE o.status NOT IN ('ISSUED', 'CANCELLED')
@@ -545,6 +547,8 @@ interface OrderDao {
 
 data class OrderSummary(
     val id: String,
+    val notebookId: String?,
+    val originalText: String?,
     val employeeId: String?,
     val recipient: String,
     val siteLabel: String?,

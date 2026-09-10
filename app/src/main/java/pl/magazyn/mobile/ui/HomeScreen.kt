@@ -48,6 +48,7 @@ fun HomeScreen(
     val aiAnalysis by viewModel.aiAnalysis.collectAsStateWithLifecycle()
     val duplicateDecisions by viewModel.duplicateDecisions.collectAsStateWithLifecycle()
     val query by viewModel.quickInput.collectAsStateWithLifecycle()
+    val openTasks = remember(tasks) { tasks.filterNot { it.isCompleted } }
     var attentionDetails by remember { mutableStateOf<AttentionDetails?>(null) }
     var showNotifications by remember { mutableStateOf(false) }
     val duplicateCandidates = remember(products, duplicateDecisions) {
@@ -98,8 +99,8 @@ fun HomeScreen(
                         },
                         onQuickIssue = onQuickIssue,
                     )
-                    SectionHeader("Do zrobienia", "Wszystkie ${uiState.openOrderCount + tasks.count { !it.isCompleted }}", onTasks)
-                    tasks.take(6).forEach { task ->
+                    SectionHeader("Do zrobienia", "Wszystkie ${uiState.openOrderCount + openTasks.size}", onTasks)
+                    openTasks.take(6).forEach { task ->
                         Row(Modifier.fillMaxWidth().clickable(onClick = onTasks), verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(task.isCompleted, { viewModel.setTaskCompleted(task.id, it) })
                             Column(Modifier.weight(1f)) {
@@ -109,7 +110,7 @@ fun HomeScreen(
                         }
                     }
                     if (uiState.openOrderCount > 0) ActiveOrderCard(uiState.openOrderCount, onOrders)
-                    if (uiState.openOrderCount == 0 && tasks.isEmpty()) EmptyOrdersCard()
+                    if (uiState.openOrderCount == 0 && openTasks.isEmpty()) EmptyOrdersCard()
                     if (uiState.negativeStockCount > 0 || uiState.pendingImportCount > 0 || duplicateCandidates.isNotEmpty()) {
                         SectionHeader("Wymaga uwagi", "Szczegóły")
                         if (uiState.negativeStockCount > 0) AttentionRow(
@@ -231,25 +232,20 @@ fun ParsedNoteReviewScreen(
                 }
             }
         }
-        if (note.kind == ParsedInputKind.ORDER && current.rawText.isNotBlank()) {
-            Surface(tonalElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.heightIn(max = 112.dp).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 8.dp)) {
-                    Text("Oryginalna wiadomość", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Text(current.rawText, style = MaterialTheme.typography.bodySmall)
-                }
-            }
+        if (note.kind == ParsedInputKind.ORDER || note.kind == ParsedInputKind.TASK) {
+            OriginalMessagePanel(current.rawText)
         }
         Box(Modifier.weight(1f)) {
             if (note.kind == ParsedInputKind.TASK && note.taskDraft != null) {
                 TaskDraftReviewContent(
-                    rawText = current.rawText,
                     initial = note.taskDraft,
                     people = people,
                     places = taskPlaces,
                     onSave = { draft ->
-                        viewModel.saveTaskDraft(current.rawText, draft)
-                        viewModel.closeReview(completed = true)
-                        onBack()
+                        viewModel.saveTaskDraft(current.rawText, draft) {
+                            viewModel.closeReview(completed = true)
+                            onBack()
+                        }
                     },
                 )
             } else ParsedNoteReviewContent(
@@ -269,9 +265,15 @@ fun ParsedNoteReviewScreen(
                     onBack()
                 },
                 onSaveOrder = { itemPairs, rememberCorrections, shipyardName, plannedIssueDate ->
-                    viewModel.saveDraftOrder(current.rawText, note.copy(shipyardName = shipyardName, suggestedIssueDate = plannedIssueDate), itemPairs, rememberCorrections)
-                    viewModel.closeReview(completed = true)
-                    onBack()
+                    viewModel.saveDraftOrder(
+                        current.rawText,
+                        note.copy(shipyardName = shipyardName, suggestedIssueDate = plannedIssueDate),
+                        itemPairs,
+                        rememberCorrections,
+                    ) {
+                        viewModel.closeReview(completed = true)
+                        onBack()
+                    }
                 },
             )
         }
@@ -687,7 +689,10 @@ private fun ParsedNoteReviewContent(
                 }
             } else {
                 OutlinedTextField(defaultRecipientName, { defaultRecipientName = it }, Modifier.fillMaxWidth(), label = { Text("Osoba / pracownik") }, singleLine = true)
-                matchingPeople(defaultRecipientName, people).take(4).forEach { person ->
+                val defaultRecipientMatches = remember(defaultRecipientName, people) {
+                    matchingPeople(defaultRecipientName, people)
+                }
+                defaultRecipientMatches.take(4).forEach { person ->
                     TextButton(onClick = { defaultRecipientName = person.listDisplayName() }, Modifier.fillMaxWidth()) { Icon(Icons.Default.Person, null); Spacer(Modifier.width(6.dp)); Text(person.listDisplayName(), Modifier.weight(1f)) }
                 }
             }
@@ -734,13 +739,18 @@ private fun ParsedNoteReviewContent(
             Button(onClick = onSaveTasks, modifier = Modifier.fillMaxWidth()) { Text("Zapisz listę zadań") }
         }
         editedItems.forEachIndexed { index, item ->
-            val productMatches = matchingProducts(item, products, strictOfflineMatching = !note.analyzedByAi)
+            // Dopasowanie katalogu jest najcięższą częścią tego ekranu. Liczymy je ponownie
+            // tylko po zmianie nazwy/wariantu lub katalogu, nie po każdej zmianie ilości,
+            // odbiorcy, checkboxa ani po zwykłej recomposition całej listy.
+            val productMatches = remember(item.name, item.variant, products, note.analyzedByAi) {
+                matchingProducts(item, products, strictOfflineMatching = !note.analyzedByAi)
+            }
             val productMatch = productMatches.singleOrNull()
             val recipientQuery = item.recipientName.orEmpty()
-            val personMatches = matchingPeople(recipientQuery, people)
-            val personMatch = recognizedPerson(recipientQuery, people)
-            val shipyardMatches = matchingShipyards(recipientQuery, shipyards)
-            val recipientShipyard = recognizedRecipientShipyard(recipientQuery, shipyards)
+            val personMatches = remember(recipientQuery, people) { matchingPeople(recipientQuery, people) }
+            val personMatch = remember(recipientQuery, people) { recognizedPerson(recipientQuery, people) }
+            val shipyardMatches = remember(recipientQuery, shipyards) { matchingShipyards(recipientQuery, shipyards) }
+            val recipientShipyard = remember(recipientQuery, shipyards) { recognizedRecipientShipyard(recipientQuery, shipyards) }
             val details = listOfNotNull(
                 item.recipientName?.let { name -> "dla: ${personMatch?.listDisplayName() ?: recipientShipyard?.name ?: name}" }
                     ?: recognizedShipyard?.let { "dla stoczni: ${it.name} (domyślnie)" },
@@ -942,7 +952,6 @@ private fun ParsedNoteReviewContent(
 
 @Composable
 private fun TaskDraftReviewContent(
-    rawText: String,
     initial: pl.magazyn.mobile.domain.ParsedTaskDraft,
     people: List<pl.magazyn.mobile.data.EmployeeSummary>,
     places: List<pl.magazyn.mobile.data.TaskPlaceView>,
@@ -953,11 +962,12 @@ private fun TaskDraftReviewContent(
     var description by remember(initial) { mutableStateOf(initial.description) }
     val steps = remember(initial) { mutableStateListOf<pl.magazyn.mobile.domain.ParsedTaskStep>().apply { addAll(initial.steps) } }
     Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) { Text("Oryginalna wiadomość", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge); Text(rawText) } }
         Text("Podgląd zadania", style = MaterialTheme.typography.titleLarge)
         Text("Elementy oznaczone kolorem wymagają sprawdzenia. Nic nie zostanie zapisane przed zatwierdzeniem.", style = MaterialTheme.typography.bodySmall)
-        OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("Tytuł") }, singleLine = true)
-        OutlinedTextField(date, { date = it }, Modifier.fillMaxWidth(), label = { Text("Data (RRRR-MM-DD, opcjonalnie)") }, singleLine = true)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(title, { title = it }, Modifier.weight(1f), label = { Text("Tytuł") }, singleLine = true)
+            OutlinedTextField(date, { date = it }, Modifier.width(132.dp), label = { Text("Data") }, singleLine = true)
+        }
         OutlinedTextField(description, { description = it }, Modifier.fillMaxWidth(), label = { Text("Opis / nierozstrzygnięte informacje") }, minLines = 2)
         steps.forEachIndexed { stepIndex, step ->
             OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -966,9 +976,11 @@ private fun TaskDraftReviewContent(
                     ConfidenceLabel(step.confidence)
                     IconButton(onClick = { steps.removeAt(stepIndex) }) { Icon(Icons.Default.DeleteOutline, "Usuń") }
                 }
-                OutlinedTextField(step.time.orEmpty(), { steps[stepIndex] = step.copy(time = it.ifBlank { null }) }, Modifier.fillMaxWidth(), label = { Text("Godzina") }, singleLine = true)
                 var placeQuery by remember(initial, stepIndex) { mutableStateOf(step.placeText) }
-                OutlinedTextField(placeQuery, { placeQuery = it; steps[stepIndex] = step.copy(placeId = null, placeText = it, confidence = pl.magazyn.mobile.domain.ParseConfidence.REVIEW) }, Modifier.fillMaxWidth(), label = { Text("Miejsce lub alias") }, singleLine = true)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(placeQuery, { placeQuery = it; steps[stepIndex] = step.copy(placeId = null, placeText = it, confidence = pl.magazyn.mobile.domain.ParseConfidence.REVIEW) }, Modifier.weight(1f), label = { Text("Miejsce lub alias") }, singleLine = true)
+                    OutlinedTextField(step.time.orEmpty(), { steps[stepIndex] = step.copy(time = it.ifBlank { null }) }, Modifier.width(104.dp), label = { Text("Godzina") }, singleLine = true)
+                }
                 if (step.placeId == null && placeQuery.isNotBlank()) {
                     val placeMatches = places.filter { place -> (listOf(place.name) + place.aliases.split(',')).any { pl.magazyn.mobile.domain.ImportParser.key(it).contains(pl.magazyn.mobile.domain.ImportParser.key(placeQuery)) } }.take(4)
                     placeMatches.forEach { place -> TextButton(onClick = { placeQuery = place.name; steps[stepIndex] = step.copy(placeId = place.id, placeText = place.name, confidence = pl.magazyn.mobile.domain.ParseConfidence.CERTAIN) }, Modifier.fillMaxWidth()) { Text("${place.name}${place.aliases.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()}") } }
@@ -991,7 +1003,6 @@ private fun TaskDraftReviewContent(
                                 }, Modifier.fillMaxWidth()) { Text(employee.listDisplayName()) }
                             }
                         }
-                        OutlinedTextField(person.note, { value -> val updated = step.people.toMutableList(); updated[personIndex] = person.copy(note = value); steps[stepIndex] = step.copy(people = updated) }, Modifier.fillMaxWidth(), label = { Text("Notatka osoby") })
                     }
                 }
                 OutlinedButton(onClick = { steps[stepIndex] = step.copy(people = step.people + pl.magazyn.mobile.domain.ParsedTaskPerson(null, "", confidence = pl.magazyn.mobile.domain.ParseConfidence.REVIEW)) }, Modifier.fillMaxWidth()) { Icon(Icons.Default.PersonAdd, null); Text("Dodaj osobę / podpunkt") }
