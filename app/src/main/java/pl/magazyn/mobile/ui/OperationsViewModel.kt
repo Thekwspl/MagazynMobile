@@ -1,6 +1,7 @@
 package pl.magazyn.mobile.ui
 
 import android.app.Application
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import pl.magazyn.mobile.MagazynApplication
 import pl.magazyn.mobile.data.*
+import pl.magazyn.mobile.domain.resolveAllOperationProducts
 
 enum class WarehouseOperationType(val label: String) {
     DELIVERY("Dostawa"),
@@ -42,10 +44,14 @@ class OperationsViewModel(application: Application) : AndroidViewModel(applicati
         val valid = lines.filter { it.productId.isNotBlank() && it.quantity > 0 }
         if (valid.isEmpty() || runCatching { LocalDate.parse(effectiveDate) }.isFailure) return
         viewModelScope.launch {
-            database.withTransaction {
-                val mainWarehouse = warehouses.value.firstOrNull { it.isMain } ?: return@withTransaction
+            val productsResolved = database.withTransaction {
+                val mainWarehouse = warehouses.value.firstOrNull { it.isMain } ?: return@withTransaction true
                 val employee = employeeId?.let { database.employeeDao().findById(it) }
                 val shipyard = shipyards.value.firstOrNull { it.id == shipyardId }
+                if (type == WarehouseOperationType.SHIPYARD_RETURN && shipyard == null) return@withTransaction true
+                val products = database.productDao().findByIds(valid.map(OperationLineRequest::productId).distinct())
+                val resolvedLines = resolveAllOperationProducts(valid, products, OperationLineRequest::productId)
+                    ?: return@withTransaction false
                 val movementWarehouseId = mainWarehouse.id
                 val movementId = UUID.randomUUID().toString()
                 val recipient = when (type) {
@@ -67,15 +73,16 @@ class OperationsViewModel(application: Application) : AndroidViewModel(applicati
                         },
                     ),
                 )
-                valid.forEach { line ->
-                    val product = database.productDao().findById(line.productId) ?: return@forEach
+                resolvedLines.forEach { resolved ->
+                    val line = resolved.request
+                    val product = resolved.product
                     val quantity = line.quantity.toDouble()
                     when (type) {
                         WarehouseOperationType.DELIVERY, WarehouseOperationType.FOUND -> {
                             changeWarehouseStock(mainWarehouse.id, line.productId, quantity)
                         }
                         WarehouseOperationType.SHIPYARD_RETURN -> {
-                            val yard = shipyard ?: return@forEach
+                            val yard = checkNotNull(shipyard)
                             val currentYard = database.shipyardDao().findStock(yard.id, line.productId)?.quantity ?: 0.0
                             database.shipyardDao().upsertStock(ShipyardStockBalanceEntity(yard.id, line.productId, currentYard - quantity))
                             changeWarehouseStock(mainWarehouse.id, line.productId, quantity)
@@ -91,6 +98,10 @@ class OperationsViewModel(application: Application) : AndroidViewModel(applicati
                         ),
                     )
                 }
+                true
+            }
+            if (!productsResolved) {
+                Toast.makeText(getApplication(), "Nie zapisano operacji: co najmniej jeden wybrany przedmiot już nie istnieje.", Toast.LENGTH_LONG).show()
             }
         }
     }

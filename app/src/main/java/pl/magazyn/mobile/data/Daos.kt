@@ -86,6 +86,9 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE isArchived = 0")
     suspend fun getAllNow(): List<ProductEntity>
 
+    @Query("SELECT * FROM products WHERE id IN (:ids)")
+    suspend fun findByIds(ids: List<String>): List<ProductEntity>
+
     @Query("""
         SELECT p.*, COALESCE(s.quantity, 0.0) AS stockQuantity,
                COALESCE(s.isKnown, 0) AS stockKnown

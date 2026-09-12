@@ -1,6 +1,7 @@
 package pl.magazyn.mobile.ui
 
 import android.app.Application
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
@@ -24,6 +25,7 @@ import pl.magazyn.mobile.data.IssueReturnEntity
 import pl.magazyn.mobile.data.EmployeeIssue
 import pl.magazyn.mobile.data.ProductVisibilityStore
 import pl.magazyn.mobile.domain.StockMath
+import pl.magazyn.mobile.domain.resolveAllOperationProducts
 import pl.magazyn.mobile.domain.normalizeCommaSeparated
 import pl.magazyn.mobile.domain.normalizeFirstName
 import pl.magazyn.mobile.domain.normalizePersonName
@@ -99,7 +101,10 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
         val validItems = items.filter { it.productId.isNotBlank() && it.quantity > 0L }
         if (validItems.isEmpty() || runCatching { LocalDate.parse(effectiveDate) }.isFailure) return
         viewModelScope.launch {
-            database.withTransaction {
+            val completed = database.withTransaction {
+                val products = database.productDao().findByIds(validItems.map(IssueRequest::productId).distinct())
+                val resolvedItems = resolveAllOperationProducts(validItems, products, IssueRequest::productId)
+                    ?: return@withTransaction false
                 val movementId = UUID.randomUUID().toString()
                 database.movementDao().insertMovement(
                     StockMovementEntity(
@@ -112,8 +117,9 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
                         note = "Wydanie bez zamówienia",
                     ),
                 )
-                validItems.forEach { item ->
-                    val product = database.productDao().findById(item.productId) ?: return@forEach
+                resolvedItems.forEach { resolved ->
+                    val item = resolved.request
+                    val product = resolved.product
                     val current = database.stockDao().find("warehouse-main", item.productId)?.quantity ?: 0.0
                     database.stockDao().upsert(
                         listOf(StockBalanceEntity("warehouse-main", item.productId, StockMath.afterIssue(current, item.quantity.toDouble()))),
@@ -140,6 +146,10 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
                 }
+                true
+            }
+            if (!completed) {
+                Toast.makeText(getApplication(), "Nie zapisano wydania: co najmniej jeden wybrany przedmiot już nie istnieje.", Toast.LENGTH_LONG).show()
             }
         }
     }

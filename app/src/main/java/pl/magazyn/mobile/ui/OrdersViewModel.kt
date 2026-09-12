@@ -1,6 +1,7 @@
 package pl.magazyn.mobile.ui
 
 import android.app.Application
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
@@ -33,6 +34,7 @@ import pl.magazyn.mobile.domain.normalizeDisplayName
 import pl.magazyn.mobile.domain.normalizePersonName
 import pl.magazyn.mobile.domain.normalizeFirstName
 import pl.magazyn.mobile.domain.normalizePhoneNumbers
+import pl.magazyn.mobile.domain.resolveAllOperationProducts
 
 data class OrderIssueWarningItem(
     val productName: String,
@@ -223,15 +225,19 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             _issueWarning.value = null
-            database.withTransaction {
-                val order = database.orderDao().findById(orderId) ?: return@withTransaction
+            val productsResolved = database.withTransaction {
+                val order = database.orderDao().findById(orderId) ?: return@withTransaction true
                 val shipyard = if (selectedEmployeeId == null) order.siteLabel?.let { label ->
                     database.shipyardDao().getAllNow().firstOrNull { it.name.equals(label, true) && !it.isArchived }
                 } else null
-                if (selectedEmployeeId == null && shipyard == null) return@withTransaction
+                if (selectedEmployeeId == null && shipyard == null) return@withTransaction true
                 val lines = database.orderDao().getLinesNow(orderId)
-                if (lines.isEmpty() || lines.any { it.productId == null }) return@withTransaction
-                if (database.orderDao().markIssuedIfDraft(orderId) != 1) return@withTransaction
+                if (lines.isEmpty()) return@withTransaction true
+                if (lines.any { it.productId == null }) return@withTransaction false
+                val products = database.productDao().findByIds(lines.map { checkNotNull(it.productId) }.distinct())
+                val resolvedLines = resolveAllOperationProducts(lines, products) { checkNotNull(it.productId) }
+                    ?: return@withTransaction false
+                if (database.orderDao().markIssuedIfDraft(orderId) != 1) return@withTransaction true
                 database.orderDao().updateOrder(orderId, selectedEmployeeId, order.recipientLabel, selectedDate)
                 val movementId = UUID.randomUUID().toString()
                 database.movementDao().insertMovement(
@@ -246,9 +252,10 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                         note = if (shipyard == null) "Realizacja zamówienia" else "Realizacja zamówienia dla stoczni",
                     ),
                 )
-                lines.forEach { line ->
-                    val productId = line.productId ?: return@forEach
-                    val product = database.productDao().findById(productId) ?: return@forEach
+                resolvedLines.forEach { resolved ->
+                    val line = resolved.request
+                    val product = resolved.product
+                    val productId = product.id
                     val current = database.stockDao().find("warehouse-main", productId)?.quantity ?: 0.0
                     database.stockDao().upsert(listOf(StockBalanceEntity("warehouse-main", productId, current - line.quantity)))
                     if (shipyard != null) {
@@ -265,6 +272,10 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
                 log(orderId, "ISSUE", "Zrealizowano zamówienie i wydano ${lines.size} pozycji")
+                true
+            }
+            if (!productsResolved) {
+                Toast.makeText(getApplication(), "Nie zrealizowano zamówienia: co najmniej jeden przedmiot nie istnieje lub nie został przypisany.", Toast.LENGTH_LONG).show()
             }
         }
     }

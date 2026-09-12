@@ -1,6 +1,7 @@
 package pl.magazyn.mobile.ui
 
 import android.app.Application
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import pl.magazyn.mobile.MagazynApplication
 import pl.magazyn.mobile.data.*
+import pl.magazyn.mobile.domain.resolveAllOperationProducts
 
 data class InventoryCount(val productId: String, val actualQuantity: Long)
 
@@ -24,7 +26,10 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
     fun applyInventory(warehouseId: String, counts: List<InventoryCount>, effectiveDate: String) {
         if (warehouseId.isBlank() || counts.isEmpty() || runCatching { LocalDate.parse(effectiveDate) }.isFailure) return
         viewModelScope.launch {
-            database.withTransaction {
+            val productsResolved = database.withTransaction {
+                val products = database.productDao().findByIds(counts.map(InventoryCount::productId).distinct())
+                val resolvedCounts = resolveAllOperationProducts(counts, products, InventoryCount::productId)
+                    ?: return@withTransaction false
                 val movementId = UUID.randomUUID().toString()
                 database.movementDao().insertMovement(
                     StockMovementEntity(
@@ -37,8 +42,9 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
                         note = "Inwentaryzacja · ${counts.size} pozycji",
                     ),
                 )
-                counts.forEach { count ->
-                    val product = database.productDao().findById(count.productId) ?: return@forEach
+                resolvedCounts.forEach { resolved ->
+                    val count = resolved.request
+                    val product = resolved.product
                     val previous = database.stockDao().find(warehouseId, count.productId)?.quantity ?: 0.0
                     val actual = count.actualQuantity.toDouble()
                     database.stockDao().upsert(listOf(StockBalanceEntity(warehouseId, count.productId, actual, true)))
@@ -46,6 +52,10 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
                         StockMovementLineEntity(UUID.randomUUID().toString(), movementId, count.productId, actual - previous, product.unit),
                     )
                 }
+                true
+            }
+            if (!productsResolved) {
+                Toast.makeText(getApplication(), "Nie zapisano inwentaryzacji: co najmniej jeden wybrany przedmiot już nie istnieje.", Toast.LENGTH_LONG).show()
             }
         }
     }

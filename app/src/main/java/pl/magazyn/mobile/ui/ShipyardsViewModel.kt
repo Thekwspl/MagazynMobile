@@ -1,6 +1,7 @@
 package pl.magazyn.mobile.ui
 
 import android.app.Application
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
@@ -18,6 +19,7 @@ import pl.magazyn.mobile.data.ShipyardStockBalanceEntity
 import pl.magazyn.mobile.data.ShipyardLeaderEntity
 import pl.magazyn.mobile.domain.StockMath
 import pl.magazyn.mobile.domain.normalizeDisplayName
+import pl.magazyn.mobile.domain.resolveAllOperationProducts
 
 data class ShipyardIssueRequest(val productId: String, val quantity: Long)
 
@@ -79,7 +81,10 @@ class ShipyardsViewModel(application: Application) : AndroidViewModel(applicatio
         val valid = items.filter { it.productId.isNotBlank() && it.quantity > 0L }
         if (valid.isEmpty() || runCatching { LocalDate.parse(effectiveDate) }.isFailure) return
         viewModelScope.launch {
-            database.withTransaction {
+            val productsResolved = database.withTransaction {
+                val products = database.productDao().findByIds(valid.map(ShipyardIssueRequest::productId).distinct())
+                val resolvedItems = resolveAllOperationProducts(valid, products, ShipyardIssueRequest::productId)
+                    ?: return@withTransaction false
                 val movementId = UUID.randomUUID().toString()
                 database.movementDao().insertMovement(
                     StockMovementEntity(
@@ -93,8 +98,9 @@ class ShipyardsViewModel(application: Application) : AndroidViewModel(applicatio
                         note = "Wydanie dla stoczni",
                     ),
                 )
-                valid.forEach { item ->
-                    val product = database.productDao().findById(item.productId) ?: return@forEach
+                resolvedItems.forEach { resolved ->
+                    val item = resolved.request
+                    val product = resolved.product
                     val current = database.stockDao().find("warehouse-main", item.productId)?.quantity ?: 0.0
                     database.stockDao().upsert(
                         listOf(StockBalanceEntity("warehouse-main", item.productId, StockMath.afterIssue(current, item.quantity.toDouble()))),
@@ -107,6 +113,10 @@ class ShipyardsViewModel(application: Application) : AndroidViewModel(applicatio
                         StockMovementLineEntity(UUID.randomUUID().toString(), movementId, item.productId, -item.quantity.toDouble(), product.unit),
                     )
                 }
+                true
+            }
+            if (!productsResolved) {
+                Toast.makeText(getApplication(), "Nie zapisano wydania: co najmniej jeden wybrany przedmiot już nie istnieje.", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -115,20 +125,28 @@ class ShipyardsViewModel(application: Application) : AndroidViewModel(applicatio
         val valid = items.filter { it.productId.isNotBlank() && it.quantity > 0L }
         if (valid.isEmpty() || runCatching { LocalDate.parse(effectiveDate) }.isFailure) return
         viewModelScope.launch {
-            database.withTransaction {
-                if (valid.any { (database.shipyardDao().findStock(shipyard.id, it.productId)?.quantity ?: 0.0) < it.quantity }) return@withTransaction
+            val productsResolved = database.withTransaction {
+                val products = database.productDao().findByIds(valid.map(ShipyardIssueRequest::productId).distinct())
+                val resolvedItems = resolveAllOperationProducts(valid, products, ShipyardIssueRequest::productId)
+                    ?: return@withTransaction false
+                if (valid.any { (database.shipyardDao().findStock(shipyard.id, it.productId)?.quantity ?: 0.0) < it.quantity }) return@withTransaction true
                 val movementId = UUID.randomUUID().toString()
                 database.movementDao().insertMovement(
                     StockMovementEntity(movementId, "SHIPYARD_RETURN", "warehouse-main", null, shipyard.name, effectiveDate, System.currentTimeMillis(), "Zwrot ze stoczni"),
                 )
-                valid.forEach { item ->
-                    val product = database.productDao().findById(item.productId) ?: return@forEach
+                resolvedItems.forEach { resolved ->
+                    val item = resolved.request
+                    val product = resolved.product
                     val main = database.stockDao().find("warehouse-main", item.productId)?.quantity ?: 0.0
                     val yard = database.shipyardDao().findStock(shipyard.id, item.productId)?.quantity ?: 0.0
                     database.stockDao().upsert(listOf(StockBalanceEntity("warehouse-main", item.productId, main + item.quantity)))
                     database.shipyardDao().upsertStock(ShipyardStockBalanceEntity(shipyard.id, item.productId, yard - item.quantity))
                     database.movementDao().insertLine(StockMovementLineEntity(UUID.randomUUID().toString(), movementId, item.productId, item.quantity.toDouble(), product.unit))
                 }
+                true
+            }
+            if (!productsResolved) {
+                Toast.makeText(getApplication(), "Nie zapisano zwrotu: co najmniej jeden wybrany przedmiot już nie istnieje.", Toast.LENGTH_LONG).show()
             }
         }
     }
