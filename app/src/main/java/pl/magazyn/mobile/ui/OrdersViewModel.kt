@@ -183,6 +183,8 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     fun realize(orderId: String, selectedEmployeeId: String?, selectedDate: String, ignoreWarnings: Boolean = false) {
         viewModelScope.launch {
             val issueDate = runCatching { LocalDate.parse(selectedDate) }.getOrNull() ?: return@launch
+            val orderBeforeIssue = database.orderDao().findById(orderId) ?: return@launch
+            if (orderBeforeIssue.status != "DRAFT") return@launch
             val linesBeforeIssue = database.orderDao().getLinesNow(orderId)
             if (!ignoreWarnings && selectedEmployeeId != null && linesBeforeIssue.isNotEmpty()) {
                 val history = database.movementDao().observeEmployeeIssues(selectedEmployeeId).first()
@@ -223,13 +225,14 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
             _issueWarning.value = null
             database.withTransaction {
                 val order = database.orderDao().findById(orderId) ?: return@withTransaction
-                database.orderDao().updateOrder(orderId, selectedEmployeeId, order.recipientLabel, selectedDate)
                 val shipyard = if (selectedEmployeeId == null) order.siteLabel?.let { label ->
                     database.shipyardDao().getAllNow().firstOrNull { it.name.equals(label, true) && !it.isArchived }
                 } else null
                 if (selectedEmployeeId == null && shipyard == null) return@withTransaction
                 val lines = database.orderDao().getLinesNow(orderId)
                 if (lines.isEmpty() || lines.any { it.productId == null }) return@withTransaction
+                if (database.orderDao().markIssuedIfDraft(orderId) != 1) return@withTransaction
+                database.orderDao().updateOrder(orderId, selectedEmployeeId, order.recipientLabel, selectedDate)
                 val movementId = UUID.randomUUID().toString()
                 database.movementDao().insertMovement(
                     StockMovementEntity(
@@ -261,7 +264,6 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
                 }
-                database.orderDao().setStatus(orderId, "ISSUED")
                 log(orderId, "ISSUE", "Zrealizowano zamówienie i wydano ${lines.size} pozycji")
             }
         }

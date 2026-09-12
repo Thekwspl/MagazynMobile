@@ -529,6 +529,9 @@ interface OrderDao {
     @Query("UPDATE orders SET status = :status WHERE id = :orderId")
     suspend fun setStatus(orderId: String, status: String)
 
+    @Query("UPDATE orders SET status = 'ISSUED' WHERE id = :orderId AND status = 'DRAFT'")
+    suspend fun markIssuedIfDraft(orderId: String): Int
+
     @Query("UPDATE order_lines SET isPrepared = :prepared WHERE id = :lineId")
     suspend fun setPrepared(lineId: String, prepared: Boolean)
 
