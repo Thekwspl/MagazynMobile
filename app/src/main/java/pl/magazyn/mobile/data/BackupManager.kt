@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.os.Process
 import android.os.SystemClock
+import androidx.sqlite.db.SupportSQLiteDatabase
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -28,23 +29,145 @@ class BackupManager(private val application: MagazynApplication) {
 
     fun createEncryptedBackup(uri: Uri, password: String) {
         require(password.length >= 6) { "Hasło musi mieć co najmniej 6 znaków" }
-        database.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(FULL)").use { cursor ->
-            if (cursor.moveToFirst() && cursor.getInt(0) != 0) error("Baza jest chwilowo zajęta. Spróbuj ponownie za moment.")
+        val snapshot = File(application.cacheDir, "magazyn-backup-snapshot-${System.nanoTime()}.db")
+        try {
+            createConsistentSnapshot(snapshot)
+            validateDatabase(snapshot, requireCurrentSchema = true)
+            val salt = ByteArray(16).also(SecureRandom()::nextBytes)
+            val iv = ByteArray(12).also(SecureRandom()::nextBytes)
+            val cipher = cipher(Cipher.ENCRYPT_MODE, password, salt, iv)
+            application.contentResolver.openOutputStream(uri, "w")?.use { rawOutput ->
+                val output = DataOutputStream(rawOutput)
+                output.write(MAGIC)
+                output.writeInt(BACKUP_FORMAT_VERSION)
+                output.write(salt)
+                output.write(iv)
+                CipherOutputStream(output, cipher).use { encrypted -> snapshot.inputStream().use { it.copyTo(encrypted) } }
+            } ?: error("Nie udało się utworzyć pliku kopii")
+        } finally {
+            deleteDatabaseFiles(snapshot)
         }
-        val databaseFile = application.getDatabasePath(MagazynApplication.DATABASE_NAME)
-        require(databaseFile.isFile) { "Nie znaleziono bazy danych" }
-        val salt = ByteArray(16).also(SecureRandom()::nextBytes)
-        val iv = ByteArray(12).also(SecureRandom()::nextBytes)
-        val cipher = cipher(Cipher.ENCRYPT_MODE, password, salt, iv)
-        application.contentResolver.openOutputStream(uri, "w")?.use { rawOutput ->
-            val output = DataOutputStream(rawOutput)
-            output.write(MAGIC)
-            output.writeInt(BACKUP_FORMAT_VERSION)
-            output.write(salt)
-            output.write(iv)
-            CipherOutputStream(output, cipher).use { encrypted -> databaseFile.inputStream().use { it.copyTo(encrypted) } }
-        } ?: error("Nie udało się utworzyć pliku kopii")
     }
+
+    /**
+     * Room korzysta tu z systemowego SQLite. VACUUM INTO pojawiło się dopiero
+     * w SQLite 3.27, więc na starszych urządzeniach kopiujemy schemat i dane
+     * przez sam silnik SQLite, z jednego transakcyjnego snapshotu źródła.
+     */
+    private fun createConsistentSnapshot(snapshot: File) {
+        deleteDatabaseFiles(snapshot)
+        val sqlite = database.openHelper.writableDatabase
+        if (supportsVacuumInto(sqlite)) {
+            sqlite.execSQL("VACUUM INTO ?", arrayOf(snapshot.absolutePath))
+        } else {
+            createTransactionalSnapshot(snapshot)
+        }
+        FileOutputStream(snapshot, true).use { it.fd.sync() }
+    }
+
+    private fun supportsVacuumInto(sqlite: SupportSQLiteDatabase): Boolean {
+        val version = sqlite.query("SELECT sqlite_version()").use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else "0"
+        }
+        val parts = version.split('.').map { part -> part.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
+        val major = parts.getOrElse(0) { 0 }
+        val minor = parts.getOrElse(1) { 0 }
+        val patch = parts.getOrElse(2) { 0 }
+        return major > 3 || major == 3 && (minor > 27 || minor == 27 && patch >= 0)
+    }
+
+    private fun createTransactionalSnapshot(snapshot: File) {
+        val source = application.getDatabasePath(MagazynApplication.DATABASE_NAME)
+        require(source.isFile) { "Nie znaleziono aktywnej bazy danych" }
+        val snapshotDatabase = SQLiteDatabase.openDatabase(
+            snapshot.path,
+            null,
+            SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.CREATE_IF_NECESSARY,
+        )
+        try {
+            snapshotDatabase.execSQL("ATTACH DATABASE ? AS backup_source", arrayOf(source.absolutePath))
+            snapshotDatabase.execSQL("PRAGMA foreign_keys=OFF")
+            snapshotDatabase.beginTransactionNonExclusive()
+            try {
+                // Pierwszy odczyt ustala niezmienny snapshot WAL źródła na całą transakcję.
+                val schema = readSchema(snapshotDatabase)
+                val userVersion = queryPragmaInt(snapshotDatabase, "PRAGMA backup_source.user_version")
+                val applicationId = queryPragmaInt(snapshotDatabase, "PRAGMA backup_source.application_id")
+
+                schema.filter { it.type == "table" }.forEach { item ->
+                    snapshotDatabase.execSQL(item.sql)
+                }
+                schema.filter { it.type == "table" }.forEach { item ->
+                    val table = quoteIdentifier(item.name)
+                    snapshotDatabase.execSQL("INSERT INTO main.$table SELECT * FROM backup_source.$table")
+                }
+                copySqliteSequenceIfPresent(snapshotDatabase)
+                schema.filter { it.type != "table" }.forEach { item ->
+                    snapshotDatabase.execSQL(item.sql)
+                }
+                snapshotDatabase.execSQL("PRAGMA user_version=$userVersion")
+                snapshotDatabase.execSQL("PRAGMA application_id=$applicationId")
+                snapshotDatabase.setTransactionSuccessful()
+            } finally {
+                snapshotDatabase.endTransaction()
+            }
+        } finally {
+            snapshotDatabase.close()
+        }
+    }
+
+    private fun readSchema(database: SQLiteDatabase): List<SnapshotSchemaObject> =
+        database.rawQuery(
+            """
+                SELECT type, name, sql
+                FROM backup_source.sqlite_master
+                WHERE sql IS NOT NULL
+                  AND name NOT LIKE 'sqlite_%'
+                  AND name != 'android_metadata'
+                ORDER BY CASE type
+                    WHEN 'table' THEN 0
+                    WHEN 'index' THEN 1
+                    WHEN 'view' THEN 2
+                    WHEN 'trigger' THEN 3
+                    ELSE 4
+                END, name
+            """.trimIndent(),
+            null,
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        SnapshotSchemaObject(
+                            type = cursor.getString(0),
+                            name = cursor.getString(1),
+                            sql = cursor.getString(2),
+                        ),
+                    )
+                }
+            }
+        }
+
+    private fun copySqliteSequenceIfPresent(database: SQLiteDatabase) {
+        val sourceHasSequence = database.rawQuery(
+            "SELECT 1 FROM backup_source.sqlite_master WHERE name='sqlite_sequence' LIMIT 1",
+            null,
+        ).use { it.moveToFirst() }
+        val destinationHasSequence = database.rawQuery(
+            "SELECT 1 FROM main.sqlite_master WHERE name='sqlite_sequence' LIMIT 1",
+            null,
+        ).use { it.moveToFirst() }
+        if (sourceHasSequence && destinationHasSequence) {
+            database.execSQL("DELETE FROM main.sqlite_sequence")
+            database.execSQL("INSERT INTO main.sqlite_sequence(name, seq) SELECT name, seq FROM backup_source.sqlite_sequence")
+        }
+    }
+
+    private fun queryPragmaInt(database: SQLiteDatabase, query: String): Int =
+        database.rawQuery(query, null).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
+
+    private fun quoteIdentifier(value: String): String = "\"${value.replace("\"", "\"\"")}\""
+
+    private data class SnapshotSchemaObject(val type: String, val name: String, val sql: String)
 
     fun restoreEncryptedBackup(uri: Uri, password: String) {
         require(password.length >= 6) { "Wpisz hasło użyte podczas tworzenia kopii" }
@@ -107,6 +230,9 @@ class BackupManager(private val application: MagazynApplication) {
             sqlite.rawQuery("PRAGMA integrity_check", null).use { cursor ->
                 require(cursor.moveToFirst() && cursor.getString(0).equals("ok", true)) { "Kontrola spójności kopii nie powiodła się" }
             }
+            sqlite.rawQuery("PRAGMA foreign_key_check", null).use { cursor ->
+                require(!cursor.moveToFirst()) { "Kopia zawiera niespójne powiązania między danymi" }
+            }
         } finally {
             sqlite.close()
         }
@@ -141,38 +267,81 @@ class BackupManager(private val application: MagazynApplication) {
     private fun replaceDatabase(source: File) {
         val destination = application.getDatabasePath(MagazynApplication.DATABASE_NAME)
         val staged = File(destination.parentFile, "${MagazynApplication.DATABASE_NAME}.restoring")
+        val rollback = RestoreJournal.rollbackFile(application)
+        val rollbackStaged = File(rollback.parentFile, "${rollback.name}.creating")
         destination.parentFile?.mkdirs()
         source.copyTo(staged, overwrite = true)
         FileOutputStream(staged, true).use { it.fd.sync() }
-        checkpointActiveDatabase()
-        val rollback = RestoreJournal.rollbackFile(application)
         rollback.parentFile?.mkdirs()
-        destination.copyTo(rollback, overwrite = true)
-        FileOutputStream(rollback, true).use { it.fd.sync() }
+        rollbackStaged.delete()
+        check(rollback.delete() || !rollback.exists()) { "Nie można przygotować bezpiecznego rollbacku" }
+        application.beginDatabaseReplacement()
+        var replacementAttempted = false
         try {
-            application.closeDatabase()
             RestoreJournal.recordStage(application, "DB_CLOSED")
-            RestoreJournal.deleteSidecars(destination)
-            runCatching {
-                java.nio.file.Files.move(staged.toPath(), destination.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            }.getOrElse {
-                java.nio.file.Files.move(staged.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            }
-            RestoreJournal.recordStage(application, "DB_REPLACED")
+            stabilizeClosedDatabase(destination)
+            destination.copyTo(rollbackStaged, overwrite = true)
+            FileOutputStream(rollbackStaged, true).use { it.fd.sync() }
+            moveReplacing(rollbackStaged, rollback)
+            RestoreJournal.recordStage(application, "ROLLBACK_CREATED")
             RestoreJournal.markPendingVerification(application)
-        } catch (error: Exception) {
-            rollback.copyTo(destination, overwrite = true)
             RestoreJournal.deleteSidecars(destination)
-            RestoreJournal.recordStage(application, "ROLLBACK_AFTER_REPLACE_FAILURE")
-            throw error
+            replacementAttempted = true
+            moveReplacing(staged, destination)
+            RestoreJournal.recordStage(application, "DB_REPLACED_AWAITING_HEALTHCHECK")
+        } catch (error: Exception) {
+            val rollbackRestored = if (!replacementAttempted) {
+                true
+            } else {
+                runCatching {
+                    check(rollback.isFile) { "Brak pliku rollbacku" }
+                    val rollbackRestore = File(destination.parentFile, "${destination.name}.rollback-after-failure")
+                    rollback.copyTo(rollbackRestore, overwrite = true)
+                    FileOutputStream(rollbackRestore, true).use { it.fd.sync() }
+                    RestoreJournal.deleteSidecars(destination)
+                    moveReplacing(rollbackRestore, destination)
+                }.isSuccess
+            }
+            runCatching {
+                RestoreJournal.markRolledBack(
+                    application,
+                    if (rollbackRestored) "ROLLBACK_AFTER_REPLACE_FAILURE" else "ROLLBACK_AFTER_REPLACE_FAILURE_FAILED",
+                )
+            }
+            throw RestoreRequiresRestartException(
+                if (rollbackRestored) {
+                    "Nie udało się zainstalować kopii. Zachowano poprzednią bazę; aplikacja musi uruchomić się ponownie."
+                } else {
+                    "Nie udało się zainstalować kopii ani automatycznie odtworzyć poprzedniej bazy. Aplikacja musi uruchomić się ponownie i użyć zapisanego rollbacku."
+                },
+                error,
+            )
         } finally {
             staged.delete()
+            rollbackStaged.delete()
         }
     }
 
-    private fun checkpointActiveDatabase() {
-        database.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(FULL)").use { cursor ->
-            if (cursor.moveToFirst() && cursor.getInt(0) != 0) error("Baza jest chwilowo zajęta. Spróbuj ponownie za moment.")
+    /** Room jest już zamknięty, więc żaden zapis nie może wejść między checkpoint a kopię rollbacku. */
+    private fun stabilizeClosedDatabase(databaseFile: File) {
+        require(databaseFile.isFile) { "Nie znaleziono aktywnej bazy danych" }
+        val sqlite = SQLiteDatabase.openDatabase(databaseFile.path, null, SQLiteDatabase.OPEN_READWRITE)
+        try {
+            sqlite.rawQuery("PRAGMA wal_checkpoint(FULL)", null).use { cursor ->
+                if (cursor.moveToFirst() && cursor.getInt(0) != 0) error("Nie udało się ustabilizować aktywnej bazy przed przywróceniem")
+            }
+        } finally {
+            sqlite.close()
+        }
+        RestoreJournal.deleteSidecars(databaseFile)
+        validateDatabase(databaseFile, requireCurrentSchema = true)
+    }
+
+    private fun moveReplacing(source: File, destination: File) {
+        runCatching {
+            java.nio.file.Files.move(source.toPath(), destination.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        }.getOrElse {
+            java.nio.file.Files.move(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
     }
 
@@ -196,3 +365,5 @@ class BackupManager(private val application: MagazynApplication) {
         const val VALIDATION_DATABASE_NAME = "magazyn-restore-validation.db"
     }
 }
+
+class RestoreRequiresRestartException(message: String, cause: Throwable) : IllegalStateException(message, cause)
