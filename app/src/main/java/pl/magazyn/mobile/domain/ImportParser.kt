@@ -40,12 +40,11 @@ object ImportParser {
                 null
             }
         }
-        val productKeys = productLookup(products).keys
         val unresolved = when (kind) {
-            ImportKind.STOCK -> emptyList()
+            ImportKind.STOCK -> rows.filterIsInstance<StockImportRow>().map { it.productName }
             ImportKind.PEOPLE -> rows.filterIsInstance<PersonIssueImportRow>().map { it.productName }
             ImportKind.SHIPYARDS -> rows.filterIsInstance<ShipyardIssueImportRow>().map { it.productName }
-        }.distinct().filter { key(it) !in productKeys }.sorted()
+        }.distinct().filter { resolveImportedProduct(it, products) !is ImportedProductResolution.Matched }.sorted()
         return ImportPreview(
             kind = kind,
             fileName = fileName,
@@ -58,12 +57,45 @@ object ImportParser {
         )
     }
 
-    fun productLookup(products: List<ProductEntity>): Map<String, ProductEntity> = buildMap {
-        products.forEach { product ->
-            putIfAbsent(key(product.name), product)
-            product.aliases.split(",").map(String::trim).filter(String::isNotBlank).forEach { alias ->
-                putIfAbsent(key(alias), product)
+    fun resolveImportedProduct(rawProductName: String, products: List<ProductEntity>): ImportedProductResolution {
+        val sourceKey = key(rawProductName)
+        if (sourceKey.isBlank()) return ImportedProductResolution.NotFound
+
+        val fullMatches = products.filter { product ->
+            val variantKey = key(product.variant.orEmpty())
+            variantKey.isNotBlank() && productImportLabels(product).any { label ->
+                key("$label ${product.variant}") == sourceKey
             }
+        }
+        val exactNameMatches = products.filter { product -> key(product.name) == sourceKey }
+        resolutionFor(fullMatches + exactNameMatches)?.let { return it }
+
+        val containsUnmatchedExplicitVariant = products.any { product ->
+            productImportLabels(product).any { label ->
+                val labelKey = key(label)
+                labelKey.isNotBlank() && sourceKey.startsWith("$labelKey ")
+            }
+        }
+        if (containsUnmatchedExplicitVariant) return ImportedProductResolution.NotFound
+
+        val aliasMatches = products.filter { product ->
+            product.aliases.split(",").any { alias -> key(alias) == sourceKey }
+        }
+        return resolutionFor(aliasMatches) ?: ImportedProductResolution.NotFound
+    }
+
+    private fun productImportLabels(product: ProductEntity): List<String> =
+        (listOf(product.name) + product.aliases.split(","))
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinctBy(::key)
+
+    private fun resolutionFor(matches: List<ProductEntity>): ImportedProductResolution? {
+        val distinct = matches.distinctBy(ProductEntity::id)
+        return when (distinct.size) {
+            0 -> null
+            1 -> ImportedProductResolution.Matched(distinct.single())
+            else -> ImportedProductResolution.Ambiguous(distinct)
         }
     }
 

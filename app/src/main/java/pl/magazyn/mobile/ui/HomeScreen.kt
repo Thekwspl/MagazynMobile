@@ -581,7 +581,9 @@ private fun PendingMappingDialog(
 ) {
     var query by rememberSaveable(item.sourceKey) { mutableStateOf(item.rawProductName) }
     var selectedProductId by rememberSaveable(item.sourceKey) { mutableStateOf<String?>(null) }
-    var unit by rememberSaveable(item.sourceKey) { mutableStateOf("szt.") }
+    var unit by rememberSaveable(item.sourceKey) {
+        mutableStateOf(item.recipientLabel.takeIf { item.kind == "STOCK" && it.isNotBlank() } ?: "szt.")
+    }
     var unitMenu by remember { mutableStateOf(false) }
     val matches = products.filter {
         pl.magazyn.mobile.domain.matchesSearch(query, it.name, it.variant.orEmpty(), it.aliases, it.tags)

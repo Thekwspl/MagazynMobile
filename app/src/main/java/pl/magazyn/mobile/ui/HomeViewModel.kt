@@ -38,6 +38,7 @@ import pl.magazyn.mobile.data.ParserLearningRuleEntity
 import pl.magazyn.mobile.domain.ParsedItem
 import pl.magazyn.mobile.domain.ParsedInputKind
 import pl.magazyn.mobile.domain.ImportParser
+import pl.magazyn.mobile.domain.PENDING_STOCK_QUANTITY_KNOWN
 import pl.magazyn.mobile.domain.normalizeDisplayName
 import pl.magazyn.mobile.domain.normalizePersonName
 import pl.magazyn.mobile.domain.normalizeFirstName
@@ -564,12 +565,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             database.withTransaction {
                 val sourceAliases = items.map { it.rawProductName.trim() }.filter(String::isNotBlank).distinct()
+                val stockUnit = items.firstOrNull { it.kind == "STOCK" }?.recipientLabel.orEmpty()
                 val existingProduct = productId?.let { database.productDao().findById(it) }
                 val product = existingProduct?.let { existing ->
                     val aliases = (existing.aliases.split(",") + sourceAliases)
                         .map(String::trim).filter(String::isNotBlank)
                         .distinctBy(ImportParser::key).joinToString(", ")
-                    existing.copy(aliases = aliases).also { database.productDao().update(it) }
+                    existing.copy(
+                        aliases = aliases,
+                        unit = stockUnit.ifBlank { existing.unit },
+                    ).also { database.productDao().update(it) }
                 } ?: ProductEntity(
                     id = UUID.randomUUID().toString(),
                     name = normalizeDisplayName(newProductName).ifBlank { normalizeDisplayName(items.first().rawProductName) },
@@ -581,6 +586,36 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 items.forEach { item ->
                     if (!database.importDao().isSourceRowPending(item.sourceKey)) return@forEach
                     when (item.kind) {
+                    "STOCK" -> {
+                        val quantityKnown = item.effectiveDate == PENDING_STOCK_QUANTITY_KNOWN
+                        val oldQuantity = database.stockDao().find("warehouse-main", product.id)?.quantity ?: 0.0
+                        database.stockDao().upsert(
+                            listOf(StockBalanceEntity("warehouse-main", product.id, item.quantity.toDouble(), quantityKnown)),
+                        )
+                        if (quantityKnown) {
+                            val movementId = UUID.randomUUID().toString()
+                            database.movementDao().insertMovement(
+                                StockMovementEntity(
+                                    id = movementId,
+                                    type = "STOCK_IMPORT",
+                                    warehouseId = "warehouse-main",
+                                    employeeId = null,
+                                    effectiveDate = java.time.LocalDate.now().toString(),
+                                    createdAtEpochMillis = System.currentTimeMillis(),
+                                    note = "Uzupełniono mapowanie importu: ${item.sourceFileName}",
+                                ),
+                            )
+                            database.movementDao().insertLine(
+                                StockMovementLineEntity(
+                                    UUID.randomUUID().toString(),
+                                    movementId,
+                                    product.id,
+                                    item.quantity.toDouble() - oldQuantity,
+                                    item.recipientLabel.ifBlank { product.unit },
+                                ),
+                            )
+                        }
+                    }
                     "PEOPLE" -> {
                         val firstName = normalizeFirstName(item.recipientFirstName)
                         val lastName = normalizePersonName(item.recipientLastName)

@@ -78,23 +78,11 @@ fun ImportScreen(contentPadding: PaddingValues, showTitle: Boolean = true, viewM
                     }
                     SummaryLine("Błędy", preview.errors.size.toString())
                     SummaryLine("Powtórzone wiersze", preview.duplicateRows.toString())
-                    if (preview.kind != ImportKind.STOCK) {
-                        SummaryLine(
-                            if (preview.kind == ImportKind.SHIPYARDS) "Nowe produkty do utworzenia" else "Nazwy do mapowania",
-                            preview.unresolvedProductNames.size.toString(),
-                        )
-                    }
+                    SummaryLine("Nazwy do mapowania", preview.unresolvedProductNames.size.toString())
                     if (preview.unresolvedProductNames.isNotEmpty()) {
                         Text("Przykłady nierozpoznanych nazw:", style = MaterialTheme.typography.labelMedium)
                         preview.unresolvedProductNames.take(6).forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
-                        Text(
-                            if (preview.kind == ImportKind.SHIPYARDS) {
-                                "Brakujące produkty zostaną utworzone automatycznie. Ich dane będzie można później poprawić."
-                            } else {
-                                "Zostaną zachowane w kolejce mapowania — nic nie zginie."
-                            },
-                            color = MaterialTheme.colorScheme.tertiary,
-                        )
+                        Text("Zostaną zachowane w kolejce mapowania — nic nie zginie.", color = MaterialTheme.colorScheme.tertiary)
                     }
                     preview.errors.take(4).forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     if (preview.alreadyImported) {

@@ -6,6 +6,15 @@ enum class ImportKind(val title: String) {
     SHIPYARDS("Wydania na stocznie"),
 }
 
+const val PENDING_STOCK_QUANTITY_KNOWN = "STOCK_QUANTITY_KNOWN"
+const val PENDING_STOCK_QUANTITY_UNKNOWN = "STOCK_QUANTITY_UNKNOWN"
+
+sealed interface ImportedProductResolution {
+    data class Matched(val product: pl.magazyn.mobile.data.ProductEntity) : ImportedProductResolution
+    data class Ambiguous(val candidates: List<pl.magazyn.mobile.data.ProductEntity>) : ImportedProductResolution
+    data object NotFound : ImportedProductResolution
+}
+
 sealed interface ImportRow {
     val rowNumber: Int
     val sourceKey: String

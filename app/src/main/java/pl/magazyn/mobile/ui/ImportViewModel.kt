@@ -28,6 +28,9 @@ import pl.magazyn.mobile.data.ShipyardStockBalanceEntity
 import pl.magazyn.mobile.domain.ImportKind
 import pl.magazyn.mobile.domain.ImportParser
 import pl.magazyn.mobile.domain.ImportPreview
+import pl.magazyn.mobile.domain.ImportedProductResolution
+import pl.magazyn.mobile.domain.PENDING_STOCK_QUANTITY_KNOWN
+import pl.magazyn.mobile.domain.PENDING_STOCK_QUANTITY_UNKNOWN
 import pl.magazyn.mobile.domain.PersonIssueImportRow
 import pl.magazyn.mobile.domain.ShipyardIssueImportRow
 import pl.magazyn.mobile.domain.StockImportRow
@@ -106,108 +109,120 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
 
         when (preview.kind) {
             ImportKind.STOCK -> {
-                val products = database.productDao().getAllNow().associateByTo(mutableMapOf(), { ImportParser.key(it.name) }, { it })
-                val movementId = UUID.randomUUID().toString()
-                database.movementDao().insertMovement(
-                    StockMovementEntity(
-                        id = movementId,
-                        type = "STOCK_IMPORT",
-                        warehouseId = "warehouse-main",
-                        employeeId = null,
-                        effectiveDate = java.time.LocalDate.now().toString(),
-                        createdAtEpochMillis = System.currentTimeMillis(),
-                        note = "Import: ${preview.fileName}",
-                    ),
-                )
+                val products = database.productDao().getAllNow()
+                var movementId: String? = null
                 preview.rows.filterIsInstance<StockImportRow>().forEach { row ->
-                    val productKey = ImportParser.key(row.productName)
-                    val existing = products[productKey]
-                    val product = if (existing == null) {
-                        ProductEntity(
-                            id = "product-import-${ImportParser.sha256(productKey).take(20)}",
-                            name = row.productName.trim(),
-                            unit = row.unit,
-                            category = inferCategory(row.productName),
-                        ).also { database.productDao().insert(it); products[productKey] = it }
-                    } else {
-                        existing.copy(unit = row.unit).also { database.productDao().update(it); products[productKey] = it }
-                    }
-                    val oldQuantity = database.stockDao().find("warehouse-main", product.id)?.quantity ?: 0.0
-                    database.stockDao().upsert(
-                        listOf(StockBalanceEntity("warehouse-main", product.id, row.quantity.toDouble(), row.quantityKnown)),
+                    val inserted = database.importDao().insertSourceRow(
+                        ImportSourceRowEntity(row.sourceKey, batchId, preview.kind.name, row.rowNumber),
                     )
-                    if (row.quantityKnown) {
-                        database.movementDao().insertLine(
-                            StockMovementLineEntity(
-                                id = UUID.randomUUID().toString(),
-                                movementId = movementId,
-                                productId = product.id,
-                                quantityDelta = row.quantity.toDouble() - oldQuantity,
-                                unit = row.unit,
-                            ),
-                        )
+                    if (inserted == -1L) {
+                        skippedRows++
+                    } else {
+                        when (val resolution = ImportParser.resolveImportedProduct(row.productName, products)) {
+                            is ImportedProductResolution.Matched -> {
+                                val product = resolution.product.copy(unit = row.unit)
+                                    .also { database.productDao().update(it) }
+                                val oldQuantity = database.stockDao().find("warehouse-main", product.id)?.quantity ?: 0.0
+                                database.stockDao().upsert(
+                                    listOf(StockBalanceEntity("warehouse-main", product.id, row.quantity.toDouble(), row.quantityKnown)),
+                                )
+                                if (row.quantityKnown) {
+                                    if (movementId == null) {
+                                        val newMovementId = UUID.randomUUID().toString()
+                                        database.movementDao().insertMovement(
+                                            StockMovementEntity(
+                                                id = newMovementId,
+                                                type = "STOCK_IMPORT",
+                                                warehouseId = "warehouse-main",
+                                                employeeId = null,
+                                                effectiveDate = java.time.LocalDate.now().toString(),
+                                                createdAtEpochMillis = System.currentTimeMillis(),
+                                                note = "Import: ${preview.fileName}",
+                                            ),
+                                        )
+                                        movementId = newMovementId
+                                    }
+                                    val stockMovementId = checkNotNull(movementId)
+                                    database.movementDao().insertLine(
+                                        StockMovementLineEntity(
+                                            id = UUID.randomUUID().toString(),
+                                            movementId = stockMovementId,
+                                            productId = product.id,
+                                            quantityDelta = row.quantity.toDouble() - oldQuantity,
+                                            unit = row.unit,
+                                        ),
+                                    )
+                                }
+                                importedRows++
+                            }
+                            is ImportedProductResolution.Ambiguous,
+                            ImportedProductResolution.NotFound -> {
+                                database.importDao().upsertPendingRow(
+                                    ImportPendingRowEntity(
+                                        sourceKey = row.sourceKey,
+                                        batchId = batchId,
+                                        kind = preview.kind.name,
+                                        sourceRowNumber = row.rowNumber,
+                                        recipientLabel = row.unit,
+                                        effectiveDate = if (row.quantityKnown) PENDING_STOCK_QUANTITY_KNOWN else PENDING_STOCK_QUANTITY_UNKNOWN,
+                                        rawProductName = row.productName,
+                                        quantity = row.quantity,
+                                    ),
+                                )
+                                pendingRows++
+                            }
+                        }
                     }
-                    database.importDao().insertSourceRow(ImportSourceRowEntity(row.sourceKey, batchId, preview.kind.name, row.rowNumber))
-                    importedRows++
                 }
             }
 
             ImportKind.PEOPLE -> {
                 val employees = database.employeeDao().getAllNow().associateByTo(mutableMapOf(), { ImportParser.key(it.firstName + " " + it.lastName) }, { it })
-                val products = ImportParser.productLookup(database.productDao().getAllNow())
+                val products = database.productDao().getAllNow()
                 preview.rows.filterIsInstance<PersonIssueImportRow>().forEach { row ->
-                    val employeeKey = ImportParser.key(row.firstName + " " + row.lastName)
-                    val employee = employees[employeeKey] ?: EmployeeEntity(
-                        id = "employee-import-${ImportParser.sha256(employeeKey).take(20)}",
-                        fullName = row.firstName + " " + row.lastName,
-                        firstName = row.firstName,
-                        lastName = row.lastName,
-                    ).also { database.employeeDao().insert(it); employees[employeeKey] = it }
                     val inserted = database.importDao().insertSourceRow(ImportSourceRowEntity(row.sourceKey, batchId, preview.kind.name, row.rowNumber))
                     if (inserted == -1L) {
                         skippedRows++
                     } else {
-                        val product = products[ImportParser.key(row.productName)]
-                        if (product == null) {
-                            database.importDao().upsertPendingRow(
-                                ImportPendingRowEntity(
-                                    sourceKey = row.sourceKey,
-                                    batchId = batchId,
-                                    kind = preview.kind.name,
-                                    sourceRowNumber = row.rowNumber,
-                                    recipientFirstName = row.firstName,
-                                    recipientLastName = row.lastName,
-                                    effectiveDate = row.effectiveDate,
-                                    rawProductName = row.productName,
-                                    quantity = 1,
-                                ),
-                            )
-                            pendingRows++
-                        } else {
-                            insertHistoricalIssue(employee.id, "", row.effectiveDate, product, 1, preview.fileName)
-                            importedRows++
+                        when (val resolution = ImportParser.resolveImportedProduct(row.productName, products)) {
+                            is ImportedProductResolution.Matched -> {
+                                val employeeKey = ImportParser.key(row.firstName + " " + row.lastName)
+                                val employee = employees[employeeKey] ?: EmployeeEntity(
+                                    id = "employee-import-${ImportParser.sha256(employeeKey).take(20)}",
+                                    fullName = row.firstName + " " + row.lastName,
+                                    firstName = row.firstName,
+                                    lastName = row.lastName,
+                                ).also { database.employeeDao().insert(it); employees[employeeKey] = it }
+                                insertHistoricalIssue(employee.id, "", row.effectiveDate, resolution.product, 1, preview.fileName)
+                                importedRows++
+                            }
+                            is ImportedProductResolution.Ambiguous,
+                            ImportedProductResolution.NotFound -> {
+                                database.importDao().upsertPendingRow(
+                                    ImportPendingRowEntity(
+                                        sourceKey = row.sourceKey,
+                                        batchId = batchId,
+                                        kind = preview.kind.name,
+                                        sourceRowNumber = row.rowNumber,
+                                        recipientFirstName = row.firstName,
+                                        recipientLastName = row.lastName,
+                                        effectiveDate = row.effectiveDate,
+                                        rawProductName = row.productName,
+                                        quantity = 1,
+                                    ),
+                                )
+                                pendingRows++
+                            }
                         }
                     }
                 }
             }
 
             ImportKind.SHIPYARDS -> {
-                val products = ImportParser.productLookup(database.productDao().getAllNow()).toMutableMap()
+                val products = database.productDao().getAllNow()
                 val shipyards = database.shipyardDao().getAllNow()
                     .associateByTo(mutableMapOf(), { ImportParser.key(it.name) }, { it })
                 preview.rows.filterIsInstance<ShipyardIssueImportRow>().forEach { row ->
-                    val shipyardKey = ImportParser.key(row.shipyard)
-                    val existingShipyard = shipyards[shipyardKey]
-                    val resolvedShipyard = if (existingShipyard == null) {
-                        ShipyardEntity(
-                            id = "shipyard-import-${ImportParser.sha256(shipyardKey).take(20)}",
-                            name = normalizeDisplayName(row.shipyard),
-                        ).also { database.shipyardDao().insert(it); shipyards[shipyardKey] = it }
-                    } else if (existingShipyard.isArchived) {
-                        database.shipyardDao().restoreById(existingShipyard.id)
-                        existingShipyard.copy(isArchived = false).also { shipyards[shipyardKey] = it }
-                    } else existingShipyard
-
                     val wasPending = repairMode && database.importDao().isSourceRowPending(row.sourceKey)
                     val wasImported = repairMode && database.importDao().wasSourceRowImported(row.sourceKey)
                     val shouldImportStock = !repairMode || wasPending || !wasImported
@@ -217,18 +232,40 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
                         if (!repairMode) {
                             database.importDao().insertSourceRow(ImportSourceRowEntity(row.sourceKey, batchId, preview.kind.name, row.rowNumber))
                         }
-
-                        val productKey = ImportParser.key(row.productName)
-                        val product = products[productKey] ?: ProductEntity(
-                            id = "product-shipyard-import-${ImportParser.sha256(productKey).take(20)}",
-                            name = normalizeDisplayName(row.productName),
-                            unit = inferUnit(row.productName),
-                            category = inferCategory(row.productName),
-                        ).also { database.productDao().insert(it); products[productKey] = it }
-
-                        insertHistoricalShipyardStock(resolvedShipyard, row.effectiveDate, product, row.quantity, preview.fileName)
-                        if (wasPending) database.importDao().deletePendingRow(row.sourceKey)
-                        importedRows++
+                        when (val resolution = ImportParser.resolveImportedProduct(row.productName, products)) {
+                            is ImportedProductResolution.Matched -> {
+                                val shipyardKey = ImportParser.key(row.shipyard)
+                                val existingShipyard = shipyards[shipyardKey]
+                                val resolvedShipyard = if (existingShipyard == null) {
+                                    ShipyardEntity(
+                                        id = "shipyard-import-${ImportParser.sha256(shipyardKey).take(20)}",
+                                        name = normalizeDisplayName(row.shipyard),
+                                    ).also { database.shipyardDao().insert(it); shipyards[shipyardKey] = it }
+                                } else if (existingShipyard.isArchived) {
+                                    database.shipyardDao().restoreById(existingShipyard.id)
+                                    existingShipyard.copy(isArchived = false).also { shipyards[shipyardKey] = it }
+                                } else existingShipyard
+                                insertHistoricalShipyardStock(resolvedShipyard, row.effectiveDate, resolution.product, row.quantity, preview.fileName)
+                                if (wasPending) database.importDao().deletePendingRow(row.sourceKey)
+                                importedRows++
+                            }
+                            is ImportedProductResolution.Ambiguous,
+                            ImportedProductResolution.NotFound -> {
+                                database.importDao().upsertPendingRow(
+                                    ImportPendingRowEntity(
+                                        sourceKey = row.sourceKey,
+                                        batchId = batchId,
+                                        kind = preview.kind.name,
+                                        sourceRowNumber = row.rowNumber,
+                                        recipientLabel = row.shipyard,
+                                        effectiveDate = row.effectiveDate,
+                                        rawProductName = row.productName,
+                                        quantity = row.quantity,
+                                    ),
+                                )
+                                pendingRows++
+                            }
+                        }
                     }
                 }
             }
