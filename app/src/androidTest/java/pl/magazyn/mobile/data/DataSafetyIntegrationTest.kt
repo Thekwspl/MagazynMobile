@@ -10,6 +10,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import pl.magazyn.mobile.IsolatedApplicationEnvironment
 import pl.magazyn.mobile.eventually
+import pl.magazyn.mobile.queryDouble
 import pl.magazyn.mobile.queryLong
 import pl.magazyn.mobile.runAndAwaitViewModelWork
 import pl.magazyn.mobile.seedCoreData
@@ -89,7 +90,21 @@ class DataSafetyIntegrationTest {
         }
 
         assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movements WHERE note='Realizacja zamówienia'"))
-        assertEquals(7.0, database.stockDao().find("warehouse-main", "product-1")?.quantity ?: Double.NaN, 0.0)
+        assertEquals(
+            1L,
+            database.queryLong(
+                "SELECT COUNT(*) FROM stock_movement_lines l JOIN stock_movements m ON m.id=l.movementId WHERE m.note='Realizacja zamówienia'",
+            ),
+        )
+        assertEquals(
+            -2.0,
+            database.queryDouble(
+                "SELECT l.quantityDelta FROM stock_movement_lines l JOIN stock_movements m ON m.id=l.movementId WHERE m.note='Realizacja zamówienia'",
+            ),
+            0.0,
+        )
+        assertEquals(8.0, database.stockDao().find("warehouse-main", "product-1")?.quantity ?: Double.NaN, 0.0)
+        assertEquals("ISSUED", database.orderDao().findById("warning-order")?.status)
     }
 
     @Test
