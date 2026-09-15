@@ -20,8 +20,7 @@ data class AiCatalogItem(
 )
 
 class GeminiNoteAnalyzer {
-    @Volatile var lastModel: String = PRIMARY_MODEL
-        private set
+    val lastModel: String = PRIMARY_MODEL
     suspend fun analyze(
         apiKey: String,
         rawText: String,
@@ -88,15 +87,7 @@ class GeminiNoteAnalyzer {
                 return postOnce(apiKey, prompt, lastModel)
             } catch (error: GeminiApiException) {
                 lastError = error
-                if (error.statusCode == 404 && lastModel != FALLBACK_MODEL) {
-                    lastModel = FALLBACK_MODEL
-                    return postOnce(apiKey, prompt, lastModel)
-                }
                 if (error.statusCode !in setOf(429, 500, 502, 503, 504) || attempt == 2) {
-                    if (lastModel != FALLBACK_MODEL && error.statusCode in setOf(429, 503)) {
-                        lastModel = FALLBACK_MODEL
-                        return postOnce(apiKey, prompt, lastModel)
-                    }
                     throw error
                 }
                 delay(1_200L * (attempt + 1))
@@ -264,7 +255,6 @@ class GeminiNoteAnalyzer {
 
     private companion object {
         const val PRIMARY_MODEL = "gemini-3.6-flash"
-        const val FALLBACK_MODEL = "gemini-3.6-flash"
         val PHONE_REGEX = Regex("""(?<!\w)(?:\+\d{1,3}[\s-]?)?(?:\d[\s-]?){7,12}(?!\w)""")
     }
 }

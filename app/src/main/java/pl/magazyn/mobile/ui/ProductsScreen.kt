@@ -372,11 +372,36 @@ private fun ProductPhoto(uri: String, modifier: Modifier = Modifier) {
     var bitmap by remember(uri) { mutableStateOf<android.graphics.Bitmap?>(null) }
     LaunchedEffect(uri) {
         bitmap = if (uri.isBlank()) null else withContext(Dispatchers.IO) {
-            runCatching { context.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use(BitmapFactory::decodeStream) }.getOrNull()
+            runCatching {
+                val imageUri = android.net.Uri.parse(uri)
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                context.contentResolver.openInputStream(imageUri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, bounds)
+                }
+                val options = BitmapFactory.Options().apply {
+                    inSampleSize = productPhotoSampleSize(bounds.outWidth, bounds.outHeight)
+                }
+                context.contentResolver.openInputStream(imageUri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, options)
+                }
+            }.getOrNull()
         }
     }
     Surface(modifier, shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
         if (bitmap != null) Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Default.Inventory2, null) }
     }
+}
+
+internal fun productPhotoSampleSize(
+    width: Int,
+    height: Int,
+    maximumDimension: Int = 1_200,
+): Int {
+    if (width <= 0 || height <= 0 || maximumDimension <= 0) return 1
+    var sampleSize = 1
+    while (maxOf(width, height) / sampleSize > maximumDimension) {
+        sampleSize *= 2
+    }
+    return sampleSize
 }

@@ -168,6 +168,28 @@ class DataSafetyIntegrationTest {
     }
 
     @Test
+    fun cancellingWholeLogicalOrderCancelsEveryDraftPart() = runBlocking {
+        database.notebookDao().insertNotebook(
+            OrderNotebookEntity("notebook-order", "Zamówienie dla dwóch osób", "VERIFIED", "ORDER", 5),
+        )
+        database.orderDao().upsertOrders(
+            listOf(
+                OrderEntity("order-part-1", "notebook-order", "employee-1", "Kowalski Jan", null, "DRAFT", "2026-09-15", 5),
+                OrderEntity("order-part-2", "notebook-order", null, "Nowak Adam", null, "DRAFT", "2026-09-15", 5),
+            ),
+        )
+        val viewModel = OrdersViewModel(environment.application)
+
+        viewModel.runAndAwaitViewModelWork {
+            viewModel.cancelOrder("order-part-1")
+        }
+
+        assertEquals("CANCELLED", database.orderDao().findById("order-part-1")?.status)
+        assertEquals("CANCELLED", database.orderDao().findById("order-part-2")?.status)
+        assertEquals(2L, database.queryLong("SELECT COUNT(*) FROM order_changes WHERE action='CANCEL'"))
+    }
+
+    @Test
     fun roomProductsStillResolveImportedVariantWithoutDependingOnQueryOrder() = runBlocking {
         database.productDao().insert(ProductEntity("product-54", "Produkt", "54", "szt."))
         val products = database.productDao().getAllNow()

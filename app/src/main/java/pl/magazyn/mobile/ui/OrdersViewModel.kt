@@ -145,7 +145,18 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun cancelOrder(orderId: String) {
-        viewModelScope.launch { log(orderId, "CANCEL", "Anulowano zamówienie"); database.orderDao().setStatus(orderId, "CANCELLED") }
+        viewModelScope.launch {
+            database.withTransaction {
+                val selectedOrder = database.orderDao().findById(orderId) ?: return@withTransaction
+                if (selectedOrder.status != "DRAFT") return@withTransaction
+                val orderIds = selectedOrder.notebookId
+                    ?.let { database.orderDao().findDraftIdsByNotebookId(it) }
+                    ?: listOf(selectedOrder.id)
+                if (orderIds.isEmpty()) return@withTransaction
+                orderIds.forEach { id -> log(id, "CANCEL", "Anulowano zamówienie") }
+                database.orderDao().cancelDraftOrders(orderIds)
+            }
+        }
     }
 
     fun createPerson(firstName: String, lastName: String, phones: String, positions: String, aliases: String, onCreated: (String, String) -> Unit) {

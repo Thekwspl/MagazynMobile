@@ -210,7 +210,7 @@ private fun TaskEditorScreen(
     var productId by remember(task?.id) { mutableStateOf(task?.productId) }
     var orderId by remember(task?.id) { mutableStateOf(task?.orderId) }
     var showDatePicker by remember { mutableStateOf(false) }
-    val drafts = remember(task?.id, storedSteps, storedPeople, places, people) {
+    val drafts = remember(task?.id) {
         val sourceSteps = if (storedSteps.isNotEmpty() || task == null) storedSteps.map { step ->
             ParsedTaskStep(step.time, step.placeId, step.placeName.orEmpty(), step.note, storedPeople.filter { it.taskStepId == step.id }.map { person ->
                 ParsedTaskPerson(person.employeeId, person.displayName, person.note, if (person.employeeId == null) ParseConfidence.REVIEW else ParseConfidence.CERTAIN, person.id, person.isCompleted, person.completedAtEpochMillis, person.completedBy)

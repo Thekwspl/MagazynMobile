@@ -58,6 +58,11 @@ jobs:
           TAG="v$APP_VERSION"
 
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            TAG_COMMIT=$(git rev-parse "$TAG^{commit}")
+            if [ "$TAG_COMMIT" != "$GITHUB_SHA" ]; then
+              echo "::error::Tag $TAG wskazuje commit $TAG_COMMIT, a workflow buduje $GITHUB_SHA. Tag nie zostanie przesunięty automatycznie."
+              exit 1
+            fi
             CREATE_TAG=false
           else
             CREATE_TAG=true
@@ -150,6 +155,7 @@ jobs:
         run: sudo chmod 666 /dev/kvm
 
       - name: Krytyczne androidTest — API 26
+        timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 26
@@ -160,6 +166,7 @@ jobs:
           script: gradle connectedDebugAndroidTest --no-daemon --max-workers=1
 
       - name: Krytyczne androidTest — API 35
+        timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35

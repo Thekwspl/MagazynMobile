@@ -532,6 +532,12 @@ interface OrderDao {
     @Query("UPDATE orders SET status = :status WHERE id = :orderId")
     suspend fun setStatus(orderId: String, status: String)
 
+    @Query("SELECT id FROM orders WHERE notebookId = :notebookId AND status = 'DRAFT'")
+    suspend fun findDraftIdsByNotebookId(notebookId: String): List<String>
+
+    @Query("UPDATE orders SET status = 'CANCELLED' WHERE id IN (:orderIds) AND status = 'DRAFT'")
+    suspend fun cancelDraftOrders(orderIds: List<String>): Int
+
     @Query("UPDATE orders SET status = 'ISSUED' WHERE id = :orderId AND status = 'DRAFT'")
     suspend fun markIssuedIfDraft(orderId: String): Int
 
