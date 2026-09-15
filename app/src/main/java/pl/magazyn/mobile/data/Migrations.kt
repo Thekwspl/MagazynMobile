@@ -268,9 +268,8 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         db.execSQL("CREATE INDEX IF NOT EXISTS index_import_pending_rows_batchId ON import_pending_rows(batchId)")
         db.execSQL("CREATE INDEX IF NOT EXISTS index_import_pending_rows_kind ON import_pending_rows(kind)")
 
-        // Usuwa wyłącznie rozpoznawalne rekordy demonstracyjne, o ile użytkownik nie wykonał na nich własnych ruchów.
-        db.execSQL("DELETE FROM order_lines WHERE orderId = 'order-104'")
-        db.execSQL("DELETE FROM orders WHERE id = 'order-104'")
+        // Nie usuwamy zamówienia wyłącznie po stałym ID. W schema 4 nie ma
+        // wiarygodnej sygnatury, która odróżnia demo order-104 od danych użytkownika.
         db.execSQL(
             """
             DELETE FROM stock_balances

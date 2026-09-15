@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 75
     steps:
       - name: Pobierz kod i tagi
         uses: actions/checkout@v4
@@ -97,11 +97,23 @@ jobs:
         # Jeden worker zapobiega równoczesnemu zapisowi częściowego pliku JSON.
         run: gradle test --no-daemon --max-workers=1
 
+      - name: Skompiluj testy instrumentacyjne
+        run: gradle assembleDebugAndroidTest --no-daemon --max-workers=1
+
+      - name: Zachowaj wygenerowany schemat Room
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: room-schema-${{ steps.release.outputs.version }}
+          path: app/schemas/pl.magazyn.mobile.data.AppDatabase/*.json
+          if-no-files-found: warn
+
       - name: Sprawdź eksportowane schematy Room
         shell: bash
         run: |
           python3 - <<'PY'
           import json
+          import re
           from pathlib import Path
 
           schemas = sorted(Path("app/schemas").rglob("*.json"))
@@ -111,7 +123,56 @@ jobs:
               with schema.open(encoding="utf-8") as source:
                   json.load(source)
               print(f"Poprawny JSON: {schema}")
+
+          schema_source = Path("app/src/main/java/pl/magazyn/mobile/data/DatabaseSchema.kt").read_text(encoding="utf-8")
+          match = re.search(r"DATABASE_SCHEMA_VERSION\s*=\s*(\d+)", schema_source)
+          if not match:
+              raise SystemExit("Nie można odczytać DATABASE_SCHEMA_VERSION")
+          current_version = int(match.group(1))
+          current_schema = Path(f"app/schemas/pl.magazyn.mobile.data.AppDatabase/{current_version}.json")
+          if not current_schema.is_file():
+              raise SystemExit(f"Brak eksportu aktualnego schematu Room: {current_schema}")
+          with current_schema.open(encoding="utf-8") as source:
+              exported = json.load(source)
+          if exported.get("database", {}).get("version") != current_version:
+              raise SystemExit(f"Eksport {current_schema} ma niezgodny numer wersji")
+          print(f"Aktualny schema gate: {current_schema}")
           PY
+
+      - name: Włącz akcelerację emulatora
+        run: sudo chmod 666 /dev/kvm
+
+      - name: Krytyczne androidTest — API 26
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 26
+          arch: x86_64
+          target: google_apis
+          profile: Nexus 6
+          disable-animations: true
+          script: gradle connectedDebugAndroidTest --no-daemon --max-workers=1
+
+      - name: Krytyczne androidTest — API 35
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: Nexus 6
+          disable-animations: true
+          script: gradle connectedDebugAndroidTest --no-daemon --max-workers=1
+
+      - name: Sprawdź, czy aktualny schemat Room jest zapisany w repozytorium
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_VERSION=$(sed -n 's/.*DATABASE_SCHEMA_VERSION[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' app/src/main/java/pl/magazyn/mobile/data/DatabaseSchema.kt | head -n 1)
+          CURRENT_SCHEMA="app/schemas/pl.magazyn.mobile.data.AppDatabase/$CURRENT_VERSION.json"
+          git ls-files --error-unmatch "$CURRENT_SCHEMA" >/dev/null || {
+            echo "Aktualny eksport $CURRENT_SCHEMA został wygenerowany przez Room, ale nie jest zapisany w repozytorium."
+            echo "Pobierz artefakt room-schema z tego workflow, dodaj plik do repo i uruchom CI ponownie."
+            exit 1
+          }
 
       - name: Podpisany build release
         env:
