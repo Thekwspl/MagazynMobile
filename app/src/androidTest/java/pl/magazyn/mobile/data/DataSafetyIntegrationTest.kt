@@ -1,9 +1,7 @@
 package pl.magazyn.mobile.data
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -11,9 +9,9 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import pl.magazyn.mobile.IsolatedApplicationEnvironment
-import pl.magazyn.mobile.awaitViewModelWork
 import pl.magazyn.mobile.eventually
 import pl.magazyn.mobile.queryLong
+import pl.magazyn.mobile.runAndAwaitViewModelWork
 import pl.magazyn.mobile.seedCoreData
 import pl.magazyn.mobile.domain.ImportParser
 import pl.magazyn.mobile.domain.ImportedProductResolution
@@ -48,19 +46,19 @@ class DataSafetyIntegrationTest {
         )
         val viewModel = OrdersViewModel(environment.application)
 
-        withContext(Dispatchers.Main) {
+        viewModel.runAndAwaitViewModelWork {
             repeat(8) { viewModel.realize("order-1", "employee-1", "2026-09-15", ignoreWarnings = true) }
         }
         eventually("Zamówienie nie zostało zrealizowane") { database.orderDao().findById("order-1")?.status == "ISSUED" }
-        database.awaitViewModelWork()
 
         assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movements WHERE note='Realizacja zamówienia'"))
         assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movement_lines"))
         assertEquals(7.0, database.stockDao().find("warehouse-main", "product-1")?.quantity ?: Double.NaN, 0.0)
         assertEquals("ISSUED", database.orderDao().findById("order-1")?.status)
 
-        viewModel.realize("order-1", "employee-1", "2026-09-15", ignoreWarnings = true)
-        database.awaitViewModelWork()
+        viewModel.runAndAwaitViewModelWork {
+            viewModel.realize("order-1", "employee-1", "2026-09-15", ignoreWarnings = true)
+        }
         assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movements WHERE note='Realizacja zamówienia'"))
         assertEquals(7.0, database.stockDao().find("warehouse-main", "product-1")?.quantity ?: Double.NaN, 0.0)
     }
@@ -78,16 +76,17 @@ class DataSafetyIntegrationTest {
         )
         val viewModel = OrdersViewModel(environment.application)
 
-        viewModel.realize("warning-order", "employee-1", "2026-09-15")
+        viewModel.runAndAwaitViewModelWork {
+            viewModel.realize("warning-order", "employee-1", "2026-09-15")
+        }
         eventually("Nie pojawiło się ostrzeżenie o ponownym wydaniu") { viewModel.issueWarning.value != null }
-        withContext(Dispatchers.Main) {
+        viewModel.runAndAwaitViewModelWork {
             viewModel.confirmIssueDespiteWarning()
             viewModel.confirmIssueDespiteWarning()
         }
         eventually("Zamówienie po potwierdzeniu ostrzeżenia nie zostało zrealizowane") {
             database.orderDao().findById("warning-order")?.status == "ISSUED"
         }
-        database.awaitViewModelWork()
 
         assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movements WHERE note='Realizacja zamówienia'"))
         assertEquals(7.0, database.stockDao().find("warehouse-main", "product-1")?.quantity ?: Double.NaN, 0.0)
@@ -97,12 +96,13 @@ class DataSafetyIntegrationTest {
     fun missingProductMakesMultiItemIssueAllOrNothing() = runBlocking {
         val viewModel = PeopleViewModel(environment.application)
 
-        viewModel.issueToPerson(
-            "employee-1",
-            listOf(IssueRequest("product-1", 2), IssueRequest("missing-product", 1)),
-            "2026-09-15",
-        )
-        database.awaitViewModelWork()
+        viewModel.runAndAwaitViewModelWork {
+            viewModel.issueToPerson(
+                "employee-1",
+                listOf(IssueRequest("product-1", 2), IssueRequest("missing-product", 1)),
+                "2026-09-15",
+            )
+        }
 
         assertEquals(0L, database.queryLong("SELECT COUNT(*) FROM stock_movements"))
         assertEquals(0L, database.queryLong("SELECT COUNT(*) FROM stock_movement_lines"))
@@ -123,8 +123,9 @@ class DataSafetyIntegrationTest {
         )
         val viewModel = OrdersViewModel(environment.application)
 
-        viewModel.realize("unresolved-order", "employee-1", "2026-09-15", ignoreWarnings = true)
-        database.awaitViewModelWork()
+        viewModel.runAndAwaitViewModelWork {
+            viewModel.realize("unresolved-order", "employee-1", "2026-09-15", ignoreWarnings = true)
+        }
 
         assertEquals("DRAFT", database.orderDao().findById("unresolved-order")?.status)
         assertEquals(0L, database.queryLong("SELECT COUNT(*) FROM stock_movements"))
@@ -142,8 +143,9 @@ class DataSafetyIntegrationTest {
         )
         val viewModel = OrdersViewModel(environment.application)
 
-        viewModel.realize("cancelled-order", "employee-1", "2026-09-15", ignoreWarnings = true)
-        database.awaitViewModelWork()
+        viewModel.runAndAwaitViewModelWork {
+            viewModel.realize("cancelled-order", "employee-1", "2026-09-15", ignoreWarnings = true)
+        }
 
         assertEquals("CANCELLED", database.orderDao().findById("cancelled-order")?.status)
         assertEquals(0L, database.queryLong("SELECT COUNT(*) FROM stock_movements"))

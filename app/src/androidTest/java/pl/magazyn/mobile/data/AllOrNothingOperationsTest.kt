@@ -13,9 +13,9 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import pl.magazyn.mobile.IsolatedApplicationEnvironment
-import pl.magazyn.mobile.awaitViewModelWork
 import pl.magazyn.mobile.eventually
 import pl.magazyn.mobile.queryLong
+import pl.magazyn.mobile.runAndAwaitViewModelWork
 import pl.magazyn.mobile.seedCoreData
 import pl.magazyn.mobile.ui.InventoryCount
 import pl.magazyn.mobile.ui.InventoryViewModel
@@ -48,38 +48,44 @@ class AllOrNothingOperationsTest {
 
     @Test
     fun missingProductRejectsAllMultiItemWarehousePathsBeforeFirstWrite() = runBlocking {
-        PeopleViewModel(environment.application).issueToPerson(
-            "employee-1",
-            listOf(IssueRequest("product-1", 1), IssueRequest("missing", 1)),
-            "2026-09-15",
-        )
-        database.awaitViewModelWork()
+        val people = PeopleViewModel(environment.application)
+        people.runAndAwaitViewModelWork {
+            people.issueToPerson(
+                "employee-1",
+                listOf(IssueRequest("product-1", 1), IssueRequest("missing", 1)),
+                "2026-09-15",
+            )
+        }
         assertUnchanged()
 
         val shipyard = ShipyardEntity("shipyard-1", "Ulstein")
         val shipyards = ShipyardsViewModel(environment.application)
-        shipyards.issue(
-            shipyard,
-            listOf(ShipyardIssueRequest("product-1", 1), ShipyardIssueRequest("missing", 1)),
-            "2026-09-15",
-        )
-        database.awaitViewModelWork()
+        shipyards.runAndAwaitViewModelWork {
+            shipyards.issue(
+                shipyard,
+                listOf(ShipyardIssueRequest("product-1", 1), ShipyardIssueRequest("missing", 1)),
+                "2026-09-15",
+            )
+        }
         assertUnchanged()
 
-        shipyards.returnToMainWarehouse(
-            shipyard,
-            listOf(ShipyardIssueRequest("product-1", 1), ShipyardIssueRequest("missing", 1)),
-            "2026-09-15",
-        )
-        database.awaitViewModelWork()
+        shipyards.runAndAwaitViewModelWork {
+            shipyards.returnToMainWarehouse(
+                shipyard,
+                listOf(ShipyardIssueRequest("product-1", 1), ShipyardIssueRequest("missing", 1)),
+                "2026-09-15",
+            )
+        }
         assertUnchanged()
 
-        InventoryViewModel(environment.application).applyInventory(
-            "warehouse-main",
-            listOf(InventoryCount("product-1", 6), InventoryCount("missing", 2)),
-            "2026-09-15",
-        )
-        database.awaitViewModelWork()
+        val inventory = InventoryViewModel(environment.application)
+        inventory.runAndAwaitViewModelWork {
+            inventory.applyInventory(
+                "warehouse-main",
+                listOf(InventoryCount("product-1", 6), InventoryCount("missing", 2)),
+                "2026-09-15",
+            )
+        }
         assertUnchanged()
 
         val operations = OperationsViewModel(environment.application)
@@ -89,24 +95,26 @@ class AllOrNothingOperationsTest {
             eventually("Magazyn główny nie pojawił się w stanie ViewModelu") {
                 operations.warehouses.value.any { it.id == "warehouse-main" }
             }
-            operations.submit(
-                WarehouseOperationType.DELIVERY,
-                employeeId = null,
-                shipyardId = null,
-                lines = listOf(OperationLineRequest("product-1", 1), OperationLineRequest("missing", 1)),
-                effectiveDate = "2026-09-15",
-            )
-            database.awaitViewModelWork()
+            operations.runAndAwaitViewModelWork {
+                operations.submit(
+                    WarehouseOperationType.DELIVERY,
+                    employeeId = null,
+                    shipyardId = null,
+                    lines = listOf(OperationLineRequest("product-1", 1), OperationLineRequest("missing", 1)),
+                    effectiveDate = "2026-09-15",
+                )
+            }
             assertUnchanged()
 
-            operations.submit(
-                WarehouseOperationType.SHIPYARD_RETURN,
-                employeeId = null,
-                shipyardId = "shipyard-1",
-                lines = listOf(OperationLineRequest("product-1", 1), OperationLineRequest("missing", 1)),
-                effectiveDate = "2026-09-15",
-            )
-            database.awaitViewModelWork()
+            operations.runAndAwaitViewModelWork {
+                operations.submit(
+                    WarehouseOperationType.SHIPYARD_RETURN,
+                    employeeId = null,
+                    shipyardId = "shipyard-1",
+                    lines = listOf(OperationLineRequest("product-1", 1), OperationLineRequest("missing", 1)),
+                    effectiveDate = "2026-09-15",
+                )
+            }
             assertUnchanged()
         } finally {
             collector.cancel()

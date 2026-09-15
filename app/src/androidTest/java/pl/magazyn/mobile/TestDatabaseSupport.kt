@@ -5,13 +5,17 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.withContext
 import pl.magazyn.mobile.data.AppDatabase
 import pl.magazyn.mobile.data.EmployeeEntity
@@ -109,14 +113,15 @@ internal fun AppDatabase.queryDouble(sql: String, vararg args: Any?): Double =
         cursor.getDouble(0)
     }
 
-internal suspend fun AppDatabase.awaitViewModelWork() {
-    // Najpierw pozwalamy viewModelScope wejść do operacji, potem ustawiamy na
-    // tym samym executorze Room barierę transakcyjną. Zapytanie wykonujemy
-    // przez DAO, aby korzystało z połączenia przypisanego przez Room do tej
-    // transakcji również na API 26.
-    withContext(Dispatchers.Main) { Unit }
-    withTransaction { warehouseDao().count() }
-    withContext(Dispatchers.Main) { Unit }
+internal suspend fun ViewModel.runAndAwaitViewModelWork(action: () -> Unit) {
+    val scopeJob = viewModelScope.coroutineContext[Job]
+        ?: error("ViewModel nie posiada aktywnego Job")
+    val launchedJobs = withContext(Dispatchers.Main.immediate) {
+        val existingJobs = scopeJob.children.toSet()
+        action()
+        scopeJob.children.filterNot(existingJobs::contains).toList()
+    }
+    launchedJobs.joinAll()
 }
 
 internal suspend fun eventually(message: String, condition: suspend () -> Boolean) {
