@@ -35,9 +35,16 @@ jobs:
 
       - name: Ustaw Android SDK
         uses: android-actions/setup-android@v4
-
-      - name: Upewnij się, że Android SDK 35 jest dostępne
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        with:
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+          packages: >-
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
+            emulator
+            system-images;android-26;google_apis;x86_64
+            system-images;android-35;google_apis;x86_64
 
       - name: Odczytaj wersję i sprawdź publikację
         id: release
