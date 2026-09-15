@@ -111,9 +111,11 @@ internal fun AppDatabase.queryDouble(sql: String, vararg args: Any?): Double =
 
 internal suspend fun AppDatabase.awaitViewModelWork() {
     // Najpierw pozwalamy viewModelScope wejść do operacji, potem ustawiamy na
-    // tym samym executorze Room barierę transakcyjną.
+    // tym samym executorze Room barierę transakcyjną. Zapytanie wykonujemy
+    // przez DAO, aby korzystało z połączenia przypisanego przez Room do tej
+    // transakcji również na API 26.
     withContext(Dispatchers.Main) { Unit }
-    withTransaction { queryLong("SELECT 1") }
+    withTransaction { warehouseDao().count() }
     withContext(Dispatchers.Main) { Unit }
 }
 
