@@ -3,6 +3,8 @@ package pl.magazyn.mobile
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import android.database.DatabaseErrorHandler
+import android.database.sqlite.SQLiteDatabase
 import androidx.room.withTransaction
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.test.platform.app.InstrumentationRegistry
@@ -53,6 +55,24 @@ private class IsolatedStorageContext(base: Context, private val root: File) : Co
     override fun getDatabasePath(name: String): File = File(root, "databases/$name").also {
         it.parentFile?.mkdirs()
     }
+
+    override fun openOrCreateDatabase(
+        name: String,
+        mode: Int,
+        factory: SQLiteDatabase.CursorFactory?,
+    ): SQLiteDatabase = baseContext.openOrCreateDatabase(getDatabasePath(name).absolutePath, mode, factory)
+
+    override fun openOrCreateDatabase(
+        name: String,
+        mode: Int,
+        factory: SQLiteDatabase.CursorFactory?,
+        errorHandler: DatabaseErrorHandler?,
+    ): SQLiteDatabase = baseContext.openOrCreateDatabase(
+        getDatabasePath(name).absolutePath,
+        mode,
+        factory,
+        errorHandler,
+    )
 
     override fun deleteDatabase(name: String): Boolean {
         val database = getDatabasePath(name)

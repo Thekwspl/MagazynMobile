@@ -8,6 +8,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -16,6 +17,11 @@ class Migration45DataSafetyTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val databaseName = "migration-4-5-order-safety.db"
 
+    @Before
+    fun prepareCleanDatabase() {
+        context.deleteDatabase(databaseName)
+    }
+
     @After
     fun cleanup() {
         context.deleteDatabase(databaseName)
@@ -23,7 +29,10 @@ class Migration45DataSafetyTest {
 
     @Test
     fun order104IsNeverDeletedUsingItsIdAlone() {
-        val version4 = open(version = 4) { database -> createFocusedVersion4Fixture(database) }
+        val version4 = open(
+            version = 4,
+            onCreate = { database -> createFocusedVersion4Fixture(database) },
+        )
         version4.writableDatabase.apply {
             execSQL("INSERT INTO orders(id, employeeId) VALUES('order-104', NULL)")
             execSQL("INSERT INTO orders(id, employeeId) VALUES('real-order', NULL)")
