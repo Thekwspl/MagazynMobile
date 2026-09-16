@@ -219,6 +219,13 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             database.withTransaction {
                 val product = database.productDao().findById(current.productId) ?: return@withTransaction
+                val persistedReturnedQuantity = database.movementDao().returnedQuantityForLine(current.lineId)
+                val persistedRemainingQuantity = current.quantity - persistedReturnedQuantity
+                if (quantity.toDouble() > persistedRemainingQuantity) return@withTransaction
+                val custody = if (product.isReturnable) {
+                    database.movementDao().findActiveCustodiesForIssue(current.movementId, employeeId, current.productId).singleOrNull()
+                        ?: return@withTransaction
+                } else null
                 val movementId = UUID.randomUUID().toString()
                 database.movementDao().insertMovement(
                     StockMovementEntity(movementId, "RETURN", "warehouse-main", employeeId, effectiveDate = effectiveDate, createdAtEpochMillis = System.currentTimeMillis(), note = "Zwrot z historii wydań"),
@@ -229,15 +236,11 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
                 database.movementDao().insertIssueReturn(
                     IssueReturnEntity(UUID.randomUUID().toString(), current.lineId, quantity.toDouble(), effectiveDate, System.currentTimeMillis()),
                 )
-                var remaining = quantity.toDouble()
-                database.movementDao().findActiveCustodiesForEmployee(employeeId, current.productId).forEach custodyLoop@{ custody ->
-                    if (remaining <= 0) return@custodyLoop
-                    if (custody.quantity <= remaining) {
+                if (custody != null) {
+                    if (custody.quantity <= quantity.toDouble()) {
                         database.movementDao().updateCustody(custody.copy(returnedDate = effectiveDate))
-                        remaining -= custody.quantity
                     } else {
-                        database.movementDao().updateCustody(custody.copy(quantity = custody.quantity - remaining))
-                        remaining = 0.0
+                        database.movementDao().updateCustody(custody.copy(quantity = custody.quantity - quantity.toDouble()))
                     }
                 }
             }

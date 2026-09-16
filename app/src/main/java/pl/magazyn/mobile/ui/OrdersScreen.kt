@@ -165,7 +165,6 @@ private fun ApprovedOrderCard(
         )
         order.parts.forEach { part ->
             key(part.id) {
-                val lines by remember(part.id) { linesFlow(part.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
                 if (showRecipientGroups) {
                     val expanded = part.id in expandedRecipients
                     Surface(
@@ -180,8 +179,12 @@ private fun ApprovedOrderCard(
                             Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "Zwiń" else "Rozwiń")
                         }
                     }
-                    if (expanded) lines.forEach { line -> OrderProductLine(line) }
+                    if (expanded) {
+                        val lines by remember(part.id) { linesFlow(part.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
+                        lines.forEach { line -> OrderProductLine(line) }
+                    }
                 } else {
+                    val lines by remember(part.id) { linesFlow(part.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
                     lines.forEach { line -> OrderProductLine(line) }
                 }
             }

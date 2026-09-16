@@ -294,11 +294,17 @@ interface MovementDao {
     @Query("SELECT * FROM custodies WHERE issuedMovementId = :movementId AND productId = :productId AND returnedDate IS NULL LIMIT 1")
     suspend fun findActiveCustody(movementId: String, productId: String): CustodyEntity?
 
+    @Query("SELECT * FROM custodies WHERE issuedMovementId = :movementId AND employeeId = :employeeId AND productId = :productId AND returnedDate IS NULL")
+    suspend fun findActiveCustodiesForIssue(movementId: String, employeeId: String, productId: String): List<CustodyEntity>
+
     @Query("SELECT * FROM custodies WHERE employeeId = :employeeId AND productId = :productId AND returnedDate IS NULL ORDER BY issuedDate LIMIT 1")
     suspend fun findActiveCustodyForEmployee(employeeId: String, productId: String): CustodyEntity?
 
     @Query("SELECT * FROM custodies WHERE employeeId = :employeeId AND productId = :productId AND returnedDate IS NULL ORDER BY issuedDate")
     suspend fun findActiveCustodiesForEmployee(employeeId: String, productId: String): List<CustodyEntity>
+
+    @Query("SELECT COALESCE(SUM(quantity), 0.0) FROM issue_returns WHERE originalLineId = :lineId")
+    suspend fun returnedQuantityForLine(lineId: String): Double
 
     @Query("""
         SELECT m.id, m.type, m.effectiveDate, m.createdAtEpochMillis, m.note,

@@ -6,6 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -666,11 +667,14 @@ private fun ParsedNoteReviewContent(
     var plannedIssueDate by rememberSaveable(note) { mutableStateOf(note.suggestedIssueDate ?: java.time.LocalDate.now().toString()) }
     var showPlannedDatePicker by remember { mutableStateOf(false) }
     val recognizedShipyard = shipyardName?.let { name -> shipyards.firstOrNull { it.name.equals(name, true) } }
-    Column(
-        Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 12.dp),
+    LazyColumn(
+        Modifier.fillMaxSize().imePadding(),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (rawText.isNotBlank()) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (rawText.isNotBlank()) {
             OutlinedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text("Oryginalna wiadomość", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
@@ -749,7 +753,12 @@ private fun ParsedNoteReviewContent(
             }
             Button(onClick = onSaveTasks, modifier = Modifier.fillMaxWidth()) { Text("Zapisz listę zadań") }
         }
-        editedItems.forEachIndexed { index, item ->
+            }
+        }
+        itemsIndexed(
+            items = editedItems,
+            key = { index, _ -> index },
+        ) { index, item ->
             // Dopasowanie katalogu jest najcięższą częścią tego ekranu. Liczymy je ponownie
             // tylko po zmianie nazwy/wariantu lub katalogu, nie po każdej zmianie ilości,
             // odbiorcy, checkboxa ani po zwykłej recomposition całej listy.
@@ -874,7 +883,9 @@ private fun ParsedNoteReviewContent(
                 HorizontalDivider()
             }
         }
-        if (note.kind == ParsedInputKind.ORDER) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (note.kind == ParsedInputKind.ORDER) {
             OutlinedButton(
                 onClick = {
                     val added = pl.magazyn.mobile.domain.ParsedItem(
@@ -929,7 +940,9 @@ private fun ParsedNoteReviewContent(
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Utwórz szkic z zatwierdzonych pozycji") }
         }
-        Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(16.dp))
+            }
+        }
     }
     if (showPlannedDatePicker) {
         val initial = runCatching { java.time.LocalDate.parse(plannedIssueDate) }.getOrDefault(java.time.LocalDate.now())

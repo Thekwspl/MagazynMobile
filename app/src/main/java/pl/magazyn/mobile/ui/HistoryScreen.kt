@@ -38,18 +38,20 @@ fun HistoryScreen(contentPadding: PaddingValues, viewModel: HistoryViewModel = v
     var categoryFilter by rememberSaveable { mutableStateOf("") }
     var tagFilter by rememberSaveable { mutableStateOf("") }
     var datePickerFor by remember { mutableStateOf<HistoryDateField?>(null) }
-    val filter = HistoryFilter.valueOf(filterName)
-    val warehouses = entries.map { it.warehouseName }.filter(String::isNotBlank).distinct().sorted()
-    val categories = entries.flatMap { it.categories.split(',') }.map(String::trim).filter(String::isNotBlank).distinct().sorted()
-    val tags = entries.flatMap { it.tags.split(',') }.map(String::trim).filter(String::isNotBlank).distinct().sorted()
-    val visible = entries.filter { entry ->
-        matchesFilter(entry.type, filter) && pl.magazyn.mobile.domain.matchesSearch(
-            query, entry.recipient, entry.itemSummary, entry.note, movementLabel(entry.type), entry.effectiveDate, entry.warehouseName, entry.categories, entry.tags,
-        ) && (dateFrom.isBlank() || entry.effectiveDate >= dateFrom)
-            && (dateTo.isBlank() || entry.effectiveDate <= dateTo)
-            && (warehouseFilter.isBlank() || entry.warehouseName == warehouseFilter)
-            && (categoryFilter.isBlank() || entry.categories.split(',').any { it.trim().equals(categoryFilter, true) })
-            && (tagFilter.isBlank() || entry.tags.split(',').any { it.trim().equals(tagFilter, true) })
+    val filter = remember(filterName) { HistoryFilter.valueOf(filterName) }
+    val warehouses = remember(entries) { entries.map { it.warehouseName }.filter(String::isNotBlank).distinct().sorted() }
+    val categories = remember(entries) { entries.flatMap { it.categories.split(',') }.map(String::trim).filter(String::isNotBlank).distinct().sorted() }
+    val tags = remember(entries) { entries.flatMap { it.tags.split(',') }.map(String::trim).filter(String::isNotBlank).distinct().sorted() }
+    val visible = remember(entries, query, filter, dateFrom, dateTo, warehouseFilter, categoryFilter, tagFilter) {
+        entries.filter { entry ->
+            matchesFilter(entry.type, filter) && pl.magazyn.mobile.domain.matchesSearch(
+                query, entry.recipient, entry.itemSummary, entry.note, movementLabel(entry.type), entry.effectiveDate, entry.warehouseName, entry.categories, entry.tags,
+            ) && (dateFrom.isBlank() || entry.effectiveDate >= dateFrom)
+                && (dateTo.isBlank() || entry.effectiveDate <= dateTo)
+                && (warehouseFilter.isBlank() || entry.warehouseName == warehouseFilter)
+                && (categoryFilter.isBlank() || entry.categories.split(',').any { it.trim().equals(categoryFilter, true) })
+                && (tagFilter.isBlank() || entry.tags.split(',').any { it.trim().equals(tagFilter, true) })
+        }
     }
 
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
