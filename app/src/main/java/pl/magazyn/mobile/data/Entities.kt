@@ -14,7 +14,13 @@ data class WarehouseEntity(
     val isArchived: Boolean = false,
 )
 
-@Entity(tableName = "employees", indices = [Index(value = ["fullName"])])
+@Entity(
+    tableName = "employees",
+    indices = [
+        Index(value = ["fullName"]),
+        Index(value = ["hrappkaId"], unique = true),
+    ],
+)
 data class EmployeeEntity(
     @PrimaryKey val id: String,
     val fullName: String,
@@ -24,6 +30,28 @@ data class EmployeeEntity(
     val aliases: String = "",
     val tags: String = "",
     val isArchived: Boolean = false,
+    val hrappkaId: Long? = null,
+    val hrappkaExternalId: String? = null,
+    @ColumnInfo(defaultValue = "0") val hrappkaDoNotHire: Boolean = false,
+)
+
+@Entity(
+    tableName = "employee_hrappka_phones",
+    primaryKeys = ["employeeId", "normalizedNumber"],
+    foreignKeys = [
+        ForeignKey(
+            entity = EmployeeEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["employeeId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("employeeId")],
+)
+data class EmployeeHrappkaPhoneEntity(
+    val employeeId: String,
+    val normalizedNumber: String,
+    val displayNumber: String,
 )
 
 @Entity(tableName = "job_positions", indices = [Index(value = ["name"], unique = true)])

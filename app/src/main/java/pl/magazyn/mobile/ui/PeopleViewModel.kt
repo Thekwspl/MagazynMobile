@@ -24,6 +24,8 @@ import pl.magazyn.mobile.data.IssueAmendmentEntity
 import pl.magazyn.mobile.data.IssueReturnEntity
 import pl.magazyn.mobile.data.EmployeeIssue
 import pl.magazyn.mobile.data.ProductVisibilityStore
+import pl.magazyn.mobile.data.normalizePhoneKey
+import pl.magazyn.mobile.data.splitPhones
 import pl.magazyn.mobile.domain.StockMath
 import pl.magazyn.mobile.domain.resolveAllOperationProducts
 import pl.magazyn.mobile.domain.normalizeCommaSeparated
@@ -68,8 +70,11 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
         val employeeId = existing?.id ?: UUID.randomUUID().toString()
         viewModelScope.launch {
             database.withTransaction {
-                val employee = EmployeeEntity(
+                val storedEmployee = existing?.let { database.employeeDao().findById(employeeId) }
+                val employee = (storedEmployee ?: EmployeeEntity(
                     id = employeeId,
+                    fullName = "$normalizedFirstName $normalizedLastName",
+                )).copy(
                     fullName = "$normalizedFirstName $normalizedLastName",
                     firstName = normalizedFirstName,
                     lastName = normalizedLastName,
@@ -77,7 +82,17 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
                     aliases = normalizeCommaSeparated(aliases),
                     tags = normalizeCommaSeparated(tags),
                 )
-                if (existing == null) database.employeeDao().insert(employee) else database.employeeDao().update(employee)
+                if (existing == null) {
+                    database.employeeDao().insert(employee)
+                } else {
+                    database.employeeDao().update(employee)
+                    val oldPhoneKeys = splitPhones(storedEmployee?.phoneNumbers.orEmpty()).map(::normalizePhoneKey).toSet()
+                    val newPhoneKeys = splitPhones(employee.phoneNumbers).map(::normalizePhoneKey).toSet()
+                    val stillImported = database.hrappkaPhoneDao().findForEmployee(employeeId)
+                        .filter { it.normalizedNumber in oldPhoneKeys && it.normalizedNumber in newPhoneKeys }
+                    database.hrappkaPhoneDao().deleteForEmployee(employeeId)
+                    if (stillImported.isNotEmpty()) database.hrappkaPhoneDao().upsert(stillImported)
+                }
                 database.jobPositionDao().deleteLinks(employeeId)
                 positionNames.split(",")
                     .map(String::trim)

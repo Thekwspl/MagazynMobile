@@ -11,7 +11,13 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 class AiKeyStore(context: Context) {
-    private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+    private val secretPreferences = context.getSharedPreferences(SECRET_PREFERENCES, Context.MODE_PRIVATE)
+    private val settingsPreferences = context.getSharedPreferences(SETTINGS_PREFERENCES, Context.MODE_PRIVATE)
+    private val legacyPreferences = context.getSharedPreferences(LEGACY_PREFERENCES, Context.MODE_PRIVATE)
+
+    init {
+        migrateLegacyPreferences()
+    }
 
     fun saveApiKey(value: String) {
         val clean = value.trim()
@@ -19,15 +25,15 @@ class AiKeyStore(context: Context) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey())
         val encrypted = cipher.doFinal(clean.toByteArray(Charsets.UTF_8))
-        preferences.edit()
+        secretPreferences.edit()
             .putString(KEY_CIPHERTEXT, Base64.encodeToString(encrypted, Base64.NO_WRAP))
             .putString(KEY_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
             .apply()
     }
 
     fun readApiKey(): String? = runCatching {
-        val encrypted = preferences.getString(KEY_CIPHERTEXT, null) ?: return null
-        val iv = preferences.getString(KEY_IV, null) ?: return null
+        val encrypted = secretPreferences.getString(KEY_CIPHERTEXT, null) ?: return null
+        val iv = secretPreferences.getString(KEY_IV, null) ?: return null
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(
             Cipher.DECRYPT_MODE,
@@ -40,15 +46,15 @@ class AiKeyStore(context: Context) {
     fun hasApiKey(): Boolean = readApiKey()?.isNotBlank() == true
 
     fun clearApiKey() {
-        preferences.edit().remove(KEY_CIPHERTEXT).remove(KEY_IV).apply()
+        secretPreferences.edit().remove(KEY_CIPHERTEXT).remove(KEY_IV).apply()
     }
 
     var redactPhoneNumbers: Boolean
-        get() = preferences.getBoolean(KEY_REDACT_PHONES, true)
-        set(value) { preferences.edit().putBoolean(KEY_REDACT_PHONES, value).apply() }
+        get() = settingsPreferences.getBoolean(KEY_REDACT_PHONES, true)
+        set(value) { settingsPreferences.edit().putBoolean(KEY_REDACT_PHONES, value).apply() }
 
     fun recordConnection(success: Boolean, model: String, message: String) {
-        preferences.edit()
+        settingsPreferences.edit()
             .putLong(KEY_LAST_ATTEMPT, System.currentTimeMillis())
             .putBoolean(KEY_LAST_SUCCESS, success)
             .putString(KEY_LAST_MODEL, model)
@@ -57,13 +63,37 @@ class AiKeyStore(context: Context) {
     }
 
     fun lastConnection(): AiConnectionStatus? {
-        val time = preferences.getLong(KEY_LAST_ATTEMPT, 0L)
+        val time = settingsPreferences.getLong(KEY_LAST_ATTEMPT, 0L)
         if (time == 0L) return null
         return AiConnectionStatus(
-            time, preferences.getBoolean(KEY_LAST_SUCCESS, false),
-            preferences.getString(KEY_LAST_MODEL, "").orEmpty(),
-            preferences.getString(KEY_LAST_MESSAGE, "").orEmpty(),
+            time, settingsPreferences.getBoolean(KEY_LAST_SUCCESS, false),
+            settingsPreferences.getString(KEY_LAST_MODEL, "").orEmpty(),
+            settingsPreferences.getString(KEY_LAST_MESSAGE, "").orEmpty(),
         )
+    }
+
+    /** Oddziela sekret od zwykłych ustawień przed włączeniem systemowego Auto Backup. */
+    private fun migrateLegacyPreferences() {
+        if (legacyPreferences.all.isEmpty()) return
+        val secretEditor = secretPreferences.edit()
+        if (!secretPreferences.contains(KEY_CIPHERTEXT) && legacyPreferences.contains(KEY_CIPHERTEXT)) {
+            secretEditor.putString(KEY_CIPHERTEXT, legacyPreferences.getString(KEY_CIPHERTEXT, null))
+        }
+        if (!secretPreferences.contains(KEY_IV) && legacyPreferences.contains(KEY_IV)) {
+            secretEditor.putString(KEY_IV, legacyPreferences.getString(KEY_IV, null))
+        }
+        val settingsEditor = settingsPreferences.edit()
+        if (!settingsPreferences.contains(KEY_REDACT_PHONES) && legacyPreferences.contains(KEY_REDACT_PHONES)) {
+            settingsEditor.putBoolean(KEY_REDACT_PHONES, legacyPreferences.getBoolean(KEY_REDACT_PHONES, true))
+        }
+        if (!settingsPreferences.contains(KEY_LAST_ATTEMPT) && legacyPreferences.contains(KEY_LAST_ATTEMPT)) {
+            settingsEditor.putLong(KEY_LAST_ATTEMPT, legacyPreferences.getLong(KEY_LAST_ATTEMPT, 0L))
+            settingsEditor.putBoolean(KEY_LAST_SUCCESS, legacyPreferences.getBoolean(KEY_LAST_SUCCESS, false))
+            settingsEditor.putString(KEY_LAST_MODEL, legacyPreferences.getString(KEY_LAST_MODEL, ""))
+            settingsEditor.putString(KEY_LAST_MESSAGE, legacyPreferences.getString(KEY_LAST_MESSAGE, ""))
+        }
+        check(secretEditor.commit() && settingsEditor.commit()) { "Nie udało się bezpiecznie przenieść ustawień AI" }
+        check(legacyPreferences.edit().clear().commit()) { "Nie udało się usunąć starego magazynu sekretu AI" }
     }
 
     private fun getOrCreateSecretKey(): SecretKey {
@@ -84,7 +114,9 @@ class AiKeyStore(context: Context) {
     }
 
     private companion object {
-        const val PREFERENCES = "ai_secure_preferences"
+        const val SECRET_PREFERENCES = "ai_secret_preferences"
+        const val SETTINGS_PREFERENCES = "ai_preferences"
+        const val LEGACY_PREFERENCES = "ai_secure_preferences"
         const val KEY_ALIAS = "magazyn_mobile_gemini_key"
         const val KEY_CIPHERTEXT = "api_key_ciphertext"
         const val KEY_IV = "api_key_iv"

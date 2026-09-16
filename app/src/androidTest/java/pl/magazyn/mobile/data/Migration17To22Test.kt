@@ -17,7 +17,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
-class Migration17To22Test {
+class Migration17To23Test {
     private val context: Context = InstrumentationRegistry.getInstrumentation().targetContext
     private val databaseName = "migration-17-22.db"
 
@@ -40,7 +40,7 @@ class Migration17To22Test {
     }
 
     @Test
-    fun migratesRepresentativeDataFrom17To22AndOpensWithCurrentRoom() = runBlocking {
+    fun migratesRepresentativeDataFrom17To23AndOpensWithCurrentRoom() = runBlocking {
         helper.createDatabase(databaseName, 17).apply {
             execSQL("INSERT INTO warehouses(id,name,isMain,isArchived) VALUES('warehouse-main','Główny',1,0)")
             execSQL("INSERT INTO employees(id,fullName,firstName,lastName,phoneNumbers,aliases,tags,isArchived) VALUES('employee-17','Jan Kowalski','Jan','Kowalski','','','',0)")
@@ -56,7 +56,7 @@ class Migration17To22Test {
         }
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
-            .addMigrations(MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22)
+            .addMigrations(MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23)
             .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -70,7 +70,50 @@ class Migration17To22Test {
             assertTrue(migrated.taskStructureDao().getStepsForTaskNow("task-17").isNotEmpty())
             assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM notebook_task_employees WHERE taskId='task-17' AND employeeId='employee-17'"))
             assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM stock_movement_lines WHERE id='line-17'"))
+            assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM employees WHERE id='employee-17' AND hrappkaId IS NULL AND hrappkaExternalId IS NULL AND hrappkaDoNotHire=0"))
+            assertEquals(0, scalarInt(sqlite, "SELECT COUNT(*) FROM employee_hrappka_phones"))
             assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM room_master_table"))
+        } finally {
+            migrated.close()
+        }
+    }
+
+    @Test
+    fun migration22To23PreservesEmployeeHistoryCustodyAndStock() = runBlocking {
+        helper.createDatabase(databaseName, 17).apply {
+            execSQL("INSERT INTO warehouses(id,name,isMain,isArchived) VALUES('warehouse-main','Główny',1,0)")
+            execSQL("INSERT INTO employees(id,fullName,firstName,lastName,phoneNumbers,aliases,tags,isArchived) VALUES('employee-22','Anna Testowa','Anna','Testowa','+48 500 000 001','','',0)")
+            execSQL("INSERT INTO products(id,name,variant,unit,category,groupName,subgroupName,aliases,tags,photoUri,isReturnable,lowStockThreshold,repeatIssueWeeks,isArchived) VALUES('product-22','Kask',NULL,'szt.','','BHP','','','','',1,0,0,0)")
+            execSQL("INSERT INTO stock_balances(warehouseId,productId,quantity,isKnown) VALUES('warehouse-main','product-22',4,1)")
+            execSQL("INSERT INTO stock_movements(id,type,warehouseId,employeeId,recipientLabel,effectiveDate,createdAtEpochMillis,note) VALUES('movement-22','ISSUE','warehouse-main','employee-22','','2026-09-01',1,'fixture 22')")
+            execSQL("INSERT INTO stock_movement_lines(id,movementId,productId,quantityDelta,unit) VALUES('line-22','movement-22','product-22',-1,'szt.')")
+            execSQL("INSERT INTO custodies(id,employeeId,productId,quantity,issuedMovementId,issuedDate,returnedDate) VALUES('custody-22','employee-22','product-22',1,'movement-22','2026-09-01',NULL)")
+            beginTransaction()
+            try {
+                listOf(MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22)
+                    .forEach { migration -> migration.migrate(this) }
+                version = 22
+                setTransactionSuccessful()
+            } finally {
+                endTransaction()
+            }
+            close()
+        }
+
+        val migrated = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+            .addMigrations(MIGRATION_22_23)
+            .build()
+        try {
+            val sqlite = migrated.openHelper.writableDatabase
+            assertEquals(23, scalarInt(sqlite, "PRAGMA user_version"))
+            assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM employees WHERE id='employee-22' AND hrappkaId IS NULL AND hrappkaExternalId IS NULL AND hrappkaDoNotHire=0"))
+            assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM stock_movements WHERE id='movement-22'"))
+            assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM stock_movement_lines WHERE id='line-22'"))
+            assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM custodies WHERE id='custody-22' AND returnedDate IS NULL"))
+            assertEquals(4, scalarInt(sqlite, "SELECT quantity FROM stock_balances WHERE warehouseId='warehouse-main' AND productId='product-22'"))
+            assertEquals(0, scalarInt(sqlite, "SELECT COUNT(*) FROM employee_hrappka_phones"))
+            assertEquals("ok", scalarText(sqlite, "PRAGMA integrity_check").lowercase())
+            sqlite.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
         } finally {
             migrated.close()
         }

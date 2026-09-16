@@ -18,6 +18,15 @@ interface EmployeeDao {
     @Query("SELECT * FROM employees WHERE isArchived = 0")
     suspend fun getAllNow(): List<EmployeeEntity>
 
+    @Query("SELECT * FROM employees")
+    suspend fun getAllIncludingArchivedNow(): List<EmployeeEntity>
+
+    @Query("SELECT * FROM employees WHERE hrappkaId = :hrappkaId LIMIT 1")
+    suspend fun findByHrappkaId(hrappkaId: Long): EmployeeEntity?
+
+    @Query("SELECT * FROM employees WHERE hrappkaDoNotHire = 1 AND isArchived = 0 ORDER BY lastName COLLATE NOCASE, firstName COLLATE NOCASE")
+    fun observeHrappkaDoNotHire(): Flow<List<EmployeeEntity>>
+
     @Query("""
         SELECT e.id, e.fullName, e.firstName, e.lastName, e.phoneNumbers, e.aliases, e.tags,
                COALESCE(GROUP_CONCAT(j.name, ', '), '') AS positions
@@ -47,6 +56,21 @@ interface EmployeeDao {
 
     @Query("UPDATE employees SET isArchived = 1 WHERE id = :id")
     suspend fun archive(id: String)
+}
+
+@Dao
+interface HrappkaPhoneDao {
+    @Query("SELECT * FROM employee_hrappka_phones")
+    suspend fun getAllNow(): List<EmployeeHrappkaPhoneEntity>
+
+    @Query("SELECT * FROM employee_hrappka_phones WHERE employeeId = :employeeId")
+    suspend fun findForEmployee(employeeId: String): List<EmployeeHrappkaPhoneEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(items: List<EmployeeHrappkaPhoneEntity>)
+
+    @Query("DELETE FROM employee_hrappka_phones WHERE employeeId = :employeeId")
+    suspend fun deleteForEmployee(employeeId: String)
 }
 
 data class EmployeeSummary(

@@ -88,6 +88,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val noteReview: StateFlow<NoteReviewUiState?> = _noteReview.asStateFlow()
     val people = database.employeeDao().observeSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val hrappkaDoNotHireEmployees = database.employeeDao().observeHrappkaDoNotHire()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val jobPositions = database.jobPositionDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val tasks = database.notebookDao().observeTasks()

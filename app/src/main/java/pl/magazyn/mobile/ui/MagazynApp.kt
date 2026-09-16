@@ -35,7 +35,7 @@ fun MagazynApp(modifier: Modifier = Modifier) {
     val currentRoute = backStack?.destination?.route.orEmpty()
     val density = LocalDensity.current
     val isImeVisible = WindowInsets.ime.getBottom(density) > 0
-    val isFocusedScreen = currentRoute == "note-review" || currentRoute == "tasks-new" || currentRoute == "product-duplicates" || currentRoute == "data-exchange" || currentRoute.startsWith("shipyards/") || currentRoute.startsWith("products/")
+    val isFocusedScreen = currentRoute == "note-review" || currentRoute == "tasks-new" || currentRoute == "product-duplicates" || currentRoute == "data-exchange" || currentRoute == "hr-synchro-import" || currentRoute.startsWith("shipyards/") || currentRoute.startsWith("products/")
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showQuickAdd by remember { mutableStateOf(false) }
@@ -229,8 +229,10 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
                 onUpdates = { navController.navigate("updates") },
                 onLearningRules = { navController.navigate("learning-rules") },
                 onDataExchange = { navController.navigate("data-exchange") },
+                onHrSynchroImport = { navController.navigate("hr-synchro-import") },
             )
         }
+        composable("hr-synchro-import") { HrSynchroImportScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
         composable("ai-settings") { AiSettingsScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
         composable("learning-rules") { LearningRulesScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
         composable("updates") { UpdateScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }

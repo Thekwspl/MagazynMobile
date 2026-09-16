@@ -635,6 +635,28 @@ val MIGRATION_21_22 = object : Migration(21, 22) {
     }
 }
 
+/** Minimalne dane łączące lokalną osobę z HRappka i provenance telefonów Synchro. */
+val MIGRATION_22_23 = object : Migration(22, 23) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE employees ADD COLUMN hrappkaId INTEGER")
+        db.execSQL("ALTER TABLE employees ADD COLUMN hrappkaExternalId TEXT")
+        db.execSQL("ALTER TABLE employees ADD COLUMN hrappkaDoNotHire INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_employees_hrappkaId ON employees(hrappkaId)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS employee_hrappka_phones (
+                employeeId TEXT NOT NULL,
+                normalizedNumber TEXT NOT NULL,
+                displayNumber TEXT NOT NULL,
+                PRIMARY KEY(employeeId, normalizedNumber),
+                FOREIGN KEY(employeeId) REFERENCES employees(id) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_employee_hrappka_phones_employeeId ON employee_hrappka_phones(employeeId)")
+    }
+}
+
 private fun ensureColumn(db: SupportSQLiteDatabase, table: String, column: String, definition: String) {
     val exists = db.query("PRAGMA table_info($table)").use { cursor ->
         val nameIndex = cursor.getColumnIndex("name")

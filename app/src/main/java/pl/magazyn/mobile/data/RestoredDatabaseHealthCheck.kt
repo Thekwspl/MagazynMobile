@@ -20,6 +20,7 @@ object RestoredDatabaseHealthCheck {
         // Minimalne zapytania przez wygenerowane implementacje Room DAO. Pusty wynik jest poprawny.
         database.warehouseDao().count()
         database.employeeDao().findById(SENTINEL_ID)
+        database.hrappkaPhoneDao().getAllNow()
         database.productDao().findById(SENTINEL_ID)
         database.stockDao().find(SENTINEL_ID, SENTINEL_ID)
         database.movementDao().findActiveCustodiesForEmployee(SENTINEL_ID, SENTINEL_ID)
@@ -45,6 +46,7 @@ object RestoredDatabaseHealthCheck {
         listOf(
             "warehouses",
             "employees",
+            "employee_hrappka_phones",
             "products",
             "stock_balances",
             "stock_movements",

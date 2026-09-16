@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.ImportExport
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +44,7 @@ fun SettingsScreen(
     onUpdates: () -> Unit,
     onLearningRules: () -> Unit,
     onDataExchange: () -> Unit,
+    onHrSynchroImport: () -> Unit,
 ) {
     val context = LocalContext.current
     val visibilityStore = remember(context) {
@@ -57,6 +59,7 @@ fun SettingsScreen(
         SettingsItem(Icons.Default.SystemUpdate, "Aktualizacje", "Sprawdzanie i instalowanie nowej wersji", onUpdates)
         SettingsItem(Icons.Default.Psychology, "Uczenie offline", "Reguły używane bez internetu", onLearningRules)
         SettingsItem(Icons.Default.ImportExport, "Import i Eksport danych", "Import, eksport i kopie zapasowe", onDataExchange)
+        SettingsItem(Icons.Default.Sync, "HRappka / Synchro", "Import pracowników z pliku Synchro JSON", onHrSynchroImport)
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Wyświetl ukryte przedmioty", fontWeight = FontWeight.SemiBold)

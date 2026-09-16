@@ -1,0 +1,22 @@
+{
+  "format": "magazynmobile-hr-import-v1",
+  "exportedAt": "2026-09-16T20:00:00Z",
+  "employeeCount": 7,
+  "completeness": {
+    "employeeListComplete": true,
+    "phoneProfilesTotal": 7,
+    "phoneProfilesFetched": 4,
+    "phoneProfilesNotFetched": 2,
+    "phoneProfilesFailed": 1,
+    "phonesComplete": false
+  },
+  "employees": [
+    {"hrappkaId": 1001, "externalId": "00000", "firstName": "Anna", "lastName": "Nowa", "phones": ["+48 500 000 001", "+47 900 00 001"], "phoneFetchStatus": "ok", "status": "Pracuje"},
+    {"hrappkaId": 1002, "externalId": "17/04/2026", "firstName": "Jan", "lastName": "Testowy", "phones": [], "phoneFetchStatus": "not_fetched", "status": "Pracuje"},
+    {"hrappkaId": 1003, "externalId": null, "firstName": "Piotr", "lastName": "Bliźniak", "phones": [], "phoneFetchStatus": "error", "status": null},
+    {"hrappkaId": 1004, "externalId": null, "firstName": "Piotr", "lastName": "Bliźniak", "phones": [], "phoneFetchStatus": "not_fetched", "status": "Oczekuje na ofertę"},
+    {"hrappkaId": 1005, "externalId": "5", "firstName": "Ewa", "lastName": "Pominięta", "phones": [], "phoneFetchStatus": "ok", "status": "Nie zatrudniać"},
+    {"hrappkaId": 1006, "externalId": null, "firstName": "Adam", "lastName": "Beztelefonu", "phones": [], "phoneFetchStatus": "ok", "status": null},
+    {"hrappkaId": 1007, "externalId": "ABC", "firstName": "Maria", "lastName": "Dwa Numery", "phones": ["+48 600 000 001", "+48 600 000 002"], "phoneFetchStatus": "ok", "status": "Pracuje"}
+  ]
+}

@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
+    <include domain="database" path="magazyn-mobile.db" />
+    <include domain="sharedpref" path="product-visibility.xml" />
+    <include domain="sharedpref" path="updates.xml" />
+    <include domain="sharedpref" path="ai_preferences.xml" />
+    <exclude domain="sharedpref" path="ai_secret_preferences.xml" />
     <exclude domain="sharedpref" path="ai_secure_preferences.xml" />
+    <exclude domain="sharedpref" path="restore-journal.xml" />
+    <exclude domain="sharedpref" path="startup-diagnostics.xml" />
+    <exclude domain="file" path="restore-rollback/" />
 </full-backup-content>
