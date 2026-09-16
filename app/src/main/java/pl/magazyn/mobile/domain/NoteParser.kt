@@ -3,6 +3,7 @@ package pl.magazyn.mobile.domain
 import kotlin.math.roundToLong
 import java.time.DateTimeException
 import java.time.LocalDate
+import java.util.Locale
 
 data class ParsedPerson(
     val fullName: String,
@@ -71,7 +72,9 @@ class NoteParser {
             .mapNotNull(::parseOrderSegment)
             .toList()
         val expandedSegments = parsedSegments.flatMap { (person, item) ->
-            expandCompoundItem(item).flatMap(::expandWarehouseClothingConvention).map { person to it }
+            expandCompoundItem(item)
+                .flatMap { expanded -> sortRecognizedPackageItems(expandWarehouseClothingConvention(expanded)) }
+                .map { person to it }
         }
         val items = expandedSegments.map { it.second }.map { item ->
             if (ImportParser.key(item.name) == "kask") item.copy(name = "Kask Biały") else item
@@ -232,3 +235,10 @@ fun expandWarehouseClothingConvention(item: ParsedItem): List<ParsedItem> {
     }
     return listOf(item.copy(name = trousers), item.copy(name = sweatshirt))
 }
+
+/** Sortuje wyłącznie elementy powstałe z jednego rozpoznanego pakietu. */
+internal fun sortRecognizedPackageItems(items: List<ParsedItem>): List<ParsedItem> =
+    items.sortedWith(
+        compareBy<ParsedItem> { ImportParser.key(it.name.lowercase(Locale.ROOT)) }
+            .thenBy { ImportParser.key(it.variant.orEmpty().lowercase(Locale.ROOT)) },
+    )

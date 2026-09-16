@@ -22,6 +22,7 @@ import pl.magazyn.mobile.data.EmployeeEntity
 import pl.magazyn.mobile.data.EmployeeJobPositionEntity
 import pl.magazyn.mobile.data.JobPositionEntity
 import pl.magazyn.mobile.data.OrderChangeEntity
+import pl.magazyn.mobile.data.OrderEntity
 import pl.magazyn.mobile.data.OrderLineEntity
 import pl.magazyn.mobile.data.ProductEntity
 import pl.magazyn.mobile.data.ProductWithStock
@@ -29,6 +30,7 @@ import pl.magazyn.mobile.data.ProductVisibilityStore
 import pl.magazyn.mobile.data.StockBalanceEntity
 import pl.magazyn.mobile.data.StockMovementEntity
 import pl.magazyn.mobile.data.StockMovementLineEntity
+import pl.magazyn.mobile.data.ShipyardStockBalanceEntity
 import pl.magazyn.mobile.domain.normalizeCommaSeparated
 import pl.magazyn.mobile.domain.normalizeDisplayName
 import pl.magazyn.mobile.domain.normalizePersonName
@@ -48,7 +50,9 @@ data class OrderIssueWarningItem(
 data class OrderIssueWarning(
     val orderId: String,
     val employeeId: String,
+    val shipyardName: String?,
     val issueDate: String,
+    val selectedLineIds: Set<String>,
     val items: List<OrderIssueWarningItem>,
 )
 
@@ -68,19 +72,21 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val jobPositions = database.jobPositionDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val shipyards = database.shipyardDao().observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     private val _issueWarning = MutableStateFlow<OrderIssueWarning?>(null)
     val issueWarning = _issueWarning.asStateFlow()
 
     fun lines(orderId: String) = database.orderDao().observeLines(orderId)
     fun changes(orderId: String) = database.orderDao().observeChanges(orderId)
 
-    fun updateOrder(orderId: String, employeeId: String?, recipientLabel: String, date: String) {
+    fun updateOrder(orderId: String, employeeId: String?, recipientLabel: String, siteLabel: String?, date: String) {
         if (runCatching { LocalDate.parse(date) }.isFailure) return
         viewModelScope.launch {
             val previous = database.orderDao().findById(orderId) ?: return@launch
-            database.orderDao().updateOrder(orderId, employeeId, recipientLabel, date)
+            database.orderDao().updateOrder(orderId, employeeId, recipientLabel, siteLabel, date)
             val changed = buildList {
-                if (previous.employeeId != employeeId || previous.recipientLabel != recipientLabel) add("odbiorcę na $recipientLabel")
+                if (previous.employeeId != employeeId || previous.recipientLabel != recipientLabel || previous.siteLabel != siteLabel) add("odbiorcę na $recipientLabel")
                 if (previous.plannedIssueDate != date) add("datę na $date")
             }
             if (changed.isNotEmpty()) log(orderId, "EDIT", "Zmieniono ${changed.joinToString(" i ")}")
@@ -193,12 +199,22 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun realize(orderId: String, selectedEmployeeId: String?, selectedDate: String, ignoreWarnings: Boolean = false) {
+    fun realize(
+        orderId: String,
+        selectedEmployeeId: String?,
+        selectedShipyardName: String?,
+        selectedDate: String,
+        selectedLineIds: Set<String>,
+        ignoreWarnings: Boolean = false,
+    ) {
         viewModelScope.launch {
+            if (selectedLineIds.isEmpty()) return@launch
             val issueDate = runCatching { LocalDate.parse(selectedDate) }.getOrNull() ?: return@launch
             val orderBeforeIssue = database.orderDao().findById(orderId) ?: return@launch
             if (orderBeforeIssue.status != "DRAFT") return@launch
             val linesBeforeIssue = database.orderDao().getLinesNow(orderId)
+                .filter { it.id in selectedLineIds && it.isPrepared }
+            if (linesBeforeIssue.isEmpty()) return@launch
             if (!ignoreWarnings && selectedEmployeeId != null && linesBeforeIssue.isNotEmpty()) {
                 val history = database.movementDao().observeEmployeeIssues(selectedEmployeeId).first()
                     .filterNot { it.isDeleted }
@@ -231,25 +247,64 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 }.distinctBy { it.productName to it.productVariant }
                 if (warnings.isNotEmpty()) {
-                    _issueWarning.value = OrderIssueWarning(orderId, selectedEmployeeId, selectedDate, warnings)
+                    _issueWarning.value = OrderIssueWarning(
+                        orderId = orderId,
+                        employeeId = selectedEmployeeId,
+                        shipyardName = selectedShipyardName,
+                        issueDate = selectedDate,
+                        selectedLineIds = selectedLineIds,
+                        items = warnings,
+                    )
                     return@launch
                 }
             }
             _issueWarning.value = null
             val productsResolved = database.withTransaction {
                 val order = database.orderDao().findById(orderId) ?: return@withTransaction true
-                val shipyard = if (selectedEmployeeId == null) order.siteLabel?.let { label ->
+                if (order.status != "DRAFT") return@withTransaction true
+                val shipyard = if (selectedEmployeeId == null) selectedShipyardName?.let { label ->
                     database.shipyardDao().getAllNow().firstOrNull { it.name.equals(label, true) && !it.isArchived }
                 } else null
                 if (selectedEmployeeId == null && shipyard == null) return@withTransaction true
-                val lines = database.orderDao().getLinesNow(orderId)
-                if (lines.isEmpty()) return@withTransaction true
-                if (lines.any { it.productId == null }) return@withTransaction false
-                val products = database.productDao().findByIds(lines.map { checkNotNull(it.productId) }.distinct())
-                val resolvedLines = resolveAllOperationProducts(lines, products) { checkNotNull(it.productId) }
+                val allLines = database.orderDao().getLinesNow(orderId)
+                val selectedLines = allLines.filter { it.id in selectedLineIds && it.isPrepared }
+                if (selectedLines.isEmpty()) return@withTransaction true
+                if (selectedLines.any { it.productId == null }) return@withTransaction false
+                val products = database.productDao().findByIds(selectedLines.map { checkNotNull(it.productId) }.distinct())
+                val resolvedLines = resolveAllOperationProducts(selectedLines, products) { checkNotNull(it.productId) }
                     ?: return@withTransaction false
-                if (database.orderDao().markIssuedIfDraft(orderId) != 1) return@withTransaction true
-                database.orderDao().updateOrder(orderId, selectedEmployeeId, order.recipientLabel, selectedDate)
+                val recipientLabel = if (shipyard != null) shipyard.name else {
+                    selectedEmployeeId?.let { database.employeeDao().findById(it) }
+                        ?.let { "${it.firstName} ${it.lastName}".trim() }
+                        ?: order.recipientLabel
+                }
+                val partial = selectedLines.size < allLines.size
+                val issuedOrderId = if (partial) {
+                    val issuedId = UUID.randomUUID().toString()
+                    database.orderDao().upsertOrders(
+                        listOf(
+                            OrderEntity(
+                                id = issuedId,
+                                notebookId = order.notebookId,
+                                employeeId = selectedEmployeeId,
+                                recipientLabel = recipientLabel,
+                                siteLabel = shipyard?.name,
+                                status = "ISSUED",
+                                plannedIssueDate = selectedDate,
+                                createdAtEpochMillis = order.createdAtEpochMillis,
+                            ),
+                        ),
+                    )
+                    check(database.orderDao().movePreparedLines(orderId, issuedId, selectedLines.map { it.id }) == selectedLines.size) {
+                        "Nie udało się atomowo wydzielić zaznaczonych pozycji zamówienia"
+                    }
+                    database.orderDao().updateOrder(orderId, selectedEmployeeId, recipientLabel, shipyard?.name, selectedDate)
+                    issuedId
+                } else {
+                    if (database.orderDao().markIssuedIfDraft(orderId) != 1) return@withTransaction true
+                    database.orderDao().updateOrder(orderId, selectedEmployeeId, recipientLabel, shipyard?.name, selectedDate)
+                    orderId
+                }
                 val movementId = UUID.randomUUID().toString()
                 database.movementDao().insertMovement(
                     StockMovementEntity(
@@ -271,7 +326,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                     database.stockDao().upsert(listOf(StockBalanceEntity("warehouse-main", productId, current - line.quantity)))
                     if (shipyard != null) {
                         val currentShipyard = database.shipyardDao().findStock(shipyard.id, productId)?.quantity ?: 0.0
-                        database.shipyardDao().upsertStock(pl.magazyn.mobile.data.ShipyardStockBalanceEntity(shipyard.id, productId, currentShipyard + line.quantity))
+                        database.shipyardDao().upsertStock(ShipyardStockBalanceEntity(shipyard.id, productId, currentShipyard + line.quantity))
                     }
                     database.movementDao().insertLine(
                         StockMovementLineEntity(UUID.randomUUID().toString(), movementId, productId, -line.quantity, product.unit),
@@ -282,7 +337,12 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
                 }
-                log(orderId, "ISSUE", "Zrealizowano zamówienie i wydano ${lines.size} pozycji")
+                if (partial) {
+                    log(orderId, "PARTIAL_ISSUE", "Częściowo zrealizowano zamówienie i wydano ${selectedLines.size} pozycji")
+                    log(issuedOrderId, "ISSUE", "Zrealizowano wydzieloną część zamówienia i wydano ${selectedLines.size} pozycji")
+                } else {
+                    log(orderId, "ISSUE", "Zrealizowano zamówienie i wydano ${selectedLines.size} pozycji")
+                }
                 true
             }
             if (!productsResolved) {
@@ -294,7 +354,14 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     fun confirmIssueDespiteWarning() {
         val warning = _issueWarning.value ?: return
         _issueWarning.value = null
-        realize(warning.orderId, warning.employeeId, warning.issueDate, ignoreWarnings = true)
+        realize(
+            warning.orderId,
+            warning.employeeId,
+            warning.shipyardName,
+            warning.issueDate,
+            warning.selectedLineIds,
+            ignoreWarnings = true,
+        )
     }
 
     fun dismissIssueWarning() {

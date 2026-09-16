@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
@@ -35,6 +36,7 @@ import pl.magazyn.mobile.data.OrderDetailLine
 import pl.magazyn.mobile.data.OrderChangeEntity
 import pl.magazyn.mobile.data.OrderSummary
 import pl.magazyn.mobile.data.ProductWithStock
+import pl.magazyn.mobile.data.ShipyardEntity
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +45,7 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
     val people by viewModel.people.collectAsStateWithLifecycle()
     val products by viewModel.products.collectAsStateWithLifecycle()
     val jobPositions by viewModel.jobPositions.collectAsStateWithLifecycle()
+    val shipyards by viewModel.shipyards.collectAsStateWithLifecycle()
     val issueWarning by viewModel.issueWarning.collectAsStateWithLifecycle()
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedPartId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -80,7 +83,7 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
                         }
                     }
                     OrderDetails(
-                        part, people, products, jobPositions,
+                        part, people, shipyards, products, jobPositions,
                         linesFlow = { viewModel.lines(part.id) },
                         changesFlow = { viewModel.changes(part.id) },
                         onUpdateOrder = viewModel::updateOrder,
@@ -94,7 +97,9 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
                             viewModel.cancelOrder(part.id)
                             selectedPartId = null
                         },
-                        onRealize = { employeeId, date -> viewModel.realize(part.id, employeeId, date) },
+                        onRealize = { employeeId, shipyardName, date, lineIds ->
+                            viewModel.realize(part.id, employeeId, shipyardName, date, lineIds)
+                        },
                     )
                 }
             }
@@ -251,11 +256,12 @@ private fun OrderGroupOverview(
 private fun OrderDetails(
     order: OrderSummary,
     people: List<EmployeeSummary>,
+    shipyards: List<ShipyardEntity>,
     products: List<ProductWithStock>,
     jobPositions: List<pl.magazyn.mobile.data.JobPositionEntity>,
     linesFlow: () -> kotlinx.coroutines.flow.Flow<List<OrderDetailLine>>,
     changesFlow: () -> kotlinx.coroutines.flow.Flow<List<OrderChangeEntity>>,
-    onUpdateOrder: (String, String?, String, String) -> Unit,
+    onUpdateOrder: (String, String?, String, String?, String) -> Unit,
     onPrepared: (String, Boolean) -> Unit,
     onUpdateLine: (String, String?, String, Long, String) -> Unit,
     onAddLine: () -> Unit,
@@ -263,41 +269,45 @@ private fun OrderDetails(
     onCreatePerson: (String, String, String, String, String, (String, String) -> Unit) -> Unit,
     onCreateProduct: (String, String, String, Long, String, (ProductWithStock) -> Unit) -> Unit,
     onCancelOrder: () -> Unit,
-    onRealize: (String?, String) -> Unit,
+    onRealize: (String?, String?, String, Set<String>) -> Unit,
 ) {
     val lines by remember(order.id) { linesFlow() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val changes by remember(order.id) { changesFlow() }.collectAsStateWithLifecycle(initialValue = emptyList())
     var employeeId by rememberSaveable(order.id) { mutableStateOf(order.employeeId) }
+    var shipyardName by rememberSaveable(order.id) { mutableStateOf(order.siteLabel.takeIf { order.employeeId == null }) }
     var date by rememberSaveable(order.id) { mutableStateOf(order.plannedIssueDate) }
-    var showPersonPicker by remember { mutableStateOf(false) }
+    var showRecipientPicker by remember { mutableStateOf(false) }
     var showNewPerson by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     var editingLine by remember { mutableStateOf<OrderDetailLine?>(null) }
     var confirmNegative by rememberSaveable(order.id) { mutableStateOf(false) }
     var confirmCancel by remember { mutableStateOf(false) }
     var showChanges by rememberSaveable(order.id) { mutableStateOf(false) }
-    val createsNegative = lines.filter { it.productId != null }.groupBy { it.productId }.any { (_, grouped) ->
+    val selectedLines = lines.filter { it.isPrepared }
+    val selectedLineIds = selectedLines.mapTo(linkedSetOf()) { it.id }
+    val createsNegative = selectedLines.filter { it.productId != null }.groupBy { it.productId }.any { (_, grouped) ->
         grouped.first().stockQuantity - grouped.sumOf { it.quantity } < 0
     }
-    val ready = (employeeId != null || !order.siteLabel.isNullOrBlank()) && lines.isNotEmpty() && lines.all { it.productId != null }
+    val ready = (employeeId != null || !shipyardName.isNullOrBlank()) && selectedLines.isNotEmpty() && selectedLines.all { it.productId != null }
 
     Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Kompletowanie zamówienia", style = MaterialTheme.typography.titleLarge)
-        order.siteLabel?.takeIf(String::isNotBlank)?.let { Text("Stocznia: $it", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = { showPersonPicker = true }, Modifier.weight(1f)) {
-                Icon(Icons.Default.Person, null)
+            OutlinedButton(onClick = { showRecipientPicker = true }, Modifier.weight(1f)) {
+                Icon(if (employeeId != null) Icons.Default.Person else Icons.Default.Business, null)
                 Spacer(Modifier.width(7.dp))
                 Text(
-                    people.firstOrNull { it.id == employeeId }?.listDisplayName() ?: "Wyszukaj i przypisz osobę",
+                    people.firstOrNull { it.id == employeeId }?.listDisplayName()
+                        ?: shipyardName
+                        ?: "Wyszukaj osobę lub stocznię",
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
             OutlinedButton(onClick = { showDatePicker = true }) { Text(formatDisplayDate(date), maxLines = 1) }
         }
-        if (employeeId == null && order.siteLabel.isNullOrBlank()) Text("Nie rozpoznano osoby z notatki. Wybierz ją z bazy przed realizacją.", color = MaterialTheme.colorScheme.error)
-        if (employeeId == null && !order.siteLabel.isNullOrBlank()) Text("To zamówienie zostanie wydane na stan stoczni.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+        if (employeeId == null && shipyardName.isNullOrBlank()) Text("Wybierz osobę lub stocznię przed realizacją.", color = MaterialTheme.colorScheme.error)
+        if (employeeId == null && !shipyardName.isNullOrBlank()) Text("To zamówienie zostanie wydane na stan stoczni.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         HorizontalDivider()
         lines.forEach { line ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -345,7 +355,11 @@ private fun OrderDetails(
                 }
             }
         }
-        Button(onClick = { onRealize(employeeId, date) }, enabled = ready && (!createsNegative || confirmNegative), modifier = Modifier.fillMaxWidth()) { Text(if (employeeId == null && !order.siteLabel.isNullOrBlank()) "Zrealizuj i wydaj stoczni" else "Zrealizuj i wydaj") }
+        Button(
+            onClick = { onRealize(employeeId, shipyardName, date, selectedLineIds) },
+            enabled = ready && (!createsNegative || confirmNegative),
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (employeeId == null && !shipyardName.isNullOrBlank()) "Zrealizuj i wydaj stoczni" else "Zrealizuj i wydaj") }
         TextButton(onClick = { confirmCancel = true }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Anuluj całe zamówienie") }
         Spacer(Modifier.height(16.dp))
     }
@@ -363,22 +377,32 @@ private fun OrderDetails(
             onCreate = { first, last, phones, positions, aliases ->
                 onCreatePerson(first, last, phones, positions, aliases) { id, fullName ->
                     employeeId = id
-                    onUpdateOrder(order.id, id, fullName, date)
+                    shipyardName = null
+                    onUpdateOrder(order.id, id, fullName, null, date)
                     showNewPerson = false
                 }
             },
         )
     }
-    if (showPersonPicker) {
-        OrderPersonPickerDialog(
+    if (showRecipientPicker) {
+        OrderRecipientPickerDialog(
             people = people,
-            selectedId = employeeId,
-            onDismiss = { showPersonPicker = false },
-            onAddNew = { showPersonPicker = false; showNewPerson = true },
-            onSelect = { person ->
+            shipyards = shipyards,
+            selectedEmployeeId = employeeId,
+            selectedShipyardName = shipyardName,
+            onDismiss = { showRecipientPicker = false },
+            onAddNew = { showRecipientPicker = false; showNewPerson = true },
+            onSelectPerson = { person ->
                 employeeId = person.id
-                onUpdateOrder(order.id, person.id, person.fullName, date)
-                showPersonPicker = false
+                shipyardName = null
+                onUpdateOrder(order.id, person.id, person.fullName, null, date)
+                showRecipientPicker = false
+            },
+            onSelectShipyard = { shipyard ->
+                employeeId = null
+                shipyardName = shipyard.name
+                onUpdateOrder(order.id, null, shipyard.name, shipyard.name, date)
+                showRecipientPicker = false
             },
         )
     }
@@ -387,7 +411,13 @@ private fun OrderDetails(
         val state = rememberDatePickerState(initialSelectedDateMillis = initial.atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli())
         DatePickerDialog(onDismissRequest = { showDatePicker = false }, confirmButton = { TextButton(onClick = {
             state.selectedDateMillis?.let { date = Instant.ofEpochMilli(it).atZone(ZoneId.of("UTC")).toLocalDate().toString() }
-            onUpdateOrder(order.id, employeeId, people.firstOrNull { it.id == employeeId }?.fullName ?: order.recipient, date)
+            onUpdateOrder(
+                order.id,
+                employeeId,
+                people.firstOrNull { it.id == employeeId }?.fullName ?: shipyardName ?: order.recipient,
+                shipyardName,
+                date,
+            )
             showDatePicker = false
         }) { Text("Wybierz") } }, dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Anuluj") } }) { DatePicker(state) }
     }
@@ -400,30 +430,36 @@ private fun OrderDetails(
 }
 
 @Composable
-private fun OrderPersonPickerDialog(
+private fun OrderRecipientPickerDialog(
     people: List<EmployeeSummary>,
-    selectedId: String?,
+    shipyards: List<ShipyardEntity>,
+    selectedEmployeeId: String?,
+    selectedShipyardName: String?,
     onDismiss: () -> Unit,
     onAddNew: () -> Unit,
-    onSelect: (EmployeeSummary) -> Unit,
+    onSelectPerson: (EmployeeSummary) -> Unit,
+    onSelectShipyard: (ShipyardEntity) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
-    val matches = people.filter { person ->
+    val matchingPeople = people.filter { person ->
         query.isBlank() || pl.magazyn.mobile.domain.matchesSearch(
             query, person.fullName, person.aliases, person.tags, person.positions, person.phoneNumbers,
         )
     }.sortedWith(compareBy<EmployeeSummary> { it.lastName.lowercase() }.thenBy { it.firstName.lowercase() })
+    val matchingShipyards = shipyards.filter { shipyard ->
+        query.isBlank() || pl.magazyn.mobile.domain.matchesSearch(query, shipyard.name)
+    }.sortedBy { it.name.lowercase() }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Przypisz osobę") },
+        title = { Text("Przypisz odbiorcę") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     query,
                     { query = it },
                     Modifier.fillMaxWidth().keepAboveKeyboard(),
-                    label = { Text("Szukaj po nazwisku, imieniu lub ksywce") },
+                    label = { Text("Szukaj osoby lub stoczni") },
                     leadingIcon = { Icon(Icons.Default.Search, null) },
                     singleLine = true,
                 )
@@ -432,19 +468,39 @@ private fun OrderPersonPickerDialog(
                     Spacer(Modifier.width(6.dp))
                     Text("Dodaj całkowicie nową osobę")
                 }
-                if (matches.isEmpty()) {
-                    Text("Nie znaleziono osoby. Możesz dodać ją bez wychodzenia z zamówienia.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                if (matchingPeople.isEmpty() && matchingShipyards.isEmpty()) {
+                    Text("Nie znaleziono osoby ani stoczni.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 } else {
                     LazyColumn(Modifier.suggestionMenuHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        items(matches, key = { it.id }) { person ->
+                        items(matchingPeople, key = { "person-${it.id}" }) { person ->
                             OutlinedCard(
-                                onClick = { onSelect(person) },
+                                onClick = { onSelectPerson(person) },
                                 modifier = Modifier.fillMaxWidth(),
-                                colors = if (person.id == selectedId) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.outlinedCardColors(),
+                                colors = if (person.id == selectedEmployeeId) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.outlinedCardColors(),
                             ) {
-                                Column(Modifier.padding(horizontal = 11.dp, vertical = 8.dp)) {
-                                    Text(person.listDisplayName(), fontWeight = FontWeight.SemiBold)
-                                    if (person.positions.isNotBlank()) Text(person.positions, style = MaterialTheme.typography.labelSmall)
+                                Row(Modifier.padding(horizontal = 11.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Person, null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
+                                        Text(person.listDisplayName(), fontWeight = FontWeight.SemiBold)
+                                        Text(listOf("Osoba", person.positions).filter(String::isNotBlank).joinToString(" · "), style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                        }
+                        items(matchingShipyards, key = { "shipyard-${it.id}" }) { shipyard ->
+                            OutlinedCard(
+                                onClick = { onSelectShipyard(shipyard) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = if (shipyard.name == selectedShipyardName) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.outlinedCardColors(),
+                            ) {
+                                Row(Modifier.padding(horizontal = 11.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Business, null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
+                                        Text(shipyard.name, fontWeight = FontWeight.SemiBold)
+                                        Text("Stocznia", style = MaterialTheme.typography.labelSmall)
+                                    }
                                 }
                             }
                         }

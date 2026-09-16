@@ -48,4 +48,12 @@ class GeminiNoteAnalyzerTaskTest {
     @Test fun malformedJsonDoesNotNeedNetworkAndCanBeHandledByCaller() {
         assertTrue(runCatching { GeminiNoteAnalyzer().parseResponse("nie json", places, employees) }.isFailure)
     }
+
+    @Test fun sortsOnlyItemsExpandedFromOneRecognizedPackage() {
+        val note = GeminiNoteAnalyzer().parseResponse(
+            """{"kind":"ORDER","items":[{"name":"Kombinezon monterski","variant":"54","quantity":1,"unit":"szt.","confidence":1.0}]}""",
+        )
+
+        assertEquals(listOf("Bluza monterska", "Spodnie monterskie"), note.items.map { it.name })
+    }
 }

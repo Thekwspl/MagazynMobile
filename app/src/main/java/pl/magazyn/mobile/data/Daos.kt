@@ -526,8 +526,8 @@ interface OrderDao {
     @Insert
     suspend fun insertChange(item: OrderChangeEntity)
 
-    @Query("UPDATE orders SET employeeId = :employeeId, recipientLabel = :recipientLabel, plannedIssueDate = :date WHERE id = :orderId")
-    suspend fun updateOrder(orderId: String, employeeId: String?, recipientLabel: String, date: String)
+    @Query("UPDATE orders SET employeeId = :employeeId, recipientLabel = :recipientLabel, siteLabel = :siteLabel, plannedIssueDate = :date WHERE id = :orderId")
+    suspend fun updateOrder(orderId: String, employeeId: String?, recipientLabel: String, siteLabel: String?, date: String)
 
     @Query("UPDATE orders SET status = :status WHERE id = :orderId")
     suspend fun setStatus(orderId: String, status: String)
@@ -543,6 +543,9 @@ interface OrderDao {
 
     @Query("UPDATE order_lines SET isPrepared = :prepared WHERE id = :lineId")
     suspend fun setPrepared(lineId: String, prepared: Boolean)
+
+    @Query("UPDATE order_lines SET orderId = :targetOrderId WHERE orderId = :sourceOrderId AND id IN (:lineIds) AND isPrepared = 1")
+    suspend fun movePreparedLines(sourceOrderId: String, targetOrderId: String, lineIds: List<String>): Int
 
     @Query("UPDATE order_lines SET productId = :productId, rawText = :rawText, quantity = :quantity, unit = :unit, verificationStatus = :verificationStatus WHERE id = :lineId")
     suspend fun updateLine(lineId: String, productId: String?, rawText: String, quantity: Double, unit: String, verificationStatus: String)

@@ -43,12 +43,12 @@ class DataSafetyIntegrationTest {
             listOf(OrderEntity("order-1", null, "employee-1", "Kowalski Jan", null, "DRAFT", "2026-09-15", 1)),
         )
         database.orderDao().upsertLines(
-            listOf(OrderLineEntity("order-line-1", "order-1", "product-1", "Produkt 52", 3.0, "szt.", "VERIFIED")),
+            listOf(OrderLineEntity("order-line-1", "order-1", "product-1", "Produkt 52", 3.0, "szt.", "VERIFIED", isPrepared = true)),
         )
         val viewModel = OrdersViewModel(environment.application)
 
         viewModel.runAndAwaitViewModelWork {
-            repeat(8) { viewModel.realize("order-1", "employee-1", "2026-09-15", ignoreWarnings = true) }
+            repeat(8) { viewModel.realize("order-1", "employee-1", null, "2026-09-15", setOf("order-line-1"), ignoreWarnings = true) }
         }
         eventually("Zamówienie nie zostało zrealizowane") { database.orderDao().findById("order-1")?.status == "ISSUED" }
 
@@ -58,7 +58,7 @@ class DataSafetyIntegrationTest {
         assertEquals("ISSUED", database.orderDao().findById("order-1")?.status)
 
         viewModel.runAndAwaitViewModelWork {
-            viewModel.realize("order-1", "employee-1", "2026-09-15", ignoreWarnings = true)
+            viewModel.realize("order-1", "employee-1", null, "2026-09-15", setOf("order-line-1"), ignoreWarnings = true)
         }
         assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movements WHERE note='Realizacja zamówienia'"))
         assertEquals(7.0, database.stockDao().find("warehouse-main", "product-1")?.quantity ?: Double.NaN, 0.0)
@@ -73,12 +73,12 @@ class DataSafetyIntegrationTest {
             listOf(OrderEntity("warning-order", null, "employee-1", "Kowalski Jan", null, "DRAFT", "2026-09-15", 2)),
         )
         database.orderDao().upsertLines(
-            listOf(OrderLineEntity("warning-line", "warning-order", "product-1", "Produkt 52", 2.0, "szt.", "VERIFIED")),
+            listOf(OrderLineEntity("warning-line", "warning-order", "product-1", "Produkt 52", 2.0, "szt.", "VERIFIED", isPrepared = true)),
         )
         val viewModel = OrdersViewModel(environment.application)
 
         viewModel.runAndAwaitViewModelWork {
-            viewModel.realize("warning-order", "employee-1", "2026-09-15")
+            viewModel.realize("warning-order", "employee-1", null, "2026-09-15", setOf("warning-line"))
         }
         eventually("Nie pojawiło się ostrzeżenie o ponownym wydaniu") { viewModel.issueWarning.value != null }
         viewModel.runAndAwaitViewModelWork {
@@ -132,14 +132,14 @@ class DataSafetyIntegrationTest {
         )
         database.orderDao().upsertLines(
             listOf(
-                OrderLineEntity("valid-line", "unresolved-order", "product-1", "Produkt 52", 2.0, "szt.", "VERIFIED"),
-                OrderLineEntity("missing-line", "unresolved-order", null, "Brak produktu", 1.0, "szt.", "NEEDS_MAPPING"),
+                OrderLineEntity("valid-line", "unresolved-order", "product-1", "Produkt 52", 2.0, "szt.", "VERIFIED", isPrepared = true),
+                OrderLineEntity("missing-line", "unresolved-order", null, "Brak produktu", 1.0, "szt.", "NEEDS_MAPPING", isPrepared = true),
             ),
         )
         val viewModel = OrdersViewModel(environment.application)
 
         viewModel.runAndAwaitViewModelWork {
-            viewModel.realize("unresolved-order", "employee-1", "2026-09-15", ignoreWarnings = true)
+            viewModel.realize("unresolved-order", "employee-1", null, "2026-09-15", setOf("valid-line", "missing-line"), ignoreWarnings = true)
         }
 
         assertEquals("DRAFT", database.orderDao().findById("unresolved-order")?.status)
@@ -154,12 +154,12 @@ class DataSafetyIntegrationTest {
             listOf(OrderEntity("cancelled-order", null, "employee-1", "Kowalski Jan", null, "CANCELLED", "2026-09-15", 4)),
         )
         database.orderDao().upsertLines(
-            listOf(OrderLineEntity("cancelled-line", "cancelled-order", "product-1", "Produkt 52", 2.0, "szt.", "VERIFIED")),
+            listOf(OrderLineEntity("cancelled-line", "cancelled-order", "product-1", "Produkt 52", 2.0, "szt.", "VERIFIED", isPrepared = true)),
         )
         val viewModel = OrdersViewModel(environment.application)
 
         viewModel.runAndAwaitViewModelWork {
-            viewModel.realize("cancelled-order", "employee-1", "2026-09-15", ignoreWarnings = true)
+            viewModel.realize("cancelled-order", "employee-1", null, "2026-09-15", setOf("cancelled-line"), ignoreWarnings = true)
         }
 
         assertEquals("CANCELLED", database.orderDao().findById("cancelled-order")?.status)

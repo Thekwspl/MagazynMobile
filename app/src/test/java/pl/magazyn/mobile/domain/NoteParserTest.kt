@@ -56,7 +56,7 @@ class NoteParserTest {
         assertEquals(4, result.items.size)
         assertEquals("Adam Pawlak", result.items[0].recipientName)
         assertEquals("Łukasz Wojdyło", result.items[1].recipientName)
-        assertEquals(listOf("Spodnie", "Bluza"), result.items.slice(1..2).map { it.name })
+        assertEquals(listOf("Bluza", "Spodnie"), result.items.slice(1..2).map { it.name })
         assertEquals(3, result.items[3].quantity)
     }
 
@@ -92,7 +92,7 @@ class NoteParserTest {
     fun treatsUnspecifiedWorkwearAsTrousersAndSweatshirt() {
         val result = parser.parse("Jan Kowalski - kombinezon monterski r.58")
 
-        assertEquals(listOf("Spodnie monterskie", "Bluza monterska"), result.items.map { it.name })
+        assertEquals(listOf("Bluza monterska", "Spodnie monterskie"), result.items.map { it.name })
         assertEquals(listOf("58", "58"), result.items.map { it.variant })
     }
 
@@ -100,7 +100,7 @@ class NoteParserTest {
     fun expandsCompactWorkwearCodeAboveFortyEight() {
         val result = parser.parse("Jan Kowalski - m50")
 
-        assertEquals(listOf("Spodnie monterskie", "Bluza monterska"), result.items.map { it.name })
+        assertEquals(listOf("Bluza monterska", "Spodnie monterskie"), result.items.map { it.name })
         assertEquals(listOf("50", "50"), result.items.map { it.variant })
     }
 
@@ -119,6 +119,17 @@ class NoteParserTest {
         assertEquals("Buty monterskie", result.items.single().name)
         assertEquals("45", result.items.single().variant)
         assertEquals("para", result.items.single().unit)
+    }
+
+    @Test
+    fun sortsRecognizedPackageAlphabeticallyWithoutLocaleDependentRules() {
+        val items = listOf(
+            ParsedItem("Spodnie", null, 1, "szt.", 1f),
+            ParsedItem("Bluza", null, 1, "szt.", 1f),
+            ParsedItem("Buty", null, 1, "para", 1f),
+        )
+
+        assertEquals(listOf("Bluza", "Buty", "Spodnie"), sortRecognizedPackageItems(items).map { it.name })
     }
 
     @Test

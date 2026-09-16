@@ -164,7 +164,7 @@ class GeminiNoteAnalyzer {
                     notes = it.optString("notes").trim(),
                 ).takeIf { item -> name.isNotBlank() }
             }
-        }.flatMap(::expandWarehouseClothingConvention)
+        }.flatMap { item -> sortRecognizedPackageItems(expandWarehouseClothingConvention(item)) }
         val taskDraft = if (kind == ParsedInputKind.TASK) parseTaskDraft(json.optJSONObject("task"), taskPlaces, employees) else null
         return ParsedNote(
             person = people.firstOrNull(),
