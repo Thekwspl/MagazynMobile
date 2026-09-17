@@ -19,7 +19,7 @@ class TextNormalizationTest {
         assertEquals("Anna Maria", normalizeEmployeeNamePart("ANNA MARIA"))
         assertEquals("O'Connor", normalizeEmployeeNamePart("O'CONNOR"))
         assertEquals("Piotr", normalizeEmployeeNamePart("  PIOTR   "))
-        assertEquals("Černý ŠŽ", normalizeEmployeeNamePart("ČERNÝ ŠŽ"))
+        assertEquals("Černý Šž", normalizeEmployeeNamePart("ČERNÝ ŠŽ"))
     }
 
     @Test
