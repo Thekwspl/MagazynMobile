@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: magazyn-mobile-main-release
@@ -121,10 +122,12 @@ jobs:
           if-no-files-found: warn
 
       - name: Sprawdź eksportowane schematy Room
+        id: room_schema
         shell: bash
         run: |
           python3 - <<'PY'
           import json
+          import os
           import re
           from pathlib import Path
 
@@ -149,7 +152,112 @@ jobs:
           if exported.get("database", {}).get("version") != current_version:
               raise SystemExit(f"Eksport {current_schema} ma niezgodny numer wersji")
           print(f"Aktualny schema gate: {current_schema}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={current_version}\n")
+              output.write(f"path={current_schema.as_posix()}\n")
           PY
+
+      - name: Sprawdź Room schema i utwórz PR dla nowego pliku
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROOM_SCHEMA_VERSION: ${{ steps.room_schema.outputs.version }}
+          ROOM_SCHEMA_FILE: ${{ steps.room_schema.outputs.path }}
+          APP_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "ROOM SCHEMA CHECK"
+          echo "Database schema version: $ROOM_SCHEMA_VERSION"
+          echo "Generated file: $ROOM_SCHEMA_FILE"
+          test -f "$ROOM_SCHEMA_FILE" || {
+            echo "::error::Room/KSP nie wygenerował oczekiwanego pliku $ROOM_SCHEMA_FILE."
+            exit 1
+          }
+
+          if git ls-files --error-unmatch "$ROOM_SCHEMA_FILE" >/dev/null 2>&1; then
+            echo "Tracked by Git: YES"
+            if ! git diff --quiet -- "$ROOM_SCHEMA_FILE"; then
+              echo "::error::Room schema version $ROOM_SCHEMA_VERSION jest już zapisany w repo, ale wygenerowana zawartość się różni."
+              echo "::error::Nie aktualizuję istniejącego schema automatycznie. Sprawdź zmianę modelu i czy DATABASE_SCHEMA_VERSION powinien zostać zwiększony."
+              git diff -- "$ROOM_SCHEMA_FILE"
+              exit 1
+            fi
+            echo "Tracked schema jest zgodny z wynikiem Room/KSP. Release gate kontynuuje."
+            exit 0
+          fi
+
+          echo "Tracked by Git: NO"
+          BRANCH="automation/room-schema-$ROOM_SCHEMA_VERSION"
+          TITLE="Add Room schema $ROOM_SCHEMA_VERSION"
+          GENERATED_COPY="$RUNNER_TEMP/room-schema-$ROOM_SCHEMA_VERSION.json"
+          REMOTE_REF="refs/remotes/origin/$BRANCH"
+          REMOTE_SHA="$(git ls-remote --heads origin "refs/heads/$BRANCH" | awk 'NR == 1 { print $1 }')"
+          cp "$ROOM_SCHEMA_FILE" "$GENERATED_COPY"
+
+          echo "Creating or updating automation branch: $BRANCH"
+          git status --short
+
+          BRANCH_IS_CURRENT=false
+          if [ -n "$REMOTE_SHA" ]; then
+            git fetch --no-tags origin "refs/heads/$BRANCH:$REMOTE_REF"
+            REMOTE_PARENT="$(git rev-parse "$REMOTE_REF^" 2>/dev/null || true)"
+            if [ "$REMOTE_PARENT" = "$GITHUB_SHA" ] && \
+               git cat-file -e "$REMOTE_REF:$ROOM_SCHEMA_FILE" 2>/dev/null && \
+               git show "$REMOTE_REF:$ROOM_SCHEMA_FILE" > "$RUNNER_TEMP/remote-room-schema.json" && \
+               cmp -s "$GENERATED_COPY" "$RUNNER_TEMP/remote-room-schema.json"; then
+              BRANCH_IS_CURRENT=true
+              echo "Branch $BRANCH zawiera już identyczny schema dla źródłowego commita $GITHUB_SHA."
+            fi
+          fi
+
+          if [ "$BRANCH_IS_CURRENT" != "true" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch -C "$BRANCH" "$GITHUB_SHA"
+            cp "$GENERATED_COPY" "$ROOM_SCHEMA_FILE"
+            git add -- "$ROOM_SCHEMA_FILE"
+
+            STAGED_FILES="$(git diff --cached --name-only)"
+            if [ "$STAGED_FILES" != "$ROOM_SCHEMA_FILE" ]; then
+              echo "::error::Commit automatyzacji zawierałby pliki inne niż oczekiwany Room schema."
+              git status --short
+              git diff --cached --name-only
+              exit 1
+            fi
+            git diff --cached --check
+            git diff --cached --stat
+            git commit -m "$TITLE"
+
+            if [ -n "$REMOTE_SHA" ]; then
+              git push --force-with-lease="refs/heads/$BRANCH:$REMOTE_SHA" origin "HEAD:refs/heads/$BRANCH"
+            else
+              git push origin "HEAD:refs/heads/$BRANCH"
+            fi
+          fi
+
+          PR_URL="$(gh pr list --base main --head "$BRANCH" --state open --json url --jq '.[0].url // empty')"
+          if [ -z "$PR_URL" ]; then
+            BODY_FILE="$RUNNER_TEMP/room-schema-pr-body.md"
+            cat > "$BODY_FILE" <<EOF
+          Room schema: $ROOM_SCHEMA_VERSION
+          Wersja aplikacji: $APP_VERSION
+          Źródłowy commit: $GITHUB_SHA
+
+          Plik \`$ROOM_SCHEMA_FILE\` został wygenerowany przez Room/KSP w release gate.
+
+          Scal ten PR. Po merge workflow main uruchomi pełny release gate ponownie.
+          EOF
+            PR_URL="$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$BODY_FILE")"
+            echo "Created PR: $PR_URL"
+          else
+            echo "Existing PR: $PR_URL"
+          fi
+
+          echo "Room schema $ROOM_SCHEMA_VERSION został wygenerowany."
+          echo "Automatyczny Pull Request został utworzony lub zaktualizowany: $PR_URL"
+          echo "Release stopped intentionally. Scal PR; workflow po merge do main zweryfikuje release."
+          exit 1
 
       - name: Włącz akcelerację emulatora
         run: sudo chmod 666 /dev/kvm
@@ -175,18 +283,6 @@ jobs:
           profile: Nexus 6
           disable-animations: true
           script: gradle connectedDebugAndroidTest --no-daemon --max-workers=1
-
-      - name: Sprawdź, czy aktualny schemat Room jest zapisany w repozytorium
-        shell: bash
-        run: |
-          set -euo pipefail
-          CURRENT_VERSION=$(sed -n 's/.*DATABASE_SCHEMA_VERSION[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' app/src/main/java/pl/magazyn/mobile/data/DatabaseSchema.kt | head -n 1)
-          CURRENT_SCHEMA="app/schemas/pl.magazyn.mobile.data.AppDatabase/$CURRENT_VERSION.json"
-          git ls-files --error-unmatch "$CURRENT_SCHEMA" >/dev/null || {
-            echo "Aktualny eksport $CURRENT_SCHEMA został wygenerowany przez Room, ale nie jest zapisany w repozytorium."
-            echo "Pobierz artefakt room-schema z tego workflow, dodaj plik do repo i uruchom CI ponownie."
-            exit 1
-          }
 
       - name: Podpisany build release
         env:
