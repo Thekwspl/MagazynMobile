@@ -1,6 +1,7 @@
 package pl.magazyn.mobile.data
 
 import java.io.File
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -19,11 +20,12 @@ class AutoBackupRulesTest {
             assertTrue(rules.contains("<include domain=\"sharedpref\" path=\"product-visibility.xml\""))
             assertTrue(rules.contains("<include domain=\"sharedpref\" path=\"updates.xml\""))
             assertTrue(rules.contains("<include domain=\"sharedpref\" path=\"ai_preferences.xml\""))
-            assertTrue(rules.contains("<exclude domain=\"sharedpref\" path=\"ai_secret_preferences.xml\""))
-            assertTrue(rules.contains("<exclude domain=\"sharedpref\" path=\"ai_secure_preferences.xml\""))
-            assertTrue(rules.contains("<exclude domain=\"sharedpref\" path=\"restore-journal.xml\""))
-            assertTrue(rules.contains("<exclude domain=\"sharedpref\" path=\"startup-diagnostics.xml\""))
-            assertTrue(rules.contains("<exclude domain=\"file\" path=\"restore-rollback/\""))
+            assertFalse(rules.contains("<exclude"))
+            assertFalse(rules.contains("ai_secret_preferences.xml"))
+            assertFalse(rules.contains("ai_secure_preferences.xml"))
+            assertFalse(rules.contains("restore-journal.xml"))
+            assertFalse(rules.contains("startup-diagnostics.xml"))
+            assertFalse(rules.contains("restore-rollback/"))
         }
         assertTrue(modern.contains("<cloud-backup>"))
         assertTrue(modern.contains("<device-transfer>"))
