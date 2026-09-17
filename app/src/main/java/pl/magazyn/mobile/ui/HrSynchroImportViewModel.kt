@@ -60,6 +60,8 @@ class HrSynchroImportViewModel(application: Application) : AndroidViewModel(appl
 
     fun createAsNew(hrappkaId: Long) = updateAssignment(hrappkaId, HrManualAssignment(createNew = true))
 
+    fun skipForThisImport(hrappkaId: Long) = updateAssignment(hrappkaId, HrManualAssignment(skip = true))
+
     private fun updateAssignment(hrappkaId: Long, assignment: HrManualAssignment) {
         val export = loadedExport ?: return
         val assignments = _state.value.assignments + (hrappkaId to assignment)

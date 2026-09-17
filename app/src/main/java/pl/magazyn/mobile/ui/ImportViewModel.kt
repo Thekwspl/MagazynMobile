@@ -27,6 +27,7 @@ import pl.magazyn.mobile.data.ShipyardEntity
 import pl.magazyn.mobile.data.ShipyardStockBalanceEntity
 import pl.magazyn.mobile.domain.ImportKind
 import pl.magazyn.mobile.domain.ImportParser
+import pl.magazyn.mobile.domain.normalizeEmployeeName
 import pl.magazyn.mobile.domain.ImportPreview
 import pl.magazyn.mobile.domain.ImportedProductResolution
 import pl.magazyn.mobile.domain.PENDING_STOCK_QUANTITY_KNOWN
@@ -186,12 +187,13 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
                     } else {
                         when (val resolution = ImportParser.resolveImportedProduct(row.productName, products)) {
                             is ImportedProductResolution.Matched -> {
-                                val employeeKey = ImportParser.key(row.firstName + " " + row.lastName)
+                                val normalizedEmployeeName = normalizeEmployeeName(row.firstName, row.lastName)
+                                val employeeKey = ImportParser.key(normalizedEmployeeName.fullName)
                                 val employee = employees[employeeKey] ?: EmployeeEntity(
                                     id = "employee-import-${ImportParser.sha256(employeeKey).take(20)}",
-                                    fullName = row.firstName + " " + row.lastName,
-                                    firstName = row.firstName,
-                                    lastName = row.lastName,
+                                    fullName = normalizedEmployeeName.fullName,
+                                    firstName = normalizedEmployeeName.firstName,
+                                    lastName = normalizedEmployeeName.lastName,
                                 ).also { database.employeeDao().insert(it); employees[employeeKey] = it }
                                 insertHistoricalIssue(employee.id, "", row.effectiveDate, resolution.product, 1, preview.fileName)
                                 importedRows++

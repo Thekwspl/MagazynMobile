@@ -46,6 +46,12 @@ import pl.magazyn.mobile.data.EmployeeEntity
 import pl.magazyn.mobile.data.HrImportDecision
 import pl.magazyn.mobile.data.HrImportPlanItem
 
+private data class AdditionalHrLinkConfirmation(
+    val item: HrImportPlanItem,
+    val employee: EmployeeEntity,
+    val existingIds: List<Long>,
+)
+
 @Composable
 fun HrSynchroImportScreen(
     contentPadding: PaddingValues,
@@ -54,6 +60,7 @@ fun HrSynchroImportScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var assigning by remember { mutableStateOf<HrImportPlanItem?>(null) }
+    var additionalLinkConfirmation by remember { mutableStateOf<AdditionalHrLinkConfirmation?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(viewModel::load) }
 
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
@@ -88,6 +95,7 @@ fun HrSynchroImportScreen(
                             HrSummaryLine("Wymagają przypisania", plan.needsAssignmentCount.toString())
                             HrSummaryLine("Nie zatrudniać", plan.doNotHireCount.toString())
                             HrSummaryLine("Pominięto — Nie zatrudniać", plan.skippedDoNotHireCount.toString())
+                            HrSummaryLine("Pominięto ręcznie", plan.skippedManualCount.toString())
                             HrSummaryLine("Błędne rekordy", "0")
                             HorizontalDivider()
                             Text("Telefony", fontWeight = FontWeight.SemiBold)
@@ -110,6 +118,23 @@ fun HrSynchroImportScreen(
                         )
                     }
                 }
+                val autoTargets = plan.items.filter { it.decision == HrImportDecision.AUTO_LINK && it.employeeId != null }
+                    .groupBy { it.employeeId }
+                val additionalAutoLinks = autoTargets.filter { (employeeId, items) ->
+                    items.size > 1 || plan.localLinks.any { it.employeeId == employeeId }
+                }
+                if (additionalAutoLinks.isNotEmpty()) {
+                    item { Text("Proponowane dodatkowe ID HRappka", style = MaterialTheme.typography.titleMedium) }
+                    items(additionalAutoLinks.entries.toList(), key = { "auto-${it.key}" }) { entry ->
+                        val employee = plan.localEmployees.first { it.id == entry.key }
+                        val existingIds = plan.localLinks.filter { it.employeeId == employee.id }.map { it.hrappkaId }
+                        val newIds = entry.value.map { it.source.hrappkaId }
+                        HrMessageCard(
+                            "${employee.lastName} ${employee.firstName}: istniejące ID ${if (existingIds.isEmpty()) "brak" else existingIds.joinToString()}, nowe ID ${newIds.joinToString()}. Powiązania zostaną dodane dopiero po zatwierdzeniu importu.",
+                            warning = true,
+                        )
+                    }
+                }
                 val unresolved = plan.items.filter { it.decision == HrImportDecision.NEEDS_ASSIGNMENT }
                 if (unresolved.isNotEmpty()) {
                     item { Text("Wymagają ręcznego przypisania", style = MaterialTheme.typography.titleMedium) }
@@ -128,6 +153,26 @@ fun HrSynchroImportScreen(
                                 OutlinedButton(onClick = { assigning = item }, modifier = Modifier.fillMaxWidth()) {
                                     Icon(Icons.Default.Link, null)
                                     Text("Przypisz")
+                                }
+                                TextButton(
+                                    onClick = { viewModel.skipForThisImport(item.source.hrappkaId) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Pomiń w tym imporcie") }
+                            }
+                        }
+                    }
+                }
+                val skippedDoNotHire = plan.items.filter { it.decision == HrImportDecision.SKIP_DO_NOT_HIRE }
+                if (skippedDoNotHire.isNotEmpty()) {
+                    item { Text("Automatycznie pominięte — Nie zatrudniać", style = MaterialTheme.typography.titleMedium) }
+                    items(skippedDoNotHire, key = { "skip-${it.source.hrappkaId}" }) { item ->
+                        OutlinedCard(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text("${item.source.lastName} ${item.source.firstName}", fontWeight = FontWeight.SemiBold)
+                                Text("HRappka ID: ${item.source.hrappkaId}", style = MaterialTheme.typography.labelSmall)
+                                Text("Nie utworzono nowej osoby. Możesz świadomie przypisać rekord do istniejącej.", style = MaterialTheme.typography.bodySmall)
+                                OutlinedButton(onClick = { assigning = item }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Przypisz istniejącej osobie")
                                 }
                             }
                         }
@@ -173,8 +218,40 @@ fun HrSynchroImportScreen(
             item = item,
             employees = state.plan?.localEmployees.orEmpty(),
             onDismiss = { assigning = null },
-            onEmployee = { employeeId -> assigning = null; viewModel.assignToEmployee(item.source.hrappkaId, employeeId) },
+            onEmployee = { employeeId ->
+                assigning = null
+                val plan = state.plan
+                val employee = plan?.localEmployees?.firstOrNull { it.id == employeeId }
+                if (plan != null && employee != null) {
+                    val persistedIds = plan.localLinks.filter { it.employeeId == employeeId }.map { it.hrappkaId }
+                    val plannedIds = state.assignments.filterValues { it.employeeId == employeeId }.keys
+                    val otherIds = (persistedIds + plannedIds).filter { it != item.source.hrappkaId }.distinct().sorted()
+                    if (otherIds.isEmpty()) viewModel.assignToEmployee(item.source.hrappkaId, employeeId)
+                    else additionalLinkConfirmation = AdditionalHrLinkConfirmation(item, employee, otherIds)
+                }
+            },
             onCreate = { assigning = null; viewModel.createAsNew(item.source.hrappkaId) },
+            onSkip = { assigning = null; viewModel.skipForThisImport(item.source.hrappkaId) },
+        )
+    }
+    additionalLinkConfirmation?.let { confirmation ->
+        AlertDialog(
+            onDismissRequest = { additionalLinkConfirmation = null },
+            title = { Text("Dodać kolejne ID HRappka?") },
+            text = {
+                Text(
+                    "${confirmation.employee.lastName} ${confirmation.employee.firstName} ma już powiązania: " +
+                        confirmation.existingIds.joinToString() +
+                        ". Nowe ID: ${confirmation.item.source.hrappkaId}.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.assignToEmployee(confirmation.item.source.hrappkaId, confirmation.employee.id)
+                    additionalLinkConfirmation = null
+                }) { Text("Dodaj kolejne ID") }
+            },
+            dismissButton = { TextButton(onClick = { additionalLinkConfirmation = null }) { Text("Anuluj") } },
         )
     }
 }
@@ -186,11 +263,12 @@ private fun HrAssignmentDialog(
     onDismiss: () -> Unit,
     onEmployee: (String) -> Unit,
     onCreate: () -> Unit,
+    onSkip: () -> Unit,
 ) {
     var query by rememberSaveable(item.source.hrappkaId) { mutableStateOf("") }
     val matches = remember(query, employees) {
         employees.filter { employee ->
-            !employee.isArchived && (employee.hrappkaId == null || employee.hrappkaId == item.source.hrappkaId) &&
+            !employee.isArchived &&
                 (query.isBlank() || listOf(employee.firstName, employee.lastName, employee.phoneNumbers).any { it.contains(query, true) })
         }.sortedWith(compareBy<EmployeeEntity> { it.lastName.lowercase() }.thenBy { it.firstName.lowercase() })
     }
@@ -212,6 +290,7 @@ private fun HrAssignmentDialog(
                 }
                 if (!item.source.doNotHire) OutlinedButton(onClick = onCreate, modifier = Modifier.fillMaxWidth()) { Text("Utwórz jako nową") }
                 else Text("Status „Nie zatrudniać” nie pozwala utworzyć nowej osoby.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) { Text("Pomiń w tym imporcie") }
             }
         },
         confirmButton = {},

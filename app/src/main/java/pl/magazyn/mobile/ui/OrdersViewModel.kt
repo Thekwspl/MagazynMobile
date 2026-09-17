@@ -33,8 +33,7 @@ import pl.magazyn.mobile.data.StockMovementLineEntity
 import pl.magazyn.mobile.data.ShipyardStockBalanceEntity
 import pl.magazyn.mobile.domain.normalizeCommaSeparated
 import pl.magazyn.mobile.domain.normalizeDisplayName
-import pl.magazyn.mobile.domain.normalizePersonName
-import pl.magazyn.mobile.domain.normalizeFirstName
+import pl.magazyn.mobile.domain.normalizeEmployeeName
 import pl.magazyn.mobile.domain.normalizePhoneNumbers
 import pl.magazyn.mobile.domain.resolveAllOperationProducts
 
@@ -166,8 +165,9 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun createPerson(firstName: String, lastName: String, phones: String, positions: String, aliases: String, onCreated: (String, String) -> Unit) {
-        val first = normalizeFirstName(firstName)
-        val last = normalizePersonName(lastName)
+        val normalized = normalizeEmployeeName(firstName, lastName)
+        val first = normalized.firstName
+        val last = normalized.lastName
         if (first.isBlank() || last.isBlank()) return
         viewModelScope.launch {
             val id = UUID.randomUUID().toString()

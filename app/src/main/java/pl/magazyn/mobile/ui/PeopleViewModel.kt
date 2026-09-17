@@ -29,8 +29,7 @@ import pl.magazyn.mobile.data.splitPhones
 import pl.magazyn.mobile.domain.StockMath
 import pl.magazyn.mobile.domain.resolveAllOperationProducts
 import pl.magazyn.mobile.domain.normalizeCommaSeparated
-import pl.magazyn.mobile.domain.normalizeFirstName
-import pl.magazyn.mobile.domain.normalizePersonName
+import pl.magazyn.mobile.domain.normalizeEmployeeName
 import pl.magazyn.mobile.domain.normalizePhoneNumbers
 
 data class IssueRequest(val productId: String, val quantity: Long)
@@ -64,8 +63,9 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
         tags: String,
         onSaved: (String) -> Unit = {},
     ) {
-        val normalizedFirstName = normalizeFirstName(firstName)
-        val normalizedLastName = normalizePersonName(lastName)
+        val normalized = normalizeEmployeeName(firstName, lastName)
+        val normalizedFirstName = normalized.firstName
+        val normalizedLastName = normalized.lastName
         if (normalizedFirstName.isBlank() || normalizedLastName.isBlank()) return
         val employeeId = existing?.id ?: UUID.randomUUID().toString()
         viewModelScope.launch {

@@ -6,6 +6,29 @@ private val polishLocale = Locale("pl", "PL")
 
 fun removeDigits(value: String): String = value.filterNot(Char::isDigit)
 
+/**
+ * Kanoniczna postać imienia lub nazwiska zapisywana w Employee.
+ * Zmienia wyłącznie wielkość liter i nadmiarowe odstępy; zachowuje Unicode,
+ * łączniki, apostrofy oraz pozostałą treść źródłową.
+ */
+fun normalizeEmployeeNamePart(value: String): String {
+    val compact = value.trim().replace(Regex("\\s+"), " ").lowercase(polishLocale)
+    var capitalizeNext = true
+    return buildString(compact.length) {
+        compact.forEach { character ->
+            append(if (capitalizeNext && character.isLetter()) character.titlecaseChar() else character)
+            capitalizeNext = character == ' ' || character == '-' || character == '\''
+        }
+    }
+}
+
+data class NormalizedEmployeeName(val firstName: String, val lastName: String) {
+    val fullName: String get() = listOf(firstName, lastName).filter(String::isNotBlank).joinToString(" ")
+}
+
+fun normalizeEmployeeName(firstName: String, lastName: String): NormalizedEmployeeName =
+    NormalizedEmployeeName(normalizeEmployeeNamePart(firstName), normalizeEmployeeNamePart(lastName))
+
 fun normalizePersonName(value: String): String = removeDigits(value)
     .trim()
     .replace(Regex("\\s+"), " ")

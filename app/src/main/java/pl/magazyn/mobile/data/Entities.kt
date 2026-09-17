@@ -16,10 +16,7 @@ data class WarehouseEntity(
 
 @Entity(
     tableName = "employees",
-    indices = [
-        Index(value = ["fullName"]),
-        Index(value = ["hrappkaId"], unique = true),
-    ],
+    indices = [Index(value = ["fullName"])],
 )
 data class EmployeeEntity(
     @PrimaryKey val id: String,
@@ -30,14 +27,15 @@ data class EmployeeEntity(
     val aliases: String = "",
     val tags: String = "",
     val isArchived: Boolean = false,
-    val hrappkaId: Long? = null,
-    val hrappkaExternalId: String? = null,
-    @ColumnInfo(defaultValue = "0") val hrappkaDoNotHire: Boolean = false,
+    // Kolumny schema 23 pozostają fizycznie, aby uniknąć ryzykownej przebudowy tabeli
+    // employees. Od schema 24 nie są źródłem prawdy i migracja je zeruje.
+    @ColumnInfo(name = "hrappkaId") val legacyHrappkaId: Long? = null,
+    @ColumnInfo(name = "hrappkaExternalId") val legacyHrappkaExternalId: String? = null,
+    @ColumnInfo(name = "hrappkaDoNotHire", defaultValue = "0") val legacyHrappkaDoNotHire: Boolean = false,
 )
 
 @Entity(
-    tableName = "employee_hrappka_phones",
-    primaryKeys = ["employeeId", "normalizedNumber"],
+    tableName = "employee_hrappka_links",
     foreignKeys = [
         ForeignKey(
             entity = EmployeeEntity::class,
@@ -48,7 +46,34 @@ data class EmployeeEntity(
     ],
     indices = [Index("employeeId")],
 )
+data class EmployeeHrappkaLinkEntity(
+    @PrimaryKey val hrappkaId: Long,
+    val employeeId: String,
+    val externalId: String? = null,
+    @ColumnInfo(defaultValue = "0") val doNotHire: Boolean = false,
+)
+
+@Entity(
+    tableName = "employee_hrappka_phones",
+    primaryKeys = ["hrappkaId", "normalizedNumber"],
+    foreignKeys = [
+        ForeignKey(
+            entity = EmployeeEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["employeeId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = EmployeeHrappkaLinkEntity::class,
+            parentColumns = ["hrappkaId"],
+            childColumns = ["hrappkaId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("employeeId")],
+)
 data class EmployeeHrappkaPhoneEntity(
+    val hrappkaId: Long,
     val employeeId: String,
     val normalizedNumber: String,
     val displayNumber: String,

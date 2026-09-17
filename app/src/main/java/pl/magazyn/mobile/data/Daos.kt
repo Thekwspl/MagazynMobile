@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -20,12 +21,6 @@ interface EmployeeDao {
 
     @Query("SELECT * FROM employees")
     suspend fun getAllIncludingArchivedNow(): List<EmployeeEntity>
-
-    @Query("SELECT * FROM employees WHERE hrappkaId = :hrappkaId LIMIT 1")
-    suspend fun findByHrappkaId(hrappkaId: Long): EmployeeEntity?
-
-    @Query("SELECT * FROM employees WHERE hrappkaDoNotHire = 1 AND isArchived = 0 ORDER BY lastName COLLATE NOCASE, firstName COLLATE NOCASE")
-    fun observeHrappkaDoNotHire(): Flow<List<EmployeeEntity>>
 
     @Query("""
         SELECT e.id, e.fullName, e.firstName, e.lastName, e.phoneNumbers, e.aliases, e.tags,
@@ -59,6 +54,58 @@ interface EmployeeDao {
 }
 
 @Dao
+interface HrappkaLinkDao {
+    @Query("SELECT * FROM employee_hrappka_links")
+    suspend fun getAllNow(): List<EmployeeHrappkaLinkEntity>
+
+    @Query("SELECT * FROM employee_hrappka_links WHERE hrappkaId = :hrappkaId LIMIT 1")
+    suspend fun findByHrappkaId(hrappkaId: Long): EmployeeHrappkaLinkEntity?
+
+    @Query("SELECT * FROM employee_hrappka_links WHERE employeeId = :employeeId ORDER BY hrappkaId")
+    suspend fun findForEmployee(employeeId: String): List<EmployeeHrappkaLinkEntity>
+
+    @Query("SELECT l.hrappkaId, l.employeeId, l.externalId, l.doNotHire, e.firstName, e.lastName FROM employee_hrappka_links l INNER JOIN employees e ON e.id = l.employeeId WHERE e.isArchived = 0 ORDER BY e.lastName COLLATE NOCASE, e.firstName COLLATE NOCASE, l.hrappkaId")
+    fun observeActiveDetails(): Flow<List<EmployeeHrappkaLinkDetail>>
+
+    @Upsert
+    suspend fun upsert(item: EmployeeHrappkaLinkEntity)
+}
+
+data class EmployeeHrappkaLinkDetail(
+    val hrappkaId: Long,
+    val employeeId: String,
+    val externalId: String?,
+    val doNotHire: Boolean,
+    val firstName: String,
+    val lastName: String,
+)
+
+enum class HrappkaAttentionKind { DO_NOT_HIRE, STATUS_CONFLICT }
+
+data class HrappkaEmployeeAttention(
+    val employeeId: String,
+    val firstName: String,
+    val lastName: String,
+    val kind: HrappkaAttentionKind,
+    val links: List<EmployeeHrappkaLinkDetail>,
+)
+
+fun buildHrappkaAttention(links: List<EmployeeHrappkaLinkDetail>): List<HrappkaEmployeeAttention> =
+    links.groupBy { it.employeeId }.values.mapNotNull { employeeLinks ->
+        val hasDoNotHire = employeeLinks.any { it.doNotHire }
+        val hasActive = employeeLinks.any { !it.doNotHire }
+        if (!hasDoNotHire) return@mapNotNull null
+        val first = employeeLinks.first()
+        HrappkaEmployeeAttention(
+            employeeId = first.employeeId,
+            firstName = first.firstName,
+            lastName = first.lastName,
+            kind = if (hasActive) HrappkaAttentionKind.STATUS_CONFLICT else HrappkaAttentionKind.DO_NOT_HIRE,
+            links = employeeLinks.sortedBy { it.hrappkaId },
+        )
+    }.sortedWith(compareBy({ it.lastName.lowercase() }, { it.firstName.lowercase() }))
+
+@Dao
 interface HrappkaPhoneDao {
     @Query("SELECT * FROM employee_hrappka_phones")
     suspend fun getAllNow(): List<EmployeeHrappkaPhoneEntity>
@@ -66,11 +113,17 @@ interface HrappkaPhoneDao {
     @Query("SELECT * FROM employee_hrappka_phones WHERE employeeId = :employeeId")
     suspend fun findForEmployee(employeeId: String): List<EmployeeHrappkaPhoneEntity>
 
+    @Query("SELECT * FROM employee_hrappka_phones WHERE hrappkaId = :hrappkaId")
+    suspend fun findForHrappkaId(hrappkaId: Long): List<EmployeeHrappkaPhoneEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(items: List<EmployeeHrappkaPhoneEntity>)
 
     @Query("DELETE FROM employee_hrappka_phones WHERE employeeId = :employeeId")
     suspend fun deleteForEmployee(employeeId: String)
+
+    @Query("DELETE FROM employee_hrappka_phones WHERE hrappkaId = :hrappkaId")
+    suspend fun deleteForHrappkaId(hrappkaId: Long)
 }
 
 data class EmployeeSummary(

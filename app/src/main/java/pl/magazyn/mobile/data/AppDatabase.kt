@@ -7,6 +7,7 @@ import androidx.room.RoomDatabase
     entities = [
         WarehouseEntity::class,
         EmployeeEntity::class,
+        EmployeeHrappkaLinkEntity::class,
         EmployeeHrappkaPhoneEntity::class,
         JobPositionEntity::class,
         EmployeeJobPositionEntity::class,
@@ -44,6 +45,7 @@ import androidx.room.RoomDatabase
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun employeeDao(): EmployeeDao
+    abstract fun hrappkaLinkDao(): HrappkaLinkDao
     abstract fun hrappkaPhoneDao(): HrappkaPhoneDao
     abstract fun jobPositionDao(): JobPositionDao
     abstract fun productDao(): ProductDao

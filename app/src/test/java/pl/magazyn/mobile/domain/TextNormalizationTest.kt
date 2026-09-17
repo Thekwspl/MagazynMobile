@@ -11,6 +11,18 @@ class TextNormalizationTest {
     }
 
     @Test
+    fun employeeNamesUseUnicodeAwareCapitalizationForEveryNamePart() {
+        assertEquals("Piotr", normalizeEmployeeNamePart("PIOTR"))
+        assertEquals("Piotr", normalizeEmployeeNamePart("pIoTr"))
+        assertEquals("Pawłowski", normalizeEmployeeNamePart("PAWŁOWSKI"))
+        assertEquals("Bukowiecka-Łytka", normalizeEmployeeNamePart("BUKOWIECKA-ŁYTKA"))
+        assertEquals("Anna Maria", normalizeEmployeeNamePart("ANNA MARIA"))
+        assertEquals("O'Connor", normalizeEmployeeNamePart("O'CONNOR"))
+        assertEquals("Piotr", normalizeEmployeeNamePart("  PIOTR   "))
+        assertEquals("Černý ŠŽ", normalizeEmployeeNamePart("ČERNÝ ŠŽ"))
+    }
+
+    @Test
     fun aliasesAndTagsAreStoredAsCommaSeparatedValues() {
         assertEquals("Wojdył, Wojdylo, serwis", normalizeCommaSeparated("Wojdył|Wojdylo, serwis"))
     }

@@ -47,7 +47,7 @@ fun HomeScreen(
     val pendingImportDetails by viewModel.pendingImportDetails.collectAsStateWithLifecycle()
     val products by viewModel.products.collectAsStateWithLifecycle()
     val people by viewModel.people.collectAsStateWithLifecycle()
-    val hrappkaDoNotHireEmployees by viewModel.hrappkaDoNotHireEmployees.collectAsStateWithLifecycle()
+    val hrappkaAttentionEmployees by viewModel.hrappkaAttentionEmployees.collectAsStateWithLifecycle()
     val aiAnalysis by viewModel.aiAnalysis.collectAsStateWithLifecycle()
     val duplicateDecisions by viewModel.duplicateDecisions.collectAsStateWithLifecycle()
     val query by viewModel.quickInput.collectAsStateWithLifecycle()
@@ -115,7 +115,7 @@ fun HomeScreen(
                     }
                     if (uiState.openOrderCount > 0) ActiveOrderCard(uiState.openOrderCount, onOrders)
                     if (uiState.openOrderCount == 0 && openTasks.isEmpty()) EmptyOrdersCard()
-                    if (uiState.negativeStockCount > 0 || uiState.pendingImportCount > 0 || duplicateCandidates.isNotEmpty() || hrappkaDoNotHireEmployees.isNotEmpty()) {
+                    if (uiState.negativeStockCount > 0 || uiState.pendingImportCount > 0 || duplicateCandidates.isNotEmpty() || hrappkaAttentionEmployees.isNotEmpty()) {
                         SectionHeader("Wymaga uwagi", "Szczegóły")
                         if (uiState.negativeStockCount > 0) AttentionRow(
                             Icons.Default.Warning,
@@ -134,9 +134,9 @@ fun HomeScreen(
                             "${duplicateCandidates.size} rekordów może być duplikatami",
                             true,
                         ) { onDuplicates() }
-                        if (hrappkaDoNotHireEmployees.isNotEmpty()) AttentionRow(
+                        if (hrappkaAttentionEmployees.isNotEmpty()) AttentionRow(
                             Icons.Default.PersonOff,
-                            "${hrappkaDoNotHireEmployees.size} osoby: HRappka — Nie zatrudniać",
+                            "${hrappkaAttentionEmployees.size} osoby wymagają uwagi w HRappka",
                             true,
                         ) { attentionDetails = AttentionDetails.HRAPPKA_DO_NOT_HIRE }
                     } else {
@@ -159,7 +159,7 @@ fun HomeScreen(
                 pendingItems = pendingImportDetails,
                 products = products,
                 duplicates = duplicateCandidates,
-                hrappkaEmployees = hrappkaDoNotHireEmployees,
+                hrappkaEmployees = hrappkaAttentionEmployees,
                 onResolvePending = viewModel::resolvePendingImports,
                 onCorrectNegative = viewModel::correctNegativeStock,
                 onOpenDuplicate = { candidate ->
@@ -180,13 +180,13 @@ fun HomeScreen(
             title = { Text("Powiadomienia") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (uiState.negativeStockCount == 0 && uiState.pendingImportCount == 0 && uiState.openOrderCount == 0 && tasks.none { !it.isCompleted } && duplicateCandidates.isEmpty() && hrappkaDoNotHireEmployees.isEmpty()) {
+                    if (uiState.negativeStockCount == 0 && uiState.pendingImportCount == 0 && uiState.openOrderCount == 0 && tasks.none { !it.isCompleted } && duplicateCandidates.isEmpty() && hrappkaAttentionEmployees.isEmpty()) {
                         Text("Brak nowych powiadomień.")
                     }
                     if (uiState.negativeStockCount > 0) Text("• ${uiState.negativeStockCount} produkty mają stan ujemny")
                     if (uiState.pendingImportCount > 0) Text("• ${uiState.pendingImportCount} pozycji importu wymaga mapowania")
                     if (duplicateCandidates.isNotEmpty()) Text("• ${duplicateCandidates.size} rekordów może być duplikatami")
-                    if (hrappkaDoNotHireEmployees.isNotEmpty()) Text("• ${hrappkaDoNotHireEmployees.size} osoby: HRappka — Nie zatrudniać")
+                    if (hrappkaAttentionEmployees.isNotEmpty()) Text("• ${hrappkaAttentionEmployees.size} osoby wymagają uwagi w HRappka")
                     if (uiState.openOrderCount > 0) Text("• ${uiState.openOrderCount} aktywne zamówienia")
                     val taskCount = tasks.count { !it.isCompleted }
                     if (taskCount > 0) Text("• $taskCount zadania do wykonania")
@@ -456,7 +456,7 @@ private fun AttentionDetailsSheet(
     pendingItems: List<pl.magazyn.mobile.data.PendingImportDetail>,
     products: List<pl.magazyn.mobile.data.ProductWithStock>,
     duplicates: List<DuplicateCandidate>,
-    hrappkaEmployees: List<pl.magazyn.mobile.data.EmployeeEntity>,
+    hrappkaEmployees: List<pl.magazyn.mobile.data.HrappkaEmployeeAttention>,
     onResolvePending: (List<pl.magazyn.mobile.data.PendingImportDetail>, String?, String, String) -> Unit,
     onCorrectNegative: (pl.magazyn.mobile.data.NegativeStockItem, Long) -> Unit,
     onOpenDuplicate: (DuplicateCandidate) -> Unit,
@@ -478,7 +478,7 @@ private fun AttentionDetailsSheet(
                         AttentionDetails.NEGATIVE_STOCK -> "Ujemne stany"
                         AttentionDetails.PENDING_IMPORT -> "Pozycje wymagające mapowania"
                         AttentionDetails.DUPLICATES -> "Możliwe duplikaty"
-                        AttentionDetails.HRAPPKA_DO_NOT_HIRE -> "HRappka: Nie zatrudniać"
+                        AttentionDetails.HRAPPKA_DO_NOT_HIRE -> "HRappka: statusy wymagające uwagi"
                     },
                     style = MaterialTheme.typography.titleLarge,
                 )
@@ -487,7 +487,7 @@ private fun AttentionDetailsSheet(
                         AttentionDetails.NEGATIVE_STOCK -> "Przedmioty wydane poniżej zera"
                         AttentionDetails.PENDING_IMPORT -> "Aplikacja nie rozpoznała tych nazw przedmiotów"
                         AttentionDetails.DUPLICATES -> "Otwórz rekord, porównaj dane i popraw albo usuń niewłaściwy"
-                        AttentionDetails.HRAPPKA_DO_NOT_HIRE -> "Osoby oznaczone w ostatnim imporcie Synchro"
+                        AttentionDetails.HRAPPKA_DO_NOT_HIRE -> "Nie zatrudniać lub konflikt statusów między ID HRappka"
                     },
                     style = MaterialTheme.typography.labelMedium,
                 )
@@ -535,12 +535,15 @@ private fun AttentionDetailsSheet(
                     DetailLine(candidate.title, candidate.subtitle) { onOpenDuplicate(candidate) }
                 }
             } else {
-                items(hrappkaEmployees.size, key = { hrappkaEmployees[it].id }) { index ->
+                items(hrappkaEmployees.size, key = { hrappkaEmployees[it].employeeId }) { index ->
                     val employee = hrappkaEmployees[index]
                     DetailLine(
                         "${employee.lastName} ${employee.firstName}",
-                        "HRappka: Nie zatrudniać",
-                    ) { onOpenPerson(employee.id) }
+                        buildString {
+                            append(if (employee.kind == pl.magazyn.mobile.data.HrappkaAttentionKind.STATUS_CONFLICT) "Konflikt statusów HRappka" else "HRappka: Nie zatrudniać")
+                            employee.links.forEach { link -> append("\nID ${link.hrappkaId}: ${if (link.doNotHire) "Nie zatrudniać" else "aktywny"}") }
+                        },
+                    ) { onOpenPerson(employee.employeeId) }
                 }
             }
         }

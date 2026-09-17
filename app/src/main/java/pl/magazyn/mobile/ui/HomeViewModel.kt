@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import pl.magazyn.mobile.MagazynApplication
@@ -40,8 +41,7 @@ import pl.magazyn.mobile.domain.ParsedInputKind
 import pl.magazyn.mobile.domain.ImportParser
 import pl.magazyn.mobile.domain.PENDING_STOCK_QUANTITY_KNOWN
 import pl.magazyn.mobile.domain.normalizeDisplayName
-import pl.magazyn.mobile.domain.normalizePersonName
-import pl.magazyn.mobile.domain.normalizeFirstName
+import pl.magazyn.mobile.domain.normalizeEmployeeName
 import pl.magazyn.mobile.domain.normalizeFullPersonName
 import pl.magazyn.mobile.domain.normalizePhoneNumbers
 import pl.magazyn.mobile.domain.TaskTextParser
@@ -88,7 +88,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val noteReview: StateFlow<NoteReviewUiState?> = _noteReview.asStateFlow()
     val people = database.employeeDao().observeSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val hrappkaDoNotHireEmployees = database.employeeDao().observeHrappkaDoNotHire()
+    val hrappkaAttentionEmployees = database.hrappkaLinkDao().observeActiveDetails()
+        .map { links ->
+            pl.magazyn.mobile.data.buildHrappkaAttention(links)
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val jobPositions = database.jobPositionDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -497,8 +500,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         aliases: String,
         onCreated: (String, String) -> Unit,
     ) {
-        val first = normalizeFirstName(firstName)
-        val last = normalizePersonName(lastName)
+        val normalizedEmployeeName = normalizeEmployeeName(firstName, lastName)
+        val first = normalizedEmployeeName.firstName
+        val last = normalizedEmployeeName.lastName
         if (first.isBlank() || last.isBlank()) return
         viewModelScope.launch {
             val fullName = "$first $last"
@@ -619,8 +623,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     "PEOPLE" -> {
-                        val firstName = normalizeFirstName(item.recipientFirstName)
-                        val lastName = normalizePersonName(item.recipientLastName)
+                        val normalizedEmployeeName = normalizeEmployeeName(item.recipientFirstName, item.recipientLastName)
+                        val firstName = normalizedEmployeeName.firstName
+                        val lastName = normalizedEmployeeName.lastName
                         val employeeKey = ImportParser.key("$firstName $lastName")
                         val employee = database.employeeDao().getAllNow().firstOrNull {
                             ImportParser.key("${it.firstName} ${it.lastName}") == employeeKey

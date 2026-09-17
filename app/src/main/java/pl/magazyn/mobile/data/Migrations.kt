@@ -2,6 +2,7 @@ package pl.magazyn.mobile.data
 
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import pl.magazyn.mobile.domain.normalizeEmployeeName
 
 val MIGRATION_14_15 = object : Migration(14, 15) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -654,6 +655,73 @@ val MIGRATION_22_23 = object : Migration(22, 23) {
             """.trimIndent(),
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS index_employee_hrappka_phones_employeeId ON employee_hrappka_phones(employeeId)")
+    }
+}
+
+/** Przenosi relację 1:1 z schema 23 do wielu identyfikatorów HRappka na jedną osobę. */
+val MIGRATION_23_24 = object : Migration(23, 24) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS employee_hrappka_links (
+                hrappkaId INTEGER NOT NULL PRIMARY KEY,
+                employeeId TEXT NOT NULL,
+                externalId TEXT,
+                doNotHire INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(employeeId) REFERENCES employees(id) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_employee_hrappka_links_employeeId ON employee_hrappka_links(employeeId)")
+        db.execSQL(
+            """
+            INSERT INTO employee_hrappka_links(hrappkaId, employeeId, externalId, doNotHire)
+            SELECT hrappkaId, id, hrappkaExternalId, hrappkaDoNotHire
+            FROM employees
+            WHERE hrappkaId IS NOT NULL
+            """.trimIndent(),
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE employee_hrappka_phones_new (
+                hrappkaId INTEGER NOT NULL,
+                employeeId TEXT NOT NULL,
+                normalizedNumber TEXT NOT NULL,
+                displayNumber TEXT NOT NULL,
+                PRIMARY KEY(hrappkaId, normalizedNumber),
+                FOREIGN KEY(employeeId) REFERENCES employees(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                FOREIGN KEY(hrappkaId) REFERENCES employee_hrappka_links(hrappkaId) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO employee_hrappka_phones_new(hrappkaId, employeeId, normalizedNumber, displayNumber)
+            SELECT l.hrappkaId, p.employeeId, p.normalizedNumber, p.displayNumber
+            FROM employee_hrappka_phones p
+            INNER JOIN employee_hrappka_links l ON l.employeeId = p.employeeId
+            """.trimIndent(),
+        )
+        db.execSQL("DROP TABLE employee_hrappka_phones")
+        db.execSQL("ALTER TABLE employee_hrappka_phones_new RENAME TO employee_hrappka_phones")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_employee_hrappka_phones_employeeId ON employee_hrappka_phones(employeeId)")
+        db.execSQL("DROP INDEX IF EXISTS index_employees_hrappkaId")
+        db.execSQL("UPDATE employees SET hrappkaId = NULL, hrappkaExternalId = NULL, hrappkaDoNotHire = 0")
+
+        val names = mutableListOf<Triple<String, String, String>>()
+        db.query("SELECT id, firstName, lastName FROM employees").use { cursor ->
+            while (cursor.moveToNext()) {
+                names += Triple(cursor.getString(0), cursor.getString(1), cursor.getString(2))
+            }
+        }
+        names.forEach { (id, firstName, lastName) ->
+            val normalized = normalizeEmployeeName(firstName, lastName)
+            db.execSQL(
+                "UPDATE employees SET firstName = ?, lastName = ?, fullName = ? WHERE id = ?",
+                arrayOf(normalized.firstName, normalized.lastName, normalized.fullName, id),
+            )
+        }
     }
 }
 
