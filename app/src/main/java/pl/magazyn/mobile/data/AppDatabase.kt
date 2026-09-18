@@ -60,4 +60,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun learningRuleDao(): LearningRuleDao
     abstract fun taskStructureDao(): TaskStructureDao
     abstract fun productMergeDao(): ProductMergeDao
+    abstract fun employeeMergeDao(): EmployeeMergeDao
 }
