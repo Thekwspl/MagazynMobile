@@ -151,7 +151,7 @@ class HrSynchroImportIntegrationTest {
     }
 
     @Test
-    fun doNotHireConflictAndAllDoNotHireProduceDistinctAttentionKinds() = runBlocking {
+    fun onlyConflictingHrappkaStatusesRequireAttention() = runBlocking {
         database.employeeDao().insert(employee("conflict", "Jan", "Konflikt"))
         importer.import(
             exportEmployees(listOf(source(1501, "Jan", "Konflikt", status = "Nie zatrudniać"), source(1502, "Jan", "Konflikt", status = "Pracuje"))),
@@ -159,13 +159,22 @@ class HrSynchroImportIntegrationTest {
         )
         var attention = buildHrappkaAttention(database.hrappkaLinkDao().observeActiveDetails().first())
         assertEquals(HrappkaAttentionKind.STATUS_CONFLICT, attention.single().kind)
+        assertFalse(database.employeeDao().observeSummaries().first().single().hrappkaDoNotHire)
 
         importer.import(
             exportEmployees(listOf(source(1502, "Jan", "Konflikt", status = "Nie zatrudniać"))),
             emptyMap(),
         )
         attention = buildHrappkaAttention(database.hrappkaLinkDao().observeActiveDetails().first())
-        assertEquals(HrappkaAttentionKind.DO_NOT_HIRE, attention.single().kind)
+        assertTrue(attention.isEmpty())
+        assertTrue(database.employeeDao().observeSummaries().first().single().hrappkaDoNotHire)
+
+        importer.import(
+            exportEmployees(listOf(source(1501, "Jan", "Konflikt", status = "Pracuje"), source(1502, "Jan", "Konflikt", status = "Pracuje"))),
+            emptyMap(),
+        )
+        assertTrue(buildHrappkaAttention(database.hrappkaLinkDao().observeActiveDetails().first()).isEmpty())
+        assertFalse(database.employeeDao().observeSummaries().first().single().hrappkaDoNotHire)
     }
 
     @Test
@@ -185,15 +194,24 @@ class HrSynchroImportIntegrationTest {
     }
 
     @Test
-    fun missingPersonIsCreatedUnlessStatusIsDoNotHireAndPhoneAloneNeverMerges() = runBlocking {
+    fun missingPersonIsCreatedIncludingDoNotHireAndPhoneAloneNeverMerges() = runBlocking {
         database.employeeDao().insert(employee("local-phone", "Jan", "Lokalny", phones = "+48 500 000 111"))
         importer.import(exportEmployees(listOf(source(1701, "Anna", "Nowa", externalId = "17/04/2026", phones = listOf("+48 500 000 111")))), emptyMap())
         val link = checkNotNull(database.hrappkaLinkDao().findByHrappkaId(1701))
         assertEquals("17/04/2026", link.externalId)
         assertEquals(2L, database.queryLong("SELECT COUNT(*) FROM employees"))
-        val skipped = importer.import(exportEmployees(listOf(source(1702, "Ewa", "Pominięta", status = "Nie zatrudniać"))), emptyMap())
-        assertEquals(1, skipped.skipped)
-        assertNull(database.hrappkaLinkDao().findByHrappkaId(1702))
+        val doNotHireExport = exportEmployees(
+            listOf(source(1702, "Ewa", "Informacyjna", phones = listOf("123 456 789"), status = "Nie zatrudniać")),
+        )
+        assertEquals(HrImportDecision.CREATE_NEW, importer.prepare(doNotHireExport).items.single().decision)
+        val report = importer.import(doNotHireExport, emptyMap())
+        val doNotHireLink = checkNotNull(database.hrappkaLinkDao().findByHrappkaId(1702))
+        assertTrue(doNotHireLink.doNotHire)
+        assertEquals(1, report.created)
+        assertEquals(0, report.skipped)
+        assertEquals(setOf("123 456 789"), phoneSet(doNotHireLink.employeeId))
+        assertTrue(database.employeeDao().observeSummaries().first().first { it.id == doNotHireLink.employeeId }.hrappkaDoNotHire)
+        assertTrue(buildHrappkaAttention(database.hrappkaLinkDao().observeActiveDetails().first()).isEmpty())
     }
 
     private suspend fun phoneSet(employeeId: String): Set<String> = database.employeeDao().findById(employeeId)?.phoneNumbers

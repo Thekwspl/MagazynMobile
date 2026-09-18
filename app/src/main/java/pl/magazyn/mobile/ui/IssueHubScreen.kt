@@ -25,10 +25,7 @@ fun IssueHubScreen(
 ) {
     val people by viewModel.people.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
-    val tokens = query.trim().split(Regex("\\s+")).filter(String::isNotBlank)
-    val visible = if (tokens.isEmpty()) people else people.filter { person ->
-        pl.magazyn.mobile.domain.matchesSearch(query, person.fullName, person.phoneNumbers, person.positions, person.aliases, person.tags)
-    }
+    val visible = people.filter { it.matchesPersonSearch(query) }
 
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
         Text("Wydaj", Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.headlineSmall)
@@ -54,9 +51,10 @@ fun IssueHubScreen(
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Person, null)
                         Column(Modifier.padding(start = 10.dp).weight(1f)) {
-                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                                Text(person.listDisplayName(), fontWeight = FontWeight.SemiBold)
-                                if (person.phoneNumbers.isNotBlank()) PhoneNumbersInline(person.phoneNumbers)
+                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                                Text(person.listDisplayName(), Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                                if (person.hrappkaDoNotHire) Text("Nie zatrudniać", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                                PersonPhoneAction(person.phoneNumbers)
                             }
                             if (person.positions.isNotBlank()) Text(person.positions, style = MaterialTheme.typography.labelMedium)
                         }

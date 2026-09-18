@@ -94,7 +94,6 @@ fun HrSynchroImportScreen(
                             HrSummaryLine("Automatycznie powiązani", plan.autoLinkedCount.toString())
                             HrSummaryLine("Wymagają przypisania", plan.needsAssignmentCount.toString())
                             HrSummaryLine("Nie zatrudniać", plan.doNotHireCount.toString())
-                            HrSummaryLine("Pominięto — Nie zatrudniać", plan.skippedDoNotHireCount.toString())
                             HrSummaryLine("Pominięto ręcznie", plan.skippedManualCount.toString())
                             HrSummaryLine("Błędne rekordy", "0")
                             HorizontalDivider()
@@ -158,22 +157,6 @@ fun HrSynchroImportScreen(
                                     onClick = { viewModel.skipForThisImport(item.source.hrappkaId) },
                                     modifier = Modifier.fillMaxWidth(),
                                 ) { Text("Pomiń w tym imporcie") }
-                            }
-                        }
-                    }
-                }
-                val skippedDoNotHire = plan.items.filter { it.decision == HrImportDecision.SKIP_DO_NOT_HIRE }
-                if (skippedDoNotHire.isNotEmpty()) {
-                    item { Text("Automatycznie pominięte — Nie zatrudniać", style = MaterialTheme.typography.titleMedium) }
-                    items(skippedDoNotHire, key = { "skip-${it.source.hrappkaId}" }) { item ->
-                        OutlinedCard(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Text("${item.source.lastName} ${item.source.firstName}", fontWeight = FontWeight.SemiBold)
-                                Text("HRappka ID: ${item.source.hrappkaId}", style = MaterialTheme.typography.labelSmall)
-                                Text("Nie utworzono nowej osoby. Możesz świadomie przypisać rekord do istniejącej.", style = MaterialTheme.typography.bodySmall)
-                                OutlinedButton(onClick = { assigning = item }, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Przypisz istniejącej osobie")
-                                }
                             }
                         }
                     }
@@ -288,8 +271,7 @@ private fun HrAssignmentDialog(
                         }
                     }
                 }
-                if (!item.source.doNotHire) OutlinedButton(onClick = onCreate, modifier = Modifier.fillMaxWidth()) { Text("Utwórz jako nową") }
-                else Text("Status „Nie zatrudniać” nie pozwala utworzyć nowej osoby.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = onCreate, modifier = Modifier.fillMaxWidth()) { Text("Utwórz jako nową") }
                 TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) { Text("Pomiń w tym imporcie") }
             }
         },

@@ -24,7 +24,16 @@ interface EmployeeDao {
 
     @Query("""
         SELECT e.id, e.fullName, e.firstName, e.lastName, e.phoneNumbers, e.aliases, e.tags,
-               COALESCE(GROUP_CONCAT(j.name, ', '), '') AS positions
+               COALESCE(GROUP_CONCAT(j.name, ', '), '') AS positions,
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1 FROM employee_hrappka_links links
+                       WHERE links.employeeId = e.id
+                   ) AND NOT EXISTS (
+                       SELECT 1 FROM employee_hrappka_links links
+                       WHERE links.employeeId = e.id AND links.doNotHire = 0
+                   ) THEN 1 ELSE 0
+               END AS hrappkaDoNotHire
         FROM employees e
         LEFT JOIN employee_job_positions ej ON ej.employeeId = e.id
         LEFT JOIN job_positions j ON j.id = ej.positionId
@@ -94,13 +103,13 @@ fun buildHrappkaAttention(links: List<EmployeeHrappkaLinkDetail>): List<HrappkaE
     links.groupBy { it.employeeId }.values.mapNotNull { employeeLinks ->
         val hasDoNotHire = employeeLinks.any { it.doNotHire }
         val hasActive = employeeLinks.any { !it.doNotHire }
-        if (!hasDoNotHire) return@mapNotNull null
+        if (!hasDoNotHire || !hasActive) return@mapNotNull null
         val first = employeeLinks.first()
         HrappkaEmployeeAttention(
             employeeId = first.employeeId,
             firstName = first.firstName,
             lastName = first.lastName,
-            kind = if (hasActive) HrappkaAttentionKind.STATUS_CONFLICT else HrappkaAttentionKind.DO_NOT_HIRE,
+            kind = HrappkaAttentionKind.STATUS_CONFLICT,
             links = employeeLinks.sortedBy { it.hrappkaId },
         )
     }.sortedWith(compareBy({ it.lastName.lowercase() }, { it.firstName.lowercase() }))
@@ -135,6 +144,7 @@ data class EmployeeSummary(
     val aliases: String,
     val tags: String,
     val positions: String,
+    val hrappkaDoNotHire: Boolean = false,
 )
 
 @Dao

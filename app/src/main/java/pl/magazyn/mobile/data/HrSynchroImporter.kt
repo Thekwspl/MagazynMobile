@@ -77,9 +77,6 @@ object HrSynchroPlanner {
                 }
                 if (manual.skip) return@map HrImportPlanItem(source, HrImportDecision.SKIP_MANUAL)
                 if (manual.createNew) {
-                    require(!source.doNotHire) {
-                        "Etap PLAN: hrappkaId=${source.hrappkaId} ma status Nie zatrudniać i nie może zostać utworzony"
-                    }
                     return@map HrImportPlanItem(source, HrImportDecision.CREATE_NEW)
                 }
                 val target = employeeById[manual.employeeId]
@@ -92,7 +89,6 @@ object HrSynchroPlanner {
             when {
                 candidates.size == 1 -> HrImportPlanItem(source, HrImportDecision.AUTO_LINK, candidates.single().id, listOf(candidates.single().id))
                 candidates.isNotEmpty() -> HrImportPlanItem(source, HrImportDecision.NEEDS_ASSIGNMENT, candidateIds = candidates.map(EmployeeEntity::id))
-                source.doNotHire -> HrImportPlanItem(source, HrImportDecision.SKIP_DO_NOT_HIRE)
                 else -> HrImportPlanItem(source, HrImportDecision.CREATE_NEW)
             }
         }
@@ -166,7 +162,7 @@ class HrSynchroImporter(private val database: AppDatabase) {
             when (source.phoneFetchStatus) {
                 HrPhoneFetchStatus.NOT_FETCHED -> skippedNotFetched++
                 HrPhoneFetchStatus.ERROR -> phoneErrors++
-                HrPhoneFetchStatus.OK -> if (!source.doNotHire) {
+                HrPhoneFetchStatus.OK -> {
                     val result = syncPhones(employee, source.hrappkaId, source.phones)
                     phonesAdded += result.added
                     phonesRemoved += result.removed
@@ -214,5 +210,7 @@ internal fun displayPhone(value: String): String = value.trim().replace(Regex("\
 internal fun normalizePhoneKey(value: String): String {
     val display = displayPhone(value)
     val digits = display.filter(Char::isDigit)
-    return if (digits.isEmpty()) display.lowercase(Locale.ROOT) else (if (display.startsWith('+')) "+" else "") + digits
+    val firstDigit = display.indexOfFirst(Char::isDigit)
+    val hasLeadingPlus = firstDigit >= 0 && display.take(firstDigit).contains('+')
+    return if (digits.isEmpty()) display.lowercase(Locale.ROOT) else (if (hasLeadingPlus) "+" else "") + digits
 }
