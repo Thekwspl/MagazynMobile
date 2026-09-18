@@ -23,6 +23,7 @@ import pl.magazyn.mobile.data.StockMovementLineEntity
 import pl.magazyn.mobile.data.IssueAmendmentEntity
 import pl.magazyn.mobile.data.IssueReturnEntity
 import pl.magazyn.mobile.data.EmployeeIssue
+import pl.magazyn.mobile.data.EmployeeMerger
 import pl.magazyn.mobile.data.ProductVisibilityStore
 import pl.magazyn.mobile.data.normalizePhoneKey
 import pl.magazyn.mobile.data.splitPhones
@@ -36,6 +37,7 @@ data class IssueRequest(val productId: String, val quantity: Long)
 
 class PeopleViewModel(application: Application) : AndroidViewModel(application) {
     private val database = (application as MagazynApplication).database
+    private val employeeMerger = EmployeeMerger(database)
     private val visibility = ProductVisibilityStore(application)
     val people = database.employeeDao().observeSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -51,6 +53,12 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
 
     fun removePerson(employeeId: String) {
         viewModelScope.launch { database.employeeDao().archive(employeeId) }
+    }
+
+    fun mergePeople(targetId: String, sourceId: String, onComplete: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            onComplete(runCatching { employeeMerger.merge(targetId, sourceId) })
+        }
     }
 
     fun savePerson(

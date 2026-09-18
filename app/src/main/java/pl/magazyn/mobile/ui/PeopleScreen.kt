@@ -97,6 +97,7 @@ fun PeopleScreen(
         ModalBottomSheet(sheetState = profileSheetState, onDismissRequest = { selectedId = null }) {
             PersonProfile(
                 person = person,
+                mergeCandidates = people.filterNot { it.id == person.id },
                 products = products,
                 possessions = possessions,
                 history = history,
@@ -112,6 +113,9 @@ fun PeopleScreen(
                 onRemovePerson = {
                     viewModel.removePerson(person.id)
                     selectedId = null
+                },
+                onMerge = { sourceId, onComplete ->
+                    viewModel.mergePeople(person.id, sourceId, onComplete)
                 },
             )
         }
@@ -166,6 +170,7 @@ private fun PersonEditor(
 @Composable
 private fun PersonProfile(
     person: EmployeeSummary,
+    mergeCandidates: List<EmployeeSummary>,
     products: List<ProductWithStock>,
     possessions: List<EmployeePossession>,
     history: List<EmployeeIssue>,
@@ -177,11 +182,17 @@ private fun PersonProfile(
     onCorrectIssue: (EmployeeIssue, String, Long, String, Boolean) -> Unit,
     onReturnIssue: (EmployeeIssue, Long, String) -> Unit,
     onRemovePerson: () -> Unit,
+    onMerge: (String, (Result<Unit>) -> Unit) -> Unit,
 ) {
     var editing by rememberSaveable(person.id) { mutableStateOf(false) }
     var issuing by rememberSaveable(person.id) { mutableStateOf(startIssuing) }
     var correctingIssue by remember { mutableStateOf<EmployeeIssue?>(null) }
     var confirmPersonRemoval by remember { mutableStateOf(false) }
+    var mergePickerVisible by rememberSaveable(person.id) { mutableStateOf(false) }
+    var mergeQuery by rememberSaveable(person.id) { mutableStateOf("") }
+    var mergeSource by remember { mutableStateOf<EmployeeSummary?>(null) }
+    var mergeInProgress by remember { mutableStateOf(false) }
+    var mergeError by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (editing) {
             PersonEditor(person, jobPositions, { editing = false }, embeddedInScrollableProfile = true) { existing, firstName, lastName, phones, positions, aliases, tags ->
@@ -199,6 +210,7 @@ private fun PersonProfile(
             OutlinedButton(onClick = { editing = true }) { Text("Edytuj dane") }
             Button(onClick = { issuing = !issuing }) { Text("Wydaj przedmiot") }
         }
+        OutlinedButton(onClick = { mergePickerVisible = true }) { Text("Scal z inną osobą") }
         if (person.aliases.isNotBlank()) ProfileField("Ksywki i aliasy", person.aliases)
         if (person.tags.isNotBlank()) ProfileField("Tagi", person.tags)
         if (issuing) {
@@ -250,6 +262,82 @@ private fun PersonProfile(
             text = { Text("Osoba zniknie z aktywnej listy. Jej wcześniejsze wydania pozostaną w historii magazynu.") },
             confirmButton = { Button(onClick = onRemovePerson, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Usuń") } },
             dismissButton = { TextButton(onClick = { confirmPersonRemoval = false }) { Text("Anuluj") } },
+        )
+    }
+    if (mergePickerVisible) {
+        val visibleCandidates = mergeCandidates.filter { it.matchesPersonSearch(mergeQuery) }
+        AlertDialog(
+            onDismissRequest = { mergePickerVisible = false },
+            title = { Text("Scal z inną osobą") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Wybierz osobę, której dane zostaną przeniesione do profilu ${person.listDisplayName()}.")
+                    OutlinedTextField(
+                        value = mergeQuery,
+                        onValueChange = { mergeQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Szukaj osoby lub telefonu") },
+                        singleLine = true,
+                    )
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        items(visibleCandidates, key = { it.id }) { candidate ->
+                            TextButton(
+                                onClick = {
+                                    mergeSource = candidate
+                                    mergePickerVisible = false
+                                    mergeError = null
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(candidate.listDisplayName(), Modifier.fillMaxWidth())
+                            }
+                        }
+                    }
+                    if (visibleCandidates.isEmpty()) Text("Brak pasujących aktywnych osób")
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { mergePickerVisible = false }) { Text("Anuluj") } },
+        )
+    }
+    mergeSource?.let { source ->
+        AlertDialog(
+            onDismissRequest = { if (!mergeInProgress) mergeSource = null },
+            title = { Text("Potwierdź scalanie") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Scalić:")
+                    Text(person.listDisplayName(), fontWeight = FontWeight.SemiBold)
+                    Text("z:")
+                    Text(source.listDisplayName(), fontWeight = FontWeight.SemiBold)
+                    Text("Pozostanie profil: ${person.listDisplayName()}. Dane drugiej osoby zostaną do niego przeniesione.")
+                    mergeError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        mergeInProgress = true
+                        mergeError = null
+                        onMerge(source.id) { result ->
+                            mergeInProgress = false
+                            result.onSuccess {
+                                mergeSource = null
+                                mergeQuery = ""
+                            }.onFailure { error ->
+                                mergeError = error.message ?: "Nie udało się scalić osób"
+                            }
+                        }
+                    },
+                    enabled = !mergeInProgress,
+                ) { Text(if (mergeInProgress) "Scalanie…" else "Scal") }
+            },
+            dismissButton = {
+                TextButton(onClick = { mergeSource = null }, enabled = !mergeInProgress) { Text("Anuluj") }
+            },
         )
     }
 }

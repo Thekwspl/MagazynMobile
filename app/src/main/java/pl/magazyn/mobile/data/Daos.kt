@@ -943,6 +943,45 @@ interface ProductMergeDao {
 }
 
 @Dao
+interface EmployeeMergeDao {
+    @Query("UPDATE employee_hrappka_links SET employeeId = :targetId WHERE employeeId = :sourceId")
+    suspend fun moveHrappkaLinks(sourceId: String, targetId: String)
+
+    @Query("SELECT positionId FROM employee_job_positions WHERE employeeId = :sourceId")
+    suspend fun sourceJobPositionIds(sourceId: String): List<String>
+
+    @Query("DELETE FROM employee_job_positions WHERE employeeId = :sourceId")
+    suspend fun deleteSourceJobPositions(sourceId: String)
+
+    @Query("SELECT shipyardId FROM shipyard_leaders WHERE employeeId = :sourceId")
+    suspend fun sourceShipyardIds(sourceId: String): List<String>
+
+    @Query("DELETE FROM shipyard_leaders WHERE employeeId = :sourceId")
+    suspend fun deleteSourceShipyardLeaderships(sourceId: String)
+
+    @Query("UPDATE stock_movements SET employeeId = :targetId WHERE employeeId = :sourceId")
+    suspend fun moveStockMovements(sourceId: String, targetId: String)
+
+    @Query("UPDATE custodies SET employeeId = :targetId WHERE employeeId = :sourceId")
+    suspend fun moveCustodies(sourceId: String, targetId: String)
+
+    @Query("UPDATE orders SET employeeId = :targetId WHERE employeeId = :sourceId")
+    suspend fun moveOrders(sourceId: String, targetId: String)
+
+    @Query("UPDATE notebook_tasks SET employeeId = :targetId WHERE employeeId = :sourceId")
+    suspend fun moveNotebookTasks(sourceId: String, targetId: String)
+
+    @Query("SELECT taskId FROM notebook_task_employees WHERE employeeId = :sourceId")
+    suspend fun sourceNotebookTaskIds(sourceId: String): List<String>
+
+    @Query("DELETE FROM notebook_task_employees WHERE employeeId = :sourceId")
+    suspend fun deleteSourceNotebookTaskEmployees(sourceId: String)
+
+    @Query("UPDATE notebook_task_step_people SET employeeId = :targetId WHERE employeeId = :sourceId")
+    suspend fun moveNotebookTaskStepPeople(sourceId: String, targetId: String)
+}
+
+@Dao
 interface ImportDao {
     @Query("SELECT EXISTS(SELECT 1 FROM import_batches WHERE fileHash = :fileHash)")
     suspend fun wasFileImported(fileHash: String): Boolean
