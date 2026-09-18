@@ -14,7 +14,90 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  classify:
+    name: Sprawdź czy potrzebny jest release
+    runs-on: ubuntu-latest
+    outputs:
+      run_release: ${{ steps.classify.outputs.run_release }}
+      reason: ${{ steps.classify.outputs.reason }}
+    steps:
+      - name: Pobierz kod i tagi
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Klasyfikuj zmianę
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_VERSION=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          test -n "$APP_VERSION" || {
+            echo "::error::Nie znaleziono versionName w app/build.gradle.kts"
+            exit 1
+          }
+          TAG="v$APP_VERSION"
+
+          # Nowa wersja aplikacji nie ma jeszcze taga — uruchom pełny release gate.
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "run_release=true" >> "$GITHUB_OUTPUT"
+            echo "reason=new-version" >> "$GITHUB_OUTPUT"
+            echo "Brak taga $TAG. Uruchamiam pełny release gate."
+            exit 0
+          fi
+
+          TAG_COMMIT=$(git rev-parse "$TAG^{commit}")
+
+          # Pozwala ręcznie ponowić pełną walidację dokładnie tego samego commita.
+          if [ "$TAG_COMMIT" = "$GITHUB_SHA" ]; then
+            echo "run_release=true" >> "$GITHUB_OUTPUT"
+            echo "reason=tagged-commit" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG wskazuje bieżący commit. Uruchamiam pełną walidację."
+            exit 0
+          fi
+
+          echo "Istniejący tag: $TAG -> $TAG_COMMIT"
+          echo "Bieżący commit: $GITHUB_SHA"
+          echo "Zmiany od istniejącego wydania:"
+          git diff --name-only "$TAG_COMMIT" "$GITHUB_SHA"
+
+          RELEASE_RELEVANT=false
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            case "$path" in
+              .github/*|AGENTS.md|README|README.*|docs/*)
+                ;;
+              *)
+                RELEASE_RELEVANT=true
+                echo "Plik wymagający nowej wersji aplikacji: $path"
+                ;;
+            esac
+          done < <(git diff --name-only "$TAG_COMMIT" "$GITHUB_SHA")
+
+          if [ "$RELEASE_RELEVANT" = "false" ]; then
+            echo "run_release=false" >> "$GITHUB_OUTPUT"
+            echo "reason=non-app-only" >> "$GITHUB_OUTPUT"
+            echo "::notice::Od $TAG zmieniły się wyłącznie pliki CI/dokumentacji. Pomijam ponowną publikację APK."
+            exit 0
+          fi
+
+          echo "::error::Wersja aplikacji nadal wynosi $APP_VERSION, ale od taga $TAG zmieniły się pliki aplikacji/release-relevant."
+          echo "::error::Podnieś versionName/versionCode. Istniejący tag nie zostanie przesunięty."
+          exit 1
+
+  non_release_summary:
+    name: Bez nowego APK
+    needs: classify
+    if: needs.classify.outputs.run_release == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Podsumowanie
+        run: echo "Zmiana dotyczy wyłącznie CI/dokumentacji. Pełny build i publikacja APK zostały bezpiecznie pominięte."
+
   build:
+    needs: classify
+    if: needs.classify.outputs.run_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
