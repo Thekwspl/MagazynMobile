@@ -1,0 +1,109 @@
+name: Pull Request checks
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: magazyn-mobile-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Pobierz kod
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ustaw Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Ustaw Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Ustaw Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+          packages: >-
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
+
+      - name: Szybkie testy PR
+        run: gradle test assembleDebugAndroidTest lintDebug --no-daemon --max-workers=1
+
+      - name: Sprawdź Room schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import re
+          import subprocess
+          from pathlib import Path
+
+          schema_source = Path("app/src/main/java/pl/magazyn/mobile/data/DatabaseSchema.kt").read_text(encoding="utf-8")
+          match = re.search(r"DATABASE_SCHEMA_VERSION\s*=\s*(\d+)", schema_source)
+          if not match:
+              raise SystemExit("Nie można odczytać DATABASE_SCHEMA_VERSION")
+
+          version = int(match.group(1))
+          schema = Path(f"app/schemas/pl.magazyn.mobile.data.AppDatabase/{version}.json")
+          if not schema.is_file():
+              raise SystemExit(f"Room/KSP nie wygenerował aktualnego schematu: {schema}")
+
+          with schema.open(encoding="utf-8") as source:
+              data = json.load(source)
+
+          if data.get("database", {}).get("version") != version:
+              raise SystemExit(f"Schema {schema} ma niezgodny numer wersji")
+
+          tracked = subprocess.run(
+              ["git", "ls-files", "--error-unmatch", str(schema)],
+              stdout=subprocess.DEVNULL,
+              stderr=subprocess.DEVNULL,
+          ).returncode == 0
+
+          if tracked:
+              changed = subprocess.run(
+                  ["git", "diff", "--quiet", "--", str(schema)]
+              ).returncode != 0
+              if changed:
+                  raise SystemExit(
+                      f"Room schema {version} jest już zapisany w repo, ale wygenerowana zawartość się zmieniła. "
+                      "Najpewniej zmieniono model bazy bez zwiększenia DATABASE_SCHEMA_VERSION."
+                  )
+              print(f"Room schema {version}: OK, plik jest śledzony i zgodny.")
+          else:
+              print(
+                  f"Room schema {version}: nowy plik nie jest jeszcze śledzony. "
+                  "To jest dozwolone w PR; po merge workflow main utworzy automatyczny PR ze schema."
+              )
+          PY
+
+      - name: Zachowaj Room schema do diagnostyki
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: room-schema-pr-${{ github.event.pull_request.number }}
+          path: app/schemas/pl.magazyn.mobile.data.AppDatabase/*.json
+          if-no-files-found: warn
+
+      - name: Podsumowanie
+        if: success()
+        run: echo "PR checks zakończone poprawnie. Można bezpiecznie przejść do merge po review."
