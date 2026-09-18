@@ -55,23 +55,22 @@ fun PeopleScreen(
     val listState = rememberLazyListState()
     val newPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val visible = people.filter {
-        query.isBlank() || listOf(it.fullName, it.phoneNumbers, it.aliases, it.tags, it.positions).any { field -> field.contains(query, true) }
-    }
+    val visible = people.filter { it.matchesPersonSearch(query) }
     val selected = selectedId?.let { id -> people.firstOrNull { it.id == id } }
 
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
         ScreenHeader("Osoby", "Dodaj osobę", { showNew = true })
-        OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), label = { Text("Szukaj po nazwisku, ksywce lub tagu") }, singleLine = true)
+        OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), label = { Text("Szukaj po nazwisku, telefonie, ksywce lub tagu") }, singleLine = true)
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(visible, key = { it.id }) { person ->
                 OutlinedCard(onClick = { selectedId = person.id }, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Person, null)
                         Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                                Text(person.listDisplayName(), fontWeight = FontWeight.SemiBold)
-                                if (person.phoneNumbers.isNotBlank()) PhoneNumbersInline(person.phoneNumbers)
+                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                                Text(person.listDisplayName(), Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                                if (person.hrappkaDoNotHire) Text("Nie zatrudniać", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                                PersonPhoneAction(person.phoneNumbers)
                             }
                             if (person.positions.isNotBlank()) Text(person.positions, style = MaterialTheme.typography.labelMedium)
                         }

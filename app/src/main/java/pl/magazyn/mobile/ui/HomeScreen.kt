@@ -136,7 +136,7 @@ fun HomeScreen(
                         ) { onDuplicates() }
                         if (hrappkaAttentionEmployees.isNotEmpty()) AttentionRow(
                             Icons.Default.PersonOff,
-                            "${hrappkaAttentionEmployees.size} osoby wymagają uwagi w HRappka",
+                            "${hrappkaAttentionEmployees.size} osoby mają konflikt statusów HRappka",
                             true,
                         ) { attentionDetails = AttentionDetails.HRAPPKA_DO_NOT_HIRE }
                     } else {
@@ -186,7 +186,7 @@ fun HomeScreen(
                     if (uiState.negativeStockCount > 0) Text("• ${uiState.negativeStockCount} produkty mają stan ujemny")
                     if (uiState.pendingImportCount > 0) Text("• ${uiState.pendingImportCount} pozycji importu wymaga mapowania")
                     if (duplicateCandidates.isNotEmpty()) Text("• ${duplicateCandidates.size} rekordów może być duplikatami")
-                    if (hrappkaAttentionEmployees.isNotEmpty()) Text("• ${hrappkaAttentionEmployees.size} osoby wymagają uwagi w HRappka")
+                    if (hrappkaAttentionEmployees.isNotEmpty()) Text("• ${hrappkaAttentionEmployees.size} osoby mają konflikt statusów HRappka")
                     if (uiState.openOrderCount > 0) Text("• ${uiState.openOrderCount} aktywne zamówienia")
                     val taskCount = tasks.count { !it.isCompleted }
                     if (taskCount > 0) Text("• $taskCount zadania do wykonania")
@@ -487,7 +487,7 @@ private fun AttentionDetailsSheet(
                         AttentionDetails.NEGATIVE_STOCK -> "Przedmioty wydane poniżej zera"
                         AttentionDetails.PENDING_IMPORT -> "Aplikacja nie rozpoznała tych nazw przedmiotów"
                         AttentionDetails.DUPLICATES -> "Otwórz rekord, porównaj dane i popraw albo usuń niewłaściwy"
-                        AttentionDetails.HRAPPKA_DO_NOT_HIRE -> "Nie zatrudniać lub konflikt statusów między ID HRappka"
+                        AttentionDetails.HRAPPKA_DO_NOT_HIRE -> "Sprzeczne statusy między ID HRappka"
                     },
                     style = MaterialTheme.typography.labelMedium,
                 )

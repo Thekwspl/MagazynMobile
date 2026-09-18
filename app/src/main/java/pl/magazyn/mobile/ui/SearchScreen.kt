@@ -35,9 +35,7 @@ fun SearchScreen(
     val shipyards by viewModel.shipyards.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     val tokens = ImportParser.key(query).split(Regex("\\s+")).filter(String::isNotBlank)
-    val matchingPeople = if (tokens.isEmpty()) emptyList() else people.filter { person ->
-        matchesSearch(query, person.fullName, person.phoneNumbers, person.positions, person.aliases, person.tags)
-    }
+    val matchingPeople = if (tokens.isEmpty()) emptyList() else people.filter { person -> person.matchesPersonSearch(query) }
     val matchingProducts = if (tokens.isEmpty()) emptyList() else products.filter { product ->
         matchesSearch(query, product.name, product.variant.orEmpty(), product.category, product.groupName, product.subgroupName, product.aliases, product.tags)
     }
@@ -78,6 +76,8 @@ fun SearchScreen(
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Person, null)
                             Text(person.listDisplayName(), Modifier.padding(start = 10.dp).weight(1f), fontWeight = FontWeight.SemiBold)
+                            if (person.hrappkaDoNotHire) Text("Nie zatrudniać", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                            PersonPhoneAction(person.phoneNumbers)
                             Icon(
                                 Icons.Default.ArrowUpward,
                                 "Wydaj tej osobie",
