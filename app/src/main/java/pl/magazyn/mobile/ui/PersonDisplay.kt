@@ -15,6 +15,8 @@ fun EmployeeSummary.listDisplayName(): String = personDisplayName(lastName, firs
 fun distinctPersonPhoneNumbers(phoneNumbers: String): List<String> = splitPhones(phoneNumbers)
     .distinctBy(::normalizePhoneKey)
 
+private fun phoneSearchDigits(value: String): String = value.filter(Char::isDigit)
+
 fun EmployeeSummary.matchesPersonSearch(query: String): Boolean {
     val value = query.trim()
     if (value.isBlank()) return true
@@ -22,8 +24,10 @@ fun EmployeeSummary.matchesPersonSearch(query: String): Boolean {
         character.isDigit() || character.isWhitespace() || character in "+-()./"
     }
     if (phoneLike) {
-        val key = normalizePhoneKey(value)
-        return key.isNotBlank() && distinctPersonPhoneNumbers(phoneNumbers).any { normalizePhoneKey(it) == key }
+        val queryDigits = phoneSearchDigits(value)
+        return queryDigits.length >= 3 && distinctPersonPhoneNumbers(phoneNumbers).any { phoneNumber ->
+            phoneSearchDigits(phoneNumber).contains(queryDigits)
+        }
     }
     return matchesSearch(value, fullName, firstName, lastName, positions, aliases, tags)
 }

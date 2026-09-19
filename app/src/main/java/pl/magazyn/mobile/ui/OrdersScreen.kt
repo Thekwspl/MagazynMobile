@@ -445,9 +445,7 @@ private fun OrderRecipientPickerDialog(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     val matchingPeople = people.filter { person ->
-        query.isBlank() || pl.magazyn.mobile.domain.matchesSearch(
-            query, person.fullName, person.aliases, person.tags, person.positions, person.phoneNumbers,
-        )
+        query.isBlank() || person.matchesPersonSearch(query)
     }.sortedWith(compareBy<EmployeeSummary> { it.lastName.lowercase() }.thenBy { it.firstName.lowercase() })
     val matchingShipyards = shipyards.filter { shipyard ->
         query.isBlank() || pl.magazyn.mobile.domain.matchesSearch(query, shipyard.name)

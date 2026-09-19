@@ -29,13 +29,35 @@ class PersonDisplayTest {
     }
 
     @Test
-    fun phoneSearchIgnoresFormattingButDoesNotGuessCountryPrefix() {
-        val employee = person("123 456 789")
-        listOf("123456789", "123 456 789", "123-456-789", "(123) 456 789").forEach { query ->
+    fun phoneSearchIgnoresFormattingCountryPrefixAndSupportsFragments() {
+        val employee = person("+48 123 456 789, +47 999 88 777")
+        listOf(
+            "+48123456789",
+            "48123456789",
+            "123456789",
+            "123 456 789",
+            "123-456-789",
+            "(123) 456 789",
+            "456789",
+            "789",
+            "99988777",
+            "777",
+        ).forEach { query ->
             assertTrue("query=$query", employee.matchesPersonSearch(query))
         }
-        assertTrue(person("+48 123 456 789").matchesPersonSearch("+48 (123) 456-789"))
-        assertFalse(person("+48 123 456 789").matchesPersonSearch("123456789"))
+        assertTrue(employee.matchesPersonSearch("+48 (123) 456-789"))
+        assertFalse(employee.matchesPersonSearch("89"))
+    }
+
+    @Test
+    fun phoneFragmentReturnsEveryMatchingPerson() {
+        val people = listOf(
+            person("+48 123 456 789").copy(id = "first"),
+            person("+47 555 00 789").copy(id = "second"),
+            person("+47 999 88 777").copy(id = "third"),
+        )
+
+        assertEquals(listOf("first", "second"), people.filter { it.matchesPersonSearch("789") }.map { it.id })
     }
 
     @Test
@@ -44,6 +66,8 @@ class PersonDisplayTest {
         assertTrue(employee.matchesPersonSearch("Jan"))
         assertTrue(employee.matchesPersonSearch("Kowalski"))
         assertTrue(employee.matchesPersonSearch("Kowal"))
+        assertTrue(employee.matchesPersonSearch("Monter"))
+        assertTrue(employee.matchesPersonSearch("spawacz"))
         assertFalse(employee.matchesPersonSearch("Nowak"))
     }
 }
