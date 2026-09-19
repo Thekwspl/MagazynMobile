@@ -13,6 +13,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import pl.magazyn.mobile.IsolatedApplicationEnvironment
 import pl.magazyn.mobile.MagazynApplication
+import pl.magazyn.mobile.queryLong
 import pl.magazyn.mobile.seedCoreData
 
 @RunWith(AndroidJUnit4::class)
@@ -22,6 +23,32 @@ class BackupRestoreIntegrationTest {
         IsolatedApplicationEnvironment.create("backup-happy-path").use { environment ->
             val database = environment.database
             database.seedCoreData(stock = 2.0)
+            database.hrappkaLinkDao().upsert(
+                EmployeeHrappkaLinkEntity(9_001, "employee-1", "RC/0001", doNotHire = false),
+            )
+            database.hrappkaPhoneDao().upsert(
+                listOf(EmployeeHrappkaPhoneEntity(9_001, "employee-1", "+48500100200", "+48 500 100 200")),
+            )
+            val employee = checkNotNull(database.employeeDao().findById("employee-1"))
+            database.employeeDao().update(employee.copy(phoneNumbers = "+48 500 100 200"))
+            database.movementDao().insertMovement(
+                StockMovementEntity("movement-rc", "ISSUE", "warehouse-main", "employee-1", effectiveDate = "2026-09-18", createdAtEpochMillis = 1),
+            )
+            database.movementDao().insertLine(
+                StockMovementLineEntity("line-rc", "movement-rc", "product-1", -1.0, "szt."),
+            )
+            database.movementDao().insertCustody(
+                CustodyEntity("custody-rc", "employee-1", "product-1", 1.0, "movement-rc", "2026-09-18"),
+            )
+            database.orderDao().upsertOrders(
+                listOf(OrderEntity("order-rc", null, "employee-1", "Kowalski Jan", null, "DRAFT", "2026-09-20", 2)),
+            )
+            database.notebookDao().insertNotebook(
+                OrderNotebookEntity("notebook-rc", "Zadanie RC", "ACTIVE", createdAtEpochMillis = 3),
+            )
+            database.notebookDao().insertTasks(
+                listOf(NotebookTaskEntity("task-rc", "notebook-rc", "Sprawdź dane", position = 0, employeeId = "employee-1")),
+            )
             val manager = BackupManager(environment.application)
             val backup = File(environment.root, "happy-path.backup")
 
@@ -38,6 +65,14 @@ class BackupRestoreIntegrationTest {
             try {
                 RestoredDatabaseHealthCheck.verify(restored)
                 assertEquals(2.0, restored.stockDao().find("warehouse-main", "product-1")?.quantity ?: Double.NaN, 0.0)
+                assertEquals("employee-1", restored.hrappkaLinkDao().findByHrappkaId(9_001)?.employeeId)
+                assertEquals("RC/0001", restored.hrappkaLinkDao().findByHrappkaId(9_001)?.externalId)
+                assertEquals(1, restored.hrappkaPhoneDao().findForEmployee("employee-1").size)
+                assertEquals("+48 500 100 200", restored.employeeDao().findById("employee-1")?.phoneNumbers)
+                assertEquals(1L, restored.queryLong("SELECT COUNT(*) FROM stock_movements WHERE id='movement-rc' AND employeeId='employee-1'"))
+                assertEquals(1L, restored.queryLong("SELECT COUNT(*) FROM custodies WHERE id='custody-rc' AND employeeId='employee-1' AND returnedDate IS NULL"))
+                assertEquals("DRAFT", restored.orderDao().findById("order-rc")?.status)
+                assertEquals(1L, restored.queryLong("SELECT COUNT(*) FROM notebook_tasks WHERE id='task-rc' AND employeeId='employee-1'"))
                 RestoreJournal.confirmAfterHealthCheck(environment.application)
                 assertFalse(RestoreJournal.rollbackFile(environment.application).exists())
             } finally {

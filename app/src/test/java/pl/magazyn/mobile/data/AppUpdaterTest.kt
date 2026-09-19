@@ -6,6 +6,9 @@ import org.junit.Test
 
 class AppUpdaterTest {
     @Test fun comparesSemanticVersions() {
+        assertTrue(isNewerVersion("0.9.31", "0.9.30.12"))
+        assertFalse(isNewerVersion("0.9.31", "0.9.31"))
+        assertFalse(isNewerVersion("0.9.30.12", "0.9.31"))
         assertTrue(isNewerVersion("0.9.9", "0.9.8"))
         assertTrue(isNewerVersion("1.0.0", "0.9.99"))
         assertFalse(isNewerVersion("0.9.8", "0.9.8"))
