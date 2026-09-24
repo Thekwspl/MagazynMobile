@@ -3,7 +3,10 @@ package pl.magazyn.mobile.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Phone
@@ -48,12 +51,14 @@ fun PersonPhoneAction(phoneNumbers: String, modifier: Modifier = Modifier) {
             onDismissRequest = { chooseNumber = false },
             title = { Text("Wybierz numer telefonu") },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     numbers.forEach { number ->
                         TextButton(onClick = {
                             chooseNumber = false
                             dial(context, number)
-                        }) { Text(number) }
+                        }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                            Text(number, modifier = Modifier.fillMaxWidth())
+                        }
                     }
                 }
             },

@@ -1,12 +1,10 @@
 package pl.magazyn.mobile.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Inventory2
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material3.*
@@ -73,17 +71,7 @@ fun SearchScreen(
                 items(matchingPeople.size, key = { matchingPeople[it].id }) { index ->
                     val person = matchingPeople[index]
                     OutlinedCard(onClick = { onPerson(person.id) }, modifier = Modifier.fillMaxWidth()) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Person, null)
-                            Text(person.listDisplayName(), Modifier.padding(start = 10.dp).weight(1f), fontWeight = FontWeight.SemiBold)
-                            if (person.hrappkaDoNotHire) Text("Nie zatrudniać", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                            PersonPhoneAction(person.phoneNumbers)
-                            Icon(
-                                Icons.Default.ArrowUpward,
-                                "Wydaj tej osobie",
-                                Modifier.size(24.dp).clickable { onIssuePerson(person.id) },
-                            )
-                        }
+                        PersonRow(person, onIssue = { onIssuePerson(person.id) })
                     }
                 }
             }

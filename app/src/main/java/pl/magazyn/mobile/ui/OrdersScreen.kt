@@ -141,22 +141,32 @@ private fun ApprovedOrderCard(
     linesFlow: (String) -> kotlinx.coroutines.flow.Flow<List<OrderDetailLine>>,
     onOpen: () -> Unit,
 ) {
+    var expanded by rememberSaveable(order.id) { mutableStateOf(false) }
     val expandedRecipients = remember(order.id) { mutableStateListOf<String>() }
     val hasPeople = order.parts.any { it.employeeId != null }
     val showRecipientGroups = hasPeople || order.parts.size > 1
+    val recipients = order.parts.map { part -> part.recipient.ifBlank { part.siteLabel.orEmpty() } }
     StructuredWorkCard(
-        expanded = true,
+        expanded = expanded,
         onClick = onOpen,
         header = {
             Column(Modifier.weight(1f)) {
-                Text("Zamówienie", fontWeight = FontWeight.SemiBold)
+                Text(
+                    compactOrderHeader(formatDisplayDate(order.plannedIssueDate), recipients),
+                    fontWeight = FontWeight.SemiBold,
+                )
                 Text(
                     "Przygotowano ${order.preparedCount} z ${order.lineCount}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(formatDisplayDate(order.plannedIssueDate), style = MaterialTheme.typography.labelMedium)
+            IconButton(onClick = { expanded = !expanded }) {
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    if (expanded) "Zwiń zamówienie" else "Rozwiń zamówienie",
+                )
+            }
         },
     ) {
         LinearProgressIndicator(
@@ -200,7 +210,7 @@ private fun OrderProductLine(line: OrderDetailLine) {
     Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Checkbox(line.isPrepared, onCheckedChange = null)
         if (line.productName != null) {
-            ProductInfo(line.productName, line.productVariant, line.groupName.orEmpty(), line.subgroupName.orEmpty(), Modifier.weight(1f))
+            ProductInfo(line.productName, line.productVariant, modifier = Modifier.weight(1f))
         } else {
             Text(line.rawText, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
         }
@@ -240,7 +250,7 @@ private fun OrderGroupOverview(
                         }
                         lines.forEach { line ->
                             if (line.productName != null) {
-                                ProductInfo(line.productName, line.productVariant, line.groupName.orEmpty(), line.subgroupName.orEmpty())
+                                ProductInfo(line.productName, line.productVariant)
                             } else {
                                 Text(line.rawText, style = MaterialTheme.typography.bodyMedium)
                             }
@@ -313,13 +323,22 @@ private fun OrderDetails(
         if (employeeId == null && !shipyardName.isNullOrBlank()) Text("To zamówienie zostanie wydane na stan stoczni.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         HorizontalDivider()
         lines.forEach { line ->
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(line.isPrepared, { onPrepared(line.id, it) }, enabled = line.productId != null)
                 Column(Modifier.weight(1f)) {
-                    if (line.productName != null) ProductInfo(line.productName, line.productVariant, line.groupName.orEmpty(), line.subgroupName.orEmpty()) else Text(line.rawText, fontWeight = FontWeight.SemiBold)
-                    Text("${formatWholeQuantity(line.quantity)} ${line.unit} · stan ${formatWholeQuantity(line.stockQuantity)}", style = MaterialTheme.typography.labelMedium)
+                    if (line.productName != null) {
+                        Text(productTitle(line.productName, line.productVariant), fontWeight = FontWeight.SemiBold)
+                    } else {
+                        Text(line.rawText, fontWeight = FontWeight.SemiBold)
+                    }
                     if (line.productId == null) Text("Nie rozpoznano przedmiotu — przypisz go", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                 }
+                Text(
+                    "${formatWholeQuantity(line.quantity)} ${line.unit}",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
                 IconButton(onClick = { editingLine = line }) { Icon(Icons.Default.Edit, "Popraw") }
                 IconButton(onClick = { onDeleteLine(line.id) }) { Icon(Icons.Default.DeleteOutline, "Usuń pozycję") }
             }
@@ -431,6 +450,19 @@ private fun OrderDetails(
         dismissButton = { TextButton(onClick = { confirmCancel = false }) { Text("Wróć") } },
     )
 }
+
+internal fun compactOrderHeader(displayDate: String, recipients: List<String>): String {
+    val distinctRecipients = recipients.map(String::trim).filter(String::isNotBlank).distinct()
+    val recipientLabel = when (distinctRecipients.size) {
+        0 -> null
+        1 -> distinctRecipients.single()
+        else -> "${distinctRecipients.size} odbiorców"
+    }
+    return listOfNotNull(displayDate.takeIf(String::isNotBlank), recipientLabel).joinToString(" · ")
+}
+
+internal fun productTitle(name: String, variant: String?): String =
+    listOf(name.trim(), variant?.trim().orEmpty()).filter(String::isNotBlank).joinToString(" · ")
 
 @Composable
 private fun OrderRecipientPickerDialog(

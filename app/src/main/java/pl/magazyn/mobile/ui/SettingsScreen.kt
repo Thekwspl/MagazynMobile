@@ -81,8 +81,11 @@ fun SettingsScreen(
 
 @Composable
 private fun SettingsItem(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 15.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Icon(icon, null)
             Column(Modifier.padding(start = 14.dp).weight(1f)) {
                 Text(title, fontWeight = FontWeight.SemiBold)
@@ -90,6 +93,6 @@ private fun SettingsItem(icon: androidx.compose.ui.graphics.vector.ImageVector, 
             }
             Icon(Icons.Default.ChevronRight, null)
         }
-        HorizontalDivider(Modifier.padding(top = 15.dp))
+        HorizontalDivider()
     }
 }

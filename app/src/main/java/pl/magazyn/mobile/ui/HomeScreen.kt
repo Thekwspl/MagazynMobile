@@ -681,6 +681,7 @@ private fun ParsedNoteReviewContent(
     val addedPhones = remember(note) { mutableStateListOf<String>() }
     val sourceItems = remember(note) { mutableStateListOf<pl.magazyn.mobile.domain.ParsedItem>().apply { addAll(note.items) } }
     val editedItems = remember(note) { mutableStateListOf<pl.magazyn.mobile.domain.ParsedItem>().apply { addAll(note.items) } }
+    val itemKeys = remember(note) { mutableStateListOf<String>().apply { note.items.forEachIndexed { index, item -> add(recognizedItemKey(item, index)) } } }
     val approvedItems = remember(note) { mutableStateMapOf<Int, Boolean>().apply { note.items.indices.forEach { put(it, true) } } }
     val quantityTexts = remember(note) { mutableStateMapOf<Int, String>().apply { note.items.forEachIndexed { index, item -> put(index, item.quantity.toString()) } } }
     val tagTexts = remember(note) { mutableStateMapOf<Int, String>() }
@@ -694,6 +695,7 @@ private fun ParsedNoteReviewContent(
     var plannedIssueDate by rememberSaveable(note) { mutableStateOf(note.suggestedIssueDate ?: java.time.LocalDate.now().toString()) }
     var showPlannedDatePicker by remember { mutableStateOf(false) }
     val recognizedShipyard = shipyardName?.let { name -> shipyards.firstOrNull { it.name.equals(name, true) } }
+    val productIndex = remember(products) { RecognizedProductIndex(products) }
     LazyColumn(
         Modifier.fillMaxSize().imePadding(),
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
@@ -784,13 +786,13 @@ private fun ParsedNoteReviewContent(
         }
         itemsIndexed(
             items = editedItems,
-            key = { index, _ -> index },
+            key = { index, _ -> itemKeys.getOrElse(index) { "recognized-item-$index" } },
         ) { index, item ->
             // Dopasowanie katalogu jest najcięższą częścią tego ekranu. Liczymy je ponownie
             // tylko po zmianie nazwy/wariantu lub katalogu, nie po każdej zmianie ilości,
             // odbiorcy, checkboxa ani po zwykłej recomposition całej listy.
-            val productMatches = remember(item.name, item.variant, products, note.analyzedByAi) {
-                matchingProducts(item, products, strictOfflineMatching = !note.analyzedByAi)
+            val productMatches = remember(item.name, item.variant, productIndex, note.analyzedByAi) {
+                productIndex.matches(item, strictOfflineMatching = !note.analyzedByAi)
             }
             val productMatch = productMatches.singleOrNull()
             val recipientQuery = item.recipientName.orEmpty()
@@ -798,31 +800,21 @@ private fun ParsedNoteReviewContent(
             val personMatch = remember(recipientQuery, people) { recognizedPerson(recipientQuery, people) }
             val shipyardMatches = remember(recipientQuery, shipyards) { matchingShipyards(recipientQuery, shipyards) }
             val recipientShipyard = remember(recipientQuery, shipyards) { recognizedRecipientShipyard(recipientQuery, shipyards) }
-            val details = listOfNotNull(
-                item.recipientName?.let { name -> "dla: ${personMatch?.listDisplayName() ?: recipientShipyard?.name ?: name}" }
-                    ?: recognizedShipyard?.let { "dla stoczni: ${it.name} (domyślnie)" },
-                item.variant?.let { v -> "rozmiar $v" },
-                formatWholeQuantity(item.quantity) + " " + item.unit,
-                item.notes.takeIf(String::isNotBlank),
-            ).joinToString(" · ")
             Column {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(approvedItems[index] == true, { approvedItems[index] = it })
                     Column(Modifier.weight(1f)) {
-                        Text(item.name, fontWeight = FontWeight.SemiBold)
-                        Text(details, style = MaterialTheme.typography.labelMedium)
+                        Text(productTitle(productMatch?.name ?: item.name, productMatch?.variant ?: item.variant), fontWeight = FontWeight.SemiBold)
+                        item.notes.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                         if (productMatches.isEmpty()) Text("Nie rozpoznano przedmiotu", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                         else if (productMatch == null) Text("Kilka pasujących przedmiotów — wybierz właściwy", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                        else {
-                            Text("Proponowany przedmiot", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                            ProductInfo(productMatch.name, productMatch.variant, productMatch.groupName, productMatch.subgroupName)
-                            if (productMatch.isHidden) Text("Ten przedmiot jest ukryty — możesz wybrać inną aktywną pozycję.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                        }
+                        else if (productMatch.isHidden) Text("Ten przedmiot jest ukryty — możesz wybrać inną aktywną pozycję.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                         when {
-                            recipientQuery.isBlank() && defaultRecipientName.isNotBlank() -> Text("Odbiorca domyślny: ${defaultRecipientName}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                            isDefaultRecipient(recipientQuery, defaultRecipientName) -> Unit
+                            recipientQuery.isBlank() && defaultRecipientName.isNotBlank() -> Unit
                             recipientQuery.isBlank() -> Text("Brak odbiorcy przy tej pozycji", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                            personMatch != null -> Text("Osoba: ${personMatch.listDisplayName()}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                            recipientShipyard != null -> Text("Stocznia: ${recipientShipyard.name}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                            personMatch != null -> Text("Odbiorca: ${personMatch.listDisplayName()}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                            recipientShipyard != null -> Text("Odbiorca: ${recipientShipyard.name}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                             else -> {
                                 Text("Nie rozpoznano odbiorcy w bazie", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                                 TextButton(onClick = { newPersonItemIndex = index }) {
@@ -833,8 +825,13 @@ private fun ParsedNoteReviewContent(
                             }
                         }
                     }
-                    TextButton(onClick = { editingItem = if (editingItem == index) null else index }) {
-                        Text(if (editingItem == index) "Zamknij" else "Popraw")
+                    Text(
+                        "${formatWholeQuantity(item.quantity)} ${item.unit}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    IconButton(onClick = { editingItem = if (editingItem == index) null else index }) {
+                        Icon(if (editingItem == index) Icons.Default.Close else Icons.Default.Edit, if (editingItem == index) "Zamknij edycję" else "Popraw")
                     }
                 }
                 if (editingItem == index) {
@@ -927,6 +924,7 @@ private fun ParsedNoteReviewContent(
                     val newIndex = editedItems.size
                     sourceItems.add(added)
                     editedItems.add(added)
+                    itemKeys.add(recognizedItemKey(added, newIndex))
                     approvedItems[newIndex] = true
                     quantityTexts[newIndex] = "1"
                     editingItem = newIndex
@@ -1073,41 +1071,6 @@ private fun ConfidenceLabel(confidence: pl.magazyn.mobile.domain.ParseConfidence
         pl.magazyn.mobile.domain.ParseConfidence.REVIEW -> "Sprawdź"
     }
     Text(text, color = if (confidence == pl.magazyn.mobile.domain.ParseConfidence.REVIEW) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-}
-
-private fun matchingProducts(
-    item: pl.magazyn.mobile.domain.ParsedItem,
-    products: List<pl.magazyn.mobile.data.ProductWithStock>,
-    strictOfflineMatching: Boolean,
-): List<pl.magazyn.mobile.data.ProductWithStock> {
-    if (!strictOfflineMatching) {
-        val nameKey = pl.magazyn.mobile.domain.ImportParser.key(item.name)
-        val variantKey = pl.magazyn.mobile.domain.ImportParser.key(item.variant.orEmpty())
-        return products.mapNotNull { product ->
-            val labels = listOf(product.name) + product.aliases.split(',') + product.tags.split(',')
-            val nameScore = when {
-                pl.magazyn.mobile.domain.ImportParser.key(product.name) == nameKey -> 4
-                labels.any { pl.magazyn.mobile.domain.ImportParser.key(it) == nameKey } -> 3
-                pl.magazyn.mobile.domain.matchesSearch(item.name, product.name, product.aliases, product.tags) -> 1
-                else -> 0
-            }
-            if (nameScore == 0) null else {
-                val variantMatches = variantKey.isBlank() ||
-                    pl.magazyn.mobile.domain.ImportParser.key(product.variant.orEmpty()) == variantKey ||
-                    (product.aliases.split(',') + product.tags.split(',')).any { pl.magazyn.mobile.domain.ImportParser.key(it) == variantKey }
-                if (!variantMatches) null else product to nameScore
-            }
-        }.sortedWith(compareByDescending<Pair<pl.magazyn.mobile.data.ProductWithStock, Int>> { it.second }.thenBy { it.first.name }.thenBy { it.first.variant.orEmpty() }).map { it.first }
-    }
-    val scored = products.mapNotNull { product ->
-        pl.magazyn.mobile.domain.offlineProductMatchScore(
-            item.name, item.variant, product.name, product.variant, product.aliases, product.tags,
-        )?.let { score -> product to score }
-    }
-    val bestScore = scored.maxOfOrNull { it.second } ?: return emptyList()
-    return scored.filter { it.second == bestScore }
-        .sortedWith(compareBy<Pair<pl.magazyn.mobile.data.ProductWithStock, Int>> { it.first.name }.thenBy { it.first.variant.orEmpty() })
-        .map { it.first }
 }
 
 private fun matchingPeople(query: String, people: List<pl.magazyn.mobile.data.EmployeeSummary>): List<pl.magazyn.mobile.data.EmployeeSummary> {
