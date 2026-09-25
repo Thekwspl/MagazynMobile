@@ -67,6 +67,17 @@ test("choice, auth gate and invalid response", async () => {
     await assert.rejects(agent.start("Kowalski"), /CODEX_PROTOCOL_ERROR/);
   } finally { agent.close(); }
 });
+test("manual choice resumes the same Codex thread", async () => {
+  const { agent, fake } = setup();
+  try {
+    fake.resultStatus = "needs_user_choice";
+    const initial = await agent.start("Kowalski rękawice");
+    const afterChoice = await agent.resumeWithChoice(initial.sessionId, "p1");
+    assert.equal(afterChoice.status, "proposal");
+    assert.equal(fake.calls[1].threadId, `thread-${initial.sessionId}`);
+    assert.equal((await agent.resumeWithChoice(initial.sessionId, "unknown")).error?.code, "INVALID_STATE");
+  } finally { agent.close(); }
+});
 test("no write tool, and catalog reads are bounded", async () => {
   const { agent } = setup();
   try {
@@ -93,6 +104,29 @@ test("HTTP message endpoint uses Codex adapter", async () => {
     assert.equal(fake.calls.length, 1);
     const denied = await fetch(`${base}/_internal/catalog/search`, { method: "POST", body: "{}" });
     assert.equal(denied.status, 403);
+  } finally { service.close(); }
+});
+test("HTTP choice endpoint preserves session and rejects unknown candidate", async () => {
+  const fake = new FakeRunner(); fake.resultStatus = "needs_user_choice";
+  const service = createAgentService({ mode: "codex", codex: {
+    start: fake.start.bind(fake), accountRead: fake.accountRead.bind(fake),
+    runStructuredOrder: fake.runStructuredOrder.bind(fake), close() {},
+    async startChatGptDeviceLogin() { return {}; }, async startChatGptLogin() { return {}; },
+  } });
+  service.server.listen(0, "127.0.0.1"); await once(service.server, "listening");
+  const address = service.server.address(); assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}`;
+  try {
+    await fetch(`${base}/v1/catalog/full-sync`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(fixture) });
+    const send = async (path: string, payload: unknown) => fetch(`${base}${path}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
+    }).then(reply => reply.json() as Promise<AgentResponse>);
+    const first = await send("/v1/sessions/message", { message: "Kowalski rękawice" });
+    const invalid = await send(`/v1/sessions/${first.sessionId}/choice`, { candidateId: "unknown" });
+    assert.equal(invalid.error?.code, "INVALID_CHOICE");
+    const next = await send(`/v1/sessions/${first.sessionId}/choice`, { candidateId: "p1" });
+    assert.equal(next.sessionId, first.sessionId);
+    assert.equal(fake.calls[1].threadId, `thread-${first.sessionId}`);
   } finally { service.close(); }
 });
 

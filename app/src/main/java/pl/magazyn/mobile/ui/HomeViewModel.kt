@@ -53,6 +53,15 @@ import pl.magazyn.mobile.data.NotebookTaskStepEntity
 import pl.magazyn.mobile.data.NotebookTaskStepPersonEntity
 import pl.magazyn.mobile.data.TaskPlaceEntity
 import pl.magazyn.mobile.data.ProductVisibilityStore
+import pl.magazyn.mobile.agent.AgentCandidate
+import pl.magazyn.mobile.agent.AgentClient
+import pl.magazyn.mobile.agent.AgentFailure
+import pl.magazyn.mobile.agent.AgentReply
+import pl.magazyn.mobile.agent.AgentRepository
+import pl.magazyn.mobile.agent.AgentRevision
+import pl.magazyn.mobile.agent.AgentStatus
+import pl.magazyn.mobile.agent.HttpAgentClient
+import pl.magazyn.mobile.agent.RoomAgentDataSource
 
 data class HomeUiState(
     val employeeCount: Int = 0,
@@ -66,6 +75,13 @@ data class AiAnalysisUiState(
     val isLoading: Boolean = false,
     val result: ParsedNote? = null,
     val error: String? = null,
+)
+
+data class CodexAnalysisUiState(
+    val isLoading: Boolean = false,
+    val error: String? = null,
+    val reply: AgentReply? = null,
+    val result: ParsedNote? = null,
 )
 
 data class NoteReviewUiState(
@@ -82,6 +98,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val aiAnalyzer = GeminiNoteAnalyzer()
     private val _aiAnalysis = MutableStateFlow(AiAnalysisUiState())
     val aiAnalysis: StateFlow<AiAnalysisUiState> = _aiAnalysis.asStateFlow()
+    private val _codexAnalysis = MutableStateFlow(CodexAnalysisUiState())
+    val codexAnalysis: StateFlow<CodexAnalysisUiState> = _codexAnalysis.asStateFlow()
+    private val agentRepository by lazy {
+        val endpoint = if (pl.magazyn.mobile.BuildConfig.DEBUG) "http://127.0.0.1:8787" else ""
+        AgentRepository(HttpAgentClient(endpoint), RoomAgentDataSource(database), AgentRevision(application)::next)
+    }
     private val _quickInput = MutableStateFlow("")
     val quickInput: StateFlow<String> = _quickInput.asStateFlow()
     private val _noteReview = MutableStateFlow<NoteReviewUiState?>(null)
@@ -139,6 +161,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateQuickInput(value: String) {
+        if (_quickInput.value != value && _codexAnalysis.value.reply != null) _codexAnalysis.value = CodexAnalysisUiState()
         _quickInput.value = value
     }
 
@@ -266,6 +289,37 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun consumeAiResult() {
         _aiAnalysis.value = AiAnalysisUiState()
     }
+
+    fun analyzeWithCodex(text: String) {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            _codexAnalysis.value = CodexAnalysisUiState(isLoading = true)
+            runCatching { showCodexReply(agentRepository.analyze(text)) }.onFailure {
+                _codexAnalysis.value = CodexAnalysisUiState(error = it.message ?: "Analiza Codex nie powiodła się.")
+            }
+        }
+    }
+
+    fun chooseCodexCandidate(candidateId: String) {
+        val reply = _codexAnalysis.value.reply ?: return
+        viewModelScope.launch {
+            _codexAnalysis.value = CodexAnalysisUiState(isLoading = true, reply = reply)
+            runCatching { showCodexReply(agentRepository.choose(reply, candidateId)) }.onFailure {
+                _codexAnalysis.value = CodexAnalysisUiState(error = it.message ?: "Nie udało się wznowić sesji.", reply = reply)
+            }
+        }
+    }
+
+    private suspend fun showCodexReply(reply: AgentReply) {
+        _codexAnalysis.value = when (reply.status) {
+            AgentStatus.PROPOSAL -> CodexAnalysisUiState(result = agentRepository.review(reply))
+            AgentStatus.NEEDS_USER_CHOICE -> CodexAnalysisUiState(reply = reply)
+            AgentStatus.ERROR -> CodexAnalysisUiState(error = reply.error ?: "Agent zwrócił błąd.")
+            AgentStatus.NEEDS_DATA -> CodexAnalysisUiState(error = "Agent wymaga dodatkowych danych.")
+        }
+    }
+
+    fun consumeCodexResult() { _codexAnalysis.value = CodexAnalysisUiState() }
 
     fun addPhoneNumber(employeeId: String, number: String) {
         viewModelScope.launch {
@@ -433,10 +487,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 approvedItems.groupBy { it.recipientName ?: note.shipyardName ?: "Bez odbiorcy" }
                     .forEach { (recipient, items) ->
                         val recipientKey = ImportParser.key(recipient)
-                        val employee = employees.firstOrNull {
+                        val fixedRecipientId = items.mapNotNull { it.recipientId?.takeIf { _ -> it.recipientName == recipient } }.distinct().singleOrNull()
+                        val employee = employees.firstOrNull { it.id == fixedRecipientId && items.any { item -> item.recipientKind == "person" } } ?: employees.firstOrNull {
                             ImportParser.key(it.fullName) == recipientKey || it.aliases.split(',').any { alias -> ImportParser.key(alias) == recipientKey }
                         }
-                        val recipientShipyard = activeShipyards.firstOrNull { ImportParser.key(it.name) == recipientKey }
+                        val recipientShipyard = activeShipyards.firstOrNull { it.id == fixedRecipientId && items.any { item -> item.recipientKind == "shipyard" } }
+                            ?: activeShipyards.firstOrNull { ImportParser.key(it.name) == recipientKey }
                         val orderId = UUID.randomUUID().toString()
                         database.orderDao().upsertOrders(
                             listOf(
@@ -472,7 +528,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                                     scoredCandidates.filter { it.second == bestScore }.map { it.first }
                                 }
                                 // Remis pozostaje do ręcznego mapowania; nie wybieramy przypadkowego rozmiaru.
-                                val product = candidates.singleOrNull()
+                                val product = item.productId?.let { id -> catalog.firstOrNull { it.id == id && !it.isArchived } }
+                                    ?: candidates.singleOrNull()
                                 OrderLineEntity(
                                     id = UUID.randomUUID().toString(),
                                     orderId = orderId,

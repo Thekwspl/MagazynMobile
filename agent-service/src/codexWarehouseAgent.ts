@@ -81,4 +81,34 @@ export class CodexWarehouseAgent {
       return result.response;
     } finally { state.busy = false; }
   }
+
+  async resumeWithChoice(sessionId: string, candidateId: string): Promise<AgentResponse> {
+    const state = this.sessions.get(sessionId);
+    if (!state) return this.error(sessionId, "SESSION_NOT_FOUND", "Nie znaleziono sesji.");
+    if (state.busy) return this.error(sessionId, "SESSION_BUSY", "Sesja przetwarza już wybór.");
+    if (state.response.status !== "needs_user_choice") return this.error(sessionId, "INVALID_STATE", "Sesja nie oczekuje na wybór.");
+    const candidate = state.response.candidates.find(item => item.id === candidateId);
+    if (!candidate) return this.error(sessionId, "INVALID_CHOICE", "Wybrany identyfikator nie jest kandydatem w tej sesji.");
+    state.busy = true;
+    try {
+      if (!await this.auth()) return this.error(sessionId, "CHATGPT_AUTH_REQUIRED", "Zaloguj Codex kontem ChatGPT.");
+      const prompt = `Użytkownik ręcznie wybrał kandydata ${JSON.stringify(candidate)} dla sessionId ${sessionId}. Kontynuuj tę samą sesję. Jeśli potrzebujesz aktualnego stanu, zwróć needs_data; nie zgaduj. Zwróć AgentResponse v1.`;
+      const result = await this.codex.runStructuredOrder(prompt, this.cwd, state.threadId);
+      if (result.threadId !== state.threadId || result.response.sessionId !== sessionId)
+        throw new Error("CODEX_PROTOCOL_ERROR: niezgodny threadId lub sessionId po wyborze.");
+      const response = result.response;
+      const snapshot = this.catalog();
+      if (response.recipient && !(response.recipient.kind === "person"
+        ? snapshot.people.some(p => p.id === response.recipient!.id)
+        : snapshot.shipyards.some(s => s.id === response.recipient!.id)))
+        throw new Error("CODEX_PROTOCOL_ERROR: nieznany odbiorca po wyborze.");
+      if (response.items.some(item => !snapshot.products.some(p => p.id === item.productId && !p.hidden)) ||
+        response.needsData.some(req => req.arguments.productIds.some(id => !response.items.some(item => item.productId === id))))
+        throw new Error("CODEX_PROTOCOL_ERROR: nieznany produkt po wyborze.");
+      if (response.status === "proposal" && response.items.some(item => item.available == null))
+        throw new Error("CODEX_PROTOCOL_ERROR: propozycja wymaga bieżącego stanu.");
+      state.response = response;
+      return response;
+    } finally { state.busy = false; }
+  }
 }

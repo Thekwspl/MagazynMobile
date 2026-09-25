@@ -49,6 +49,7 @@ fun HomeScreen(
     val people by viewModel.people.collectAsStateWithLifecycle()
     val hrappkaAttentionEmployees by viewModel.hrappkaAttentionEmployees.collectAsStateWithLifecycle()
     val aiAnalysis by viewModel.aiAnalysis.collectAsStateWithLifecycle()
+    val codexAnalysis by viewModel.codexAnalysis.collectAsStateWithLifecycle()
     val duplicateDecisions by viewModel.duplicateDecisions.collectAsStateWithLifecycle()
     val query by viewModel.quickInput.collectAsStateWithLifecycle()
     val openTasks = remember(tasks) { tasks.filterNot { it.isCompleted } }
@@ -73,6 +74,13 @@ fun HomeScreen(
             onReview()
         }
     }
+    LaunchedEffect(codexAnalysis.result) {
+        codexAnalysis.result?.let {
+            viewModel.openReview(it)
+            viewModel.consumeCodexResult()
+            onReview()
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(contentPadding),
@@ -89,11 +97,16 @@ fun HomeScreen(
                         onChange = viewModel::updateQuickInput,
                         aiLoading = aiAnalysis.isLoading,
                         aiError = aiAnalysis.error,
+                        codexLoading = codexAnalysis.isLoading,
+                        codexError = codexAnalysis.error,
+                        codexChoice = codexAnalysis.reply,
                         onRecognizeLocal = {
                             viewModel.openReview(viewModel.recognize(query))
                             onReview()
                         },
                         onRecognizeAi = { viewModel.analyzeWithAi(query) },
+                        onRecognizeCodex = { viewModel.analyzeWithCodex(query) },
+                        onChooseCodex = viewModel::chooseCodexCandidate,
                     )
                     QuickButtons(
                         onNewOrder = {
@@ -241,7 +254,7 @@ fun ParsedNoteReviewScreen(
                         style = MaterialTheme.typography.titleLarge,
                     )
                     Text(
-                        if (note.analyzedByAi) "Propozycja AI · sprawdź każdą pozycję" else "Sprawdź dane przed zapisaniem",
+                        if (note.agentProposal) "Propozycja Codex · sprawdź każdą pozycję" else if (note.analyzedByAi) "Propozycja Gemini · sprawdź każdą pozycję" else "Sprawdź dane przed zapisaniem",
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
@@ -322,8 +335,13 @@ private fun SmartInput(
     onChange: (String) -> Unit,
     aiLoading: Boolean,
     aiError: String?,
+    codexLoading: Boolean,
+    codexError: String?,
+    codexChoice: pl.magazyn.mobile.agent.AgentReply?,
     onRecognizeLocal: () -> Unit,
     onRecognizeAi: () -> Unit,
+    onRecognizeCodex: () -> Unit,
+    onChooseCodex: (String) -> Unit,
 ) {
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(11.dp)) {
@@ -337,17 +355,30 @@ private fun SmartInput(
                 placeholder = { Text("Wklej zamówienie, zadanie albo wpisz osobę, miejsce lub przedmiot…") },
             )
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onRecognizeLocal, enabled = value.isNotBlank() && !aiLoading, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = onRecognizeLocal, enabled = value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.weight(1f)) {
                     Text(if (pl.magazyn.mobile.domain.TaskTextParser().looksLikeTask(value)) "Utwórz zadanie z tekstu" else "Offline")
                 }
-                Button(onClick = onRecognizeAi, enabled = value.isNotBlank() && !aiLoading, modifier = Modifier.weight(1f)) {
+                Button(onClick = onRecognizeAi, enabled = value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.weight(1f)) {
                     if (aiLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     else Icon(Icons.Default.AutoAwesome, null)
                     Spacer(Modifier.width(5.dp))
-                    Text(if (aiLoading) "Analizuję" else "Analizuj AI")
+                    Text(if (aiLoading) "Analizuję" else "Gemini")
                 }
             }
+            OutlinedButton(onClick = onRecognizeCodex, enabled = value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.fillMaxWidth().padding(top = 5.dp)) {
+                if (codexLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Text(if (codexLoading) " Analizuję w Codex…" else "Codex")
+            }
             aiError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
+            codexError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
+            if (codexChoice?.status == pl.magazyn.mobile.agent.AgentStatus.NEEDS_USER_CHOICE) {
+                codexChoice.questions.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                codexChoice.candidates.forEach { candidate ->
+                    OutlinedButton(onClick = { onChooseCodex(candidate.id) }, enabled = !codexLoading, modifier = Modifier.fillMaxWidth()) {
+                        Text("${candidate.label} (${candidate.kind})")
+                    }
+                }
+            }
             Text("AI tworzy tylko propozycję — niczego nie zapisuje automatycznie.", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
         }
     }
@@ -715,6 +746,7 @@ private fun ParsedNoteReviewContent(
             ReviewRow(name, note.person?.position?.let { p -> "stanowisko: $p" } ?: "rozpoznana osoba")
         }
         if (note.kind == ParsedInputKind.ORDER) {
+            if (note.agentProposal) Text("Propozycja Codex — sprawdź odbiorcę, produkty i dostępność przed zapisaniem szkicu.", color = MaterialTheme.colorScheme.primary)
             Text("Domyślny odbiorca", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = !defaultRecipientIsShipyard, onClick = { defaultRecipientIsShipyard = false; defaultRecipientName = "" }, label = { Text("Osoba") }, leadingIcon = if (!defaultRecipientIsShipyard) { { Icon(Icons.Default.Person, null) } } else null)
@@ -743,7 +775,7 @@ private fun ParsedNoteReviewContent(
             OutlinedButton(
                 onClick = {
                     val recipient = defaultRecipientName.trim().takeIf(String::isNotBlank) ?: return@OutlinedButton
-                    editedItems.indices.filter { editedItems[it].recipientName.isNullOrBlank() }.forEach { i -> editedItems[i] = editedItems[i].copy(recipientName = recipient) }
+                    editedItems.indices.filter { editedItems[it].recipientName.isNullOrBlank() }.forEach { i -> editedItems[i] = editedItems[i].copy(recipientName = recipient, recipientId = null, recipientKind = null) }
                 },
                 enabled = defaultRecipientName.isNotBlank(), modifier = Modifier.fillMaxWidth(),
             ) { Text("Zastosuj do wszystkich bez odbiorcy") }
@@ -791,8 +823,9 @@ private fun ParsedNoteReviewContent(
             // Dopasowanie katalogu jest najcięższą częścią tego ekranu. Liczymy je ponownie
             // tylko po zmianie nazwy/wariantu lub katalogu, nie po każdej zmianie ilości,
             // odbiorcy, checkboxa ani po zwykłej recomposition całej listy.
-            val productMatches = remember(item.name, item.variant, productIndex, note.analyzedByAi) {
-                productIndex.matches(item, strictOfflineMatching = !note.analyzedByAi)
+            val productMatches = remember(item.name, item.variant, item.productId, productIndex, note.analyzedByAi) {
+                item.productId?.let { id -> products.filter { it.id == id } }
+                    ?: productIndex.matches(item, strictOfflineMatching = !note.analyzedByAi)
             }
             val productMatch = productMatches.singleOrNull()
             val recipientQuery = item.recipientName.orEmpty()
@@ -840,7 +873,7 @@ private fun ParsedNoteReviewContent(
                         Text("1. Odbiorca", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                         OutlinedTextField(
                             item.recipientName.orEmpty(),
-                            { editedItems[index] = item.copy(recipientName = it.ifBlank { null }) },
+                            { editedItems[index] = item.copy(recipientName = it.ifBlank { null }, recipientId = null, recipientKind = null) },
                             Modifier.fillMaxWidth().keepAboveKeyboard(),
                             label = { Text("Osoba lub stocznia") },
                             placeholder = { defaultRecipientName.takeIf(String::isNotBlank)?.let { Text("Domyślnie: $it") } },
@@ -851,7 +884,7 @@ private fun ParsedNoteReviewContent(
                         if (personMatches.isNotEmpty()) {
                             Text("Proponowane osoby", style = MaterialTheme.typography.labelMedium)
                             SuggestionList(personMatches, key = { it.id }) { person ->
-                                OutlinedButton(onClick = { editedItems[index] = item.copy(recipientName = person.listDisplayName()) }, Modifier.fillMaxWidth()) {
+                                OutlinedButton(onClick = { editedItems[index] = item.copy(recipientName = person.listDisplayName(), recipientId = person.id, recipientKind = "person") }, Modifier.fillMaxWidth()) {
                                     Icon(Icons.Default.Person, null)
                                     Spacer(Modifier.width(6.dp))
                                     Text(person.listDisplayName() + person.positions.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty(), Modifier.weight(1f))
@@ -861,7 +894,7 @@ private fun ParsedNoteReviewContent(
                         if (shipyardMatches.isNotEmpty()) {
                             Text("Proponowane stocznie", style = MaterialTheme.typography.labelMedium)
                             SuggestionList(shipyardMatches, key = { it.id }) { shipyard ->
-                                OutlinedButton(onClick = { editedItems[index] = item.copy(recipientName = shipyard.name) }, Modifier.fillMaxWidth()) {
+                                OutlinedButton(onClick = { editedItems[index] = item.copy(recipientName = shipyard.name, recipientId = shipyard.id, recipientKind = "shipyard") }, Modifier.fillMaxWidth()) {
                                     Icon(Icons.Default.Business, null)
                                     Spacer(Modifier.width(6.dp))
                                     Text(shipyard.name)
@@ -870,11 +903,11 @@ private fun ParsedNoteReviewContent(
                         }
                         HorizontalDivider(Modifier.padding(vertical = 3.dp))
                         Text("2. Przedmiot", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                        OutlinedTextField(item.name, { editedItems[index] = item.copy(name = it) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Nazwa, alias lub tag") })
+                        OutlinedTextField(item.name, { editedItems[index] = item.copy(name = it, productId = null) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Nazwa, alias lub tag") })
                         if (productMatches.isNotEmpty()) {
                             Text("Proponowane przedmioty", style = MaterialTheme.typography.labelMedium)
                             SuggestionList(productMatches, key = { it.id }) { product ->
-                                OutlinedButton(onClick = { editedItems[index] = item.copy(name = product.name, variant = product.variant, unit = product.unit) }, Modifier.fillMaxWidth()) {
+                                OutlinedButton(onClick = { editedItems[index] = item.copy(name = product.name, variant = product.variant, unit = product.unit, productId = product.id) }, Modifier.fillMaxWidth()) {
                                     ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.weight(1f), stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit)
                                 }
                             }
@@ -886,7 +919,7 @@ private fun ParsedNoteReviewContent(
                         HorizontalDivider(Modifier.padding(vertical = 3.dp))
                         Text("3. Szczegóły", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(item.variant.orEmpty(), { editedItems[index] = item.copy(variant = it.ifBlank { null }) }, Modifier.weight(1f).keepAboveKeyboard(), label = { Text("Wariant") })
+                            OutlinedTextField(item.variant.orEmpty(), { editedItems[index] = item.copy(variant = it.ifBlank { null }, productId = null) }, Modifier.weight(1f).keepAboveKeyboard(), label = { Text("Wariant") })
                             OutlinedTextField(
                                 quantityTexts[index].orEmpty(),
                                 { value ->
@@ -899,7 +932,7 @@ private fun ParsedNoteReviewContent(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             )
                         }
-                        OutlinedTextField(item.unit, { editedItems[index] = item.copy(unit = it) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Jednostka") })
+                        OutlinedTextField(item.unit, { editedItems[index] = item.copy(unit = it, productId = null) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Jednostka") })
                         OutlinedTextField(item.notes, { editedItems[index] = item.copy(notes = it) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Uwagi") })
                     }
                     }
@@ -949,7 +982,7 @@ private fun ParsedNoteReviewContent(
                         onSaveOrder(
                             editedItems.mapIndexedNotNull { index, corrected ->
                             if (approvedItems[index] == true) sourceItems.getOrNull(index)?.let { source ->
-                                val withDefault = if (corrected.recipientName.isNullOrBlank() && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim()) else corrected
+                                val withDefault = if (corrected.recipientName.isNullOrBlank() && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim(), recipientId = null, recipientKind = null) else corrected
                                 val storageRecipient = withDefault.recipientName?.let { recipient -> recognizedPerson(recipient, people)?.fullName ?: recipient }
                                 source to withDefault.copy(recipientName = storageRecipient)
                             } else null

@@ -50,8 +50,12 @@ Docelowy adapter Codex powinien uruchamiać `thread/start`, a kolejne wiadomośc
 - `.gitignore` blokuje lokalne katalogi Codex, `auth.json`, `.env` i pliki tokenów.
 - Usługa POC nasłuchuje tylko na localhost. Uwierzytelnienie transportu, szyfrowanie, retencja, audyt i trwały magazyn sesji są obowiązkowe przed integracją sieciową.
 
+## Klient Android — Paczka D
+
+Wersja debug wysyła pełny katalog przed każdą wiadomością, odczytuje wyłącznie `get_current_stock` z Room i odsyła wyniki opatrzone `requestId`. Wybór niejednoznacznego kandydata przechodzi przez `/v1/sessions/{sessionId}/choice` w tym samym wątku. `proposal` jest adaptowany do istniejącego ekranu review, bez zapisu do momentu jawnego przycisku tworzącego szkic. Lokalny HTTP jest dozwolony wyłącznie w debug na `127.0.0.1` z `adb reverse`; release nie ma domyślnego endpointu.
+
 ## Ograniczenia i dalsze kroki
 
-To fundament, nie funkcja produkcyjna. Fixture'owy resolver zapewnia powtarzalne testy bez danych użytkownika; klient `app-server` pokazuje wspieraną ścieżkę autoryzacji i ustrukturyzowanego wyniku, ale nie jest jeszcze podłączony do Androida. Przed produkcją trzeba przeprowadzić przegląd bezpieczeństwa, polityk organizacji, warunków i licencji właściwych dla wdrażanej wersji komponentów OpenAI, dodać uwierzytelnienie samej usługi, trwałe i szyfrowane sesje, limity, obserwowalność oraz testy integracyjne na osobnym koncie testowym.
+To nadal POC developerski: brak autoryzacji transportu usługi i trwałych sesji wyklucza wystawianie jej na sieć. Przed produkcją potrzebne są uwierzytelnienie samej usługi i bezpieczny transport.
 
 Istniejący parser offline i integracja Gemini pozostają bez zmian. Schemat Room pozostaje w wersji 24.

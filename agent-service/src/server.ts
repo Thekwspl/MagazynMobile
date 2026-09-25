@@ -64,6 +64,14 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
           ? await agent.resumeWithData(sessionId, payload.results)
           : local.resumeWithData(sessionId, payload.results));
       }
+      const choice = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/choice$/);
+      if (request.method === "POST" && choice) {
+        const payload = await body<{ candidateId: string }>(request);
+        const sessionId = decodeURIComponent(choice[1]);
+        return json(response, 200, mode === "codex"
+          ? await agent.resumeWithChoice(sessionId, payload.candidateId)
+          : local.resumeWithChoice(sessionId, payload.candidateId));
+      }
       if (request.method === "GET" && url.pathname === "/v1/auth/status") {
         await codex.start("codex", mcp()); return json(response, 200, await codex.accountRead());
       }

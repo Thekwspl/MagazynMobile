@@ -3,12 +3,14 @@ import type { CatalogSnapshot, PersonRecord, ProductRecord } from "./catalog.js"
 import {
   PROTOCOL_VERSION,
   type AgentResponse,
+  type Candidate,
   type OrderItemProposal,
   type ReadOnlyToolResult,
 } from "./contracts.js";
 
 interface SessionState {
   response: AgentResponse;
+  message: string;
 }
 
 const normalize = (value: string): string =>
@@ -43,7 +45,7 @@ export class WarehouseAgent {
   start(message: string): AgentResponse {
     const sessionId = randomUUID();
     const response = this.resolve(sessionId, message);
-    this.sessions.set(sessionId, { response });
+    this.sessions.set(sessionId, { response, message });
     return structuredClone(response);
   }
 
@@ -85,21 +87,34 @@ export class WarehouseAgent {
       warnings,
       needsData: [],
     };
-    this.sessions.set(sessionId, { response });
+    this.sessions.set(sessionId, { ...state, response });
     return structuredClone(response);
   }
 
-  private resolve(sessionId: string, message: string): AgentResponse {
+  resumeWithChoice(sessionId: string, candidateId: string): AgentResponse {
+    const state = this.sessions.get(sessionId);
+    if (!state) return this.error(sessionId, "SESSION_NOT_FOUND", "Nie znaleziono sesji.");
+    if (state.response.status !== "needs_user_choice") return this.error(sessionId, "INVALID_STATE", "Sesja nie oczekuje na wybór.");
+    const candidate = state.response.candidates.find(item => item.id === candidateId);
+    if (!candidate) return this.error(sessionId, "INVALID_CHOICE", "Nie znaleziono wskazanego kandydata.");
+    const response = this.resolve(sessionId, state.message, candidate);
+    this.sessions.set(sessionId, { ...state, response });
+    return structuredClone(response);
+  }
+
+  private resolve(sessionId: string, message: string, selected?: Candidate): AgentResponse {
     const catalog = this.catalog();
     const normalized = normalize(message);
     const people = catalog.people.filter((person) =>
-      labelsForPerson(person).some((label) => normalized.includes(normalize(label))),
-    );
+      (selected?.kind === "person" && selected.id === person.id) || labelsForPerson(person).some((label) => normalized.includes(normalize(label))),
+    ).filter(person => !selected || selected.kind !== "person" || person.id === selected.id);
     const shipyards = catalog.shipyards.filter((shipyard) =>
-      [shipyard.name, ...(shipyard.aliases ?? [])].some((label) =>
+      (selected?.kind === "shipyard" && selected.id === shipyard.id) || [shipyard.name, ...(shipyard.aliases ?? [])].some((label) =>
         normalized.includes(normalize(label)),
       ),
-    );
+    ).filter(shipyard => !selected || selected.kind !== "shipyard" || shipyard.id === selected.id);
+    if (selected?.kind === "person") shipyards.length = 0;
+    if (selected?.kind === "shipyard") people.length = 0;
     const base = this.base(sessionId);
 
     if (people.length + shipyards.length > 1) {
@@ -126,11 +141,11 @@ export class WarehouseAgent {
         ...base,
         status: "needs_user_choice",
         questions: ["Nie rozpoznano odbiorcy. Wybierz osobę lub stocznię."],
-        candidates: catalog.people.map((person) => ({
+        candidates: [...catalog.people.map((person) => ({
           id: person.id,
           label: `${person.firstName} ${person.lastName}`,
-          kind: "person",
-        })),
+          kind: "person" as const,
+        })), ...catalog.shipyards.map((yard) => ({ id: yard.id, label: yard.name, kind: "shipyard" as const }))],
       };
     }
 
@@ -140,10 +155,11 @@ export class WarehouseAgent {
         product,
         label: labelsForProduct(product)
           .map(normalize)
-          .filter((label) => normalized.includes(label))
+          .filter((label) => normalized.includes(label) || (selected?.kind === "product" && selected.id === product.id))
           .sort((a, b) => b.length - a.length)[0],
       }))
-      .filter((match): match is { product: ProductRecord; label: string } => Boolean(match.label));
+      .filter((match): match is { product: ProductRecord; label: string } => Boolean(match.label))
+      .filter(match => !selected || selected.kind !== "product" || match.product.id === selected.id);
     const ambiguousLabel = productMatches.find(
       (match, index, matches) =>
         matches.findIndex((candidate) => candidate.label === match.label) !== index,
@@ -177,6 +193,9 @@ export class WarehouseAgent {
         },
         warnings: ["Nie znaleziono produktu w zsynchronizowanym katalogu."],
         questions: ["Jaki produkt dodać do zamówienia?"],
+        candidates: catalog.products.filter(product => !product.hidden).map(product => ({
+          id: product.id, label: productLabel(product), kind: "product" as const,
+        })),
       };
     }
 
