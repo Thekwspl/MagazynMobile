@@ -23,6 +23,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Ustaw Node.js 24 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: agent-service/package-lock.json
+
+      - name: Testy agent-service (mocki)
+        working-directory: agent-service
+        run: npm ci && npm test
+
       - name: Ustaw Java 17
         uses: actions/setup-java@v4
         with:
