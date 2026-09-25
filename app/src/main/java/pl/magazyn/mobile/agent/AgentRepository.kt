@@ -106,7 +106,8 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
             if (item.available == null || !item.available.isFinite() || !item.quantity.isFinite() || item.quantity <= 0 || item.quantity % 1 != 0.0 || item.quantity > Long.MAX_VALUE || item.unit != product.unit)
                 throw AgentFailure("Propozycja zawiera nieobsługiwaną ilość lub jednostkę produktu ${item.productId}.")
             pl.magazyn.mobile.domain.ParsedItem(product.name, product.variant, item.quantity.toLong(), product.unit, 1f,
-                recipientName = person?.fullName ?: yard?.name, notes = reply.warnings.joinToString("; "), productId = product.id,
+                recipientName = person?.fullName ?: yard?.name,
+                notes = (listOf("Dostępne: ${item.available} ${product.unit}") + reply.warnings).joinToString("; "), productId = product.id,
                 recipientId = recipient.id, recipientKind = recipient.kind)
         }
         val parsedPerson = person?.let { pl.magazyn.mobile.domain.ParsedPerson(it.fullName, null, 1f) }

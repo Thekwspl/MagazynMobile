@@ -26,12 +26,15 @@ class FakeRunner implements CodexRunner {
   calls: Array<{ prompt: string; threadId?: string }> = [];
   resultStatus: AgentResponse["status"] = "needs_data";
   malformed = false;
+  forceProposalOnChoice = false;
   async start(): Promise<void> {}
   async accountRead(): Promise<unknown> { return { account: this.auth ? { type: "chatgpt" } : { type: "apiKey" } }; }
   async runStructuredOrder(prompt: string, _cwd: string, threadId?: string) {
     this.calls.push({ prompt, threadId });
     const sessionId = prompt.match(/sessionId[: ]+([\da-f-]{36})/)?.[1] ?? "";
-    const value = response(sessionId, threadId ? "proposal" : this.resultStatus);
+    const value = response(sessionId, threadId
+      ? (prompt.includes("ręcznie wybrał") && !this.forceProposalOnChoice ? "needs_data" : "proposal")
+      : this.resultStatus);
     if (this.malformed) (value as unknown as Record<string, unknown>).candidates = [{}];
     return { threadId: threadId ?? `thread-${sessionId}`, response: parseAgentResponse(JSON.stringify(value)), toolCalls: 2 };
   }
@@ -73,9 +76,22 @@ test("manual choice resumes the same Codex thread", async () => {
     fake.resultStatus = "needs_user_choice";
     const initial = await agent.start("Kowalski rękawice");
     const afterChoice = await agent.resumeWithChoice(initial.sessionId, "p1");
-    assert.equal(afterChoice.status, "proposal");
+    assert.equal(afterChoice.status, "needs_data");
+    const proposal = await agent.resumeWithData(initial.sessionId, [{ requestId: "req1", tool: "get_current_stock", data: { stocks: [{ productId: "g", available: 3 }] } }]);
+    assert.equal(proposal.status, "proposal");
     assert.equal(fake.calls[1].threadId, `thread-${initial.sessionId}`);
     assert.equal((await agent.resumeWithChoice(initial.sessionId, "unknown")).error?.code, "INVALID_STATE");
+  } finally { agent.close(); }
+});
+test("Codex cannot propose stock before the requested Room read", async () => {
+  const { agent, fake } = setup();
+  try {
+    fake.resultStatus = "proposal";
+    await assert.rejects(agent.start("Kowalski rękawice"), /CODEX_PROTOCOL_ERROR/);
+    fake.resultStatus = "needs_user_choice";
+    fake.forceProposalOnChoice = true;
+    const choice = await agent.start("Kowalski rękawice");
+    await assert.rejects(agent.resumeWithChoice(choice.sessionId, "p1"), /CODEX_PROTOCOL_ERROR/);
   } finally { agent.close(); }
 });
 test("no write tool, and catalog reads are bounded", async () => {
@@ -126,6 +142,9 @@ test("HTTP choice endpoint preserves session and rejects unknown candidate", asy
     assert.equal(invalid.error?.code, "INVALID_CHOICE");
     const next = await send(`/v1/sessions/${first.sessionId}/choice`, { candidateId: "p1" });
     assert.equal(next.sessionId, first.sessionId);
+    assert.equal(next.status, "needs_data");
+    const final = await send(`/v1/sessions/${first.sessionId}/tool-results`, { results: [{ requestId: "req1", tool: "get_current_stock", data: { stocks: [{ productId: "g", available: 3 }] } }] });
+    assert.equal(final.status, "proposal");
     assert.equal(fake.calls[1].threadId, `thread-${first.sessionId}`);
   } finally { service.close(); }
 });

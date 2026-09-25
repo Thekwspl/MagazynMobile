@@ -22,7 +22,7 @@ class RoomAgentDataSourceTest {
 
     @After fun cleanup() { environment.close() }
 
-    @Test fun `reads actual zero and negative Room balances without writing`() = runBlocking {
+    @Test fun readsActualZeroAndNegativeRoomBalancesWithoutWriting() = runBlocking {
         val database = environment.database
         val source = RoomAgentDataSource(database)
         assertEquals(listOf("product-1" to 0.0), source.currentStock(listOf("product-1")))
@@ -34,7 +34,7 @@ class RoomAgentDataSourceTest {
         try { source.currentStock(listOf("product-1")); fail("Unknown balance accepted") } catch (_: AgentFailure) { }
     }
 
-    @Test fun `catalog reflects Room and excludes phone numbers`() = runBlocking {
+    @Test fun catalogReflectsRoomAndExcludesPhoneNumbers() = runBlocking {
         val database = environment.database
         database.employeeDao().update(database.employeeDao().findById("employee-1")!!.copy(phoneNumbers = "+48 123456789"))
         val catalog = RoomAgentDataSource(database).catalog(1)

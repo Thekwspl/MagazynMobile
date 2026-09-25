@@ -38,6 +38,8 @@ export class CodexWarehouseAgent {
     if (result.toolCalls < 1) throw new Error("CODEX_PROTOCOL_ERROR: Codex nie użył narzędzi katalogu.");
     const snapshot = this.catalog();
     const response = result.response;
+    if (response.status === "proposal")
+      throw new Error("CODEX_PROTOCOL_ERROR: propozycja wymaga wcześniejszego odczytu bieżącego stanu.");
     if (response.recipient && !(response.recipient.kind === "person"
       ? snapshot.people.some(p => p.id === response.recipient!.id)
       : snapshot.shipyards.some(s => s.id === response.recipient!.id)))
@@ -97,6 +99,8 @@ export class CodexWarehouseAgent {
       if (result.threadId !== state.threadId || result.response.sessionId !== sessionId)
         throw new Error("CODEX_PROTOCOL_ERROR: niezgodny threadId lub sessionId po wyborze.");
       const response = result.response;
+      if (response.status === "proposal")
+        throw new Error("CODEX_PROTOCOL_ERROR: propozycja po wyborze wymaga wcześniejszego odczytu bieżącego stanu.");
       const snapshot = this.catalog();
       if (response.recipient && !(response.recipient.kind === "person"
         ? snapshot.people.some(p => p.id === response.recipient!.id)
@@ -105,8 +109,6 @@ export class CodexWarehouseAgent {
       if (response.items.some(item => !snapshot.products.some(p => p.id === item.productId && !p.hidden)) ||
         response.needsData.some(req => req.arguments.productIds.some(id => !response.items.some(item => item.productId === id))))
         throw new Error("CODEX_PROTOCOL_ERROR: nieznany produkt po wyborze.");
-      if (response.status === "proposal" && response.items.some(item => item.available == null))
-        throw new Error("CODEX_PROTOCOL_ERROR: propozycja wymaga bieżącego stanu.");
       state.response = response;
       return response;
     } finally { state.busy = false; }
