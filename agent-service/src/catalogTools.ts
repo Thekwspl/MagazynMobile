@@ -14,7 +14,10 @@ export function searchCatalog(catalog: CatalogSnapshot, tool: SearchTool, query:
     [p.name, [p.name, p.variant].filter(Boolean).join(" "), p.variant ?? "", ...(p.aliases ?? []), ...(p.tags ?? [])]
       .some(s => normalize(s).includes(q))).slice(0, 20).map(p => ({ ...p }));
   if (tool === "search_shipyards") return catalog.shipyards.filter(p =>
-    [p.name, ...(p.aliases ?? []), ...(p.tags ?? []), ...(p.leaders ?? [])].some(s => normalize(s).includes(q))).slice(0, 20).map(p => ({ ...p }));
+    [p.name, ...(p.aliases ?? []), ...(p.tags ?? []), ...(p.leaders ?? []),
+      ...catalog.people.filter(person => (p.leaders ?? []).includes(person.id)).flatMap(person =>
+        [`${person.firstName} ${person.lastName}`, person.lastName, ...(person.aliases ?? [])])]
+      .some(s => normalize(s).includes(q))).slice(0, 20).map(p => ({ ...p }));
   if (tool === "search_task_places") return catalog.taskPlaces.filter(p =>
     [p.name, ...(p.aliases ?? [])].some(s => normalize(s).includes(q))).slice(0, 20).map(p => ({ ...p }));
   throw new Error("Nieznane narzędzie katalogu.");

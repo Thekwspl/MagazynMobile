@@ -396,6 +396,7 @@ interface MovementDao {
         LEFT JOIN issue_amendments a ON a.id = (SELECT ia.id FROM issue_amendments ia WHERE ia.originalLineId = l.id ORDER BY ia.createdAtEpochMillis DESC,ia.id DESC LIMIT 1)
         JOIN products p ON p.id = COALESCE(a.replacementProductId,l.productId)
         WHERE m.employeeId = :employeeId AND m.type IN ('ISSUE','HISTORICAL_ISSUE_IMPORT') AND COALESCE(a.isDeleted,0) = 0
+          AND (CASE WHEN a.id IS NULL THEN -l.quantityDelta ELSE a.replacementQuantity END) > 0
         ORDER BY COALESCE(a.replacementDate,m.effectiveDate) DESC,m.createdAtEpochMillis DESC,l.id DESC LIMIT :limit
     """)
     suspend fun agentPersonIssues(employeeId: String, limit: Int): List<AgentIssue>
@@ -404,7 +405,7 @@ interface MovementDao {
         SELECT l.id AS lineId,m.id AS movementId,l.productId,p.unit,-l.quantityDelta AS quantity,m.effectiveDate AS issuedDate
         FROM stock_movements m JOIN stock_movement_lines l ON l.movementId = m.id
         JOIN products p ON p.id = l.productId
-        WHERE m.employeeId IS NULL AND m.shipyardId = :shipyardId AND m.type = 'SHIPYARD_ISSUE'
+        WHERE m.employeeId IS NULL AND m.shipyardId = :shipyardId AND m.type = 'SHIPYARD_ISSUE' AND l.quantityDelta < 0
         ORDER BY m.effectiveDate DESC,m.createdAtEpochMillis DESC,l.id DESC LIMIT :limit
     """)
     suspend fun agentShipyardIssues(shipyardId: String, limit: Int): List<AgentIssue>
@@ -414,6 +415,7 @@ interface MovementDao {
         FROM stock_movements m JOIN stock_movement_lines l ON l.movementId = m.id
         JOIN products p ON p.id = l.productId
         WHERE m.employeeId IS NULL AND m.shipyardId IS NULL AND m.type = 'SHIPYARD_ISSUE' AND m.recipientLabel IN (:labels)
+          AND l.quantityDelta < 0
         ORDER BY m.effectiveDate DESC,m.createdAtEpochMillis DESC,l.id DESC LIMIT :limit
     """)
     suspend fun agentLegacyShipyardIssues(labels: List<String>, limit: Int): List<AgentIssue>

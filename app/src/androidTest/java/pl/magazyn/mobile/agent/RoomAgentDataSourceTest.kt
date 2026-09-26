@@ -16,6 +16,7 @@ import pl.magazyn.mobile.data.StockMovementEntity
 import pl.magazyn.mobile.data.StockMovementLineEntity
 import pl.magazyn.mobile.data.CustodyEntity
 import pl.magazyn.mobile.data.OrderEntity
+import pl.magazyn.mobile.data.OrderNotebookEntity
 import pl.magazyn.mobile.data.OrderLineEntity
 import pl.magazyn.mobile.data.ProductEntity
 import pl.magazyn.mobile.data.IssueReturnEntity
@@ -70,10 +71,12 @@ class RoomAgentDataSourceTest {
         db.movementDao().insertIssueReturn(IssueReturnEntity("return-1", "l1", 1.0, "2026-01-02", 3))
         db.movementDao().insertMovement(StockMovementEntity("y1", "SHIPYARD_ISSUE", "warehouse-main", null, "Ulstein", "2026-01-01", 1, shipyardId = "yard-1"))
         db.movementDao().insertLine(StockMovementLineEntity("yl1", "y1", "product-1", -4.0, "szt."))
+        db.notebookDao().insertNotebook(OrderNotebookEntity("notebook", "Tekst", "VERIFIED", "ORDER", 1))
         db.orderDao().upsertOrders(listOf(
             OrderEntity("o1", null, "employee-1", "Jan", null, "DRAFT", "2026-03-01", 1),
             OrderEntity("o2", null, "employee-1", "Jan", null, "CANCELLED", "2026-03-02", 2),
-            OrderEntity("o3", null, null, "Ulstein", "Ulstein", "DRAFT", "2026-03-03", 3, "yard-1"),
+            OrderEntity("o3", "notebook", null, "Ulstein", "Ulstein", "DRAFT", "2026-03-03", 3, "yard-1"),
+            OrderEntity("o4", "notebook", null, "Ulstein", "Ulstein", "DRAFT", "2026-03-03", 4, "yard-1"),
         ))
         db.orderDao().upsertLines(listOf(OrderLineEntity("ol1", "o1", "product-1", "Produkt", 2.0, "szt.", "VERIFIED")))
         val source = RoomAgentDataSource(db)
@@ -81,7 +84,7 @@ class RoomAgentDataSourceTest {
         assertEquals(listOf("2026-02-01", "2026-01-01"), source.personItems("employee-1").map { it.issuedDate })
         assertEquals(listOf(-3.0, 4.0), source.shipyardStock("yard-1").map { it.quantity })
         assertEquals(listOf("o1"), source.activeOrders(AgentRecipientKey("person", "employee-1")).map { it.orderId })
-        assertEquals(listOf("o3"), source.activeOrders(AgentRecipientKey("shipyard", "yard-1")).map { it.orderId })
+        assertEquals(listOf("notebook"), source.activeOrders(AgentRecipientKey("shipyard", "yard-1")).map { it.orderId })
         assertEquals(2, source.recentIssues(AgentRecipientKey("person", "employee-1"), 20).size)
         assertEquals("l2", source.recentIssues(AgentRecipientKey("person", "employee-1"), 1).single().lineId)
         assertEquals(1, source.recentIssues(AgentRecipientKey("shipyard", "yard-1"), 20).size)

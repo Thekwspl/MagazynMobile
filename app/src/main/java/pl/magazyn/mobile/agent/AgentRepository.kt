@@ -65,7 +65,9 @@ class RoomAgentDataSource(private val database: AppDatabase) : AgentDataSource {
         }
     }
     override suspend fun product(id: String) = database.productDao().findById(id)?.takeUnless { it.isArchived }
-    override suspend fun person(id: String) = database.employeeDao().observeSummaries().first().firstOrNull { it.id == id }
+    override suspend fun person(id: String) = database.employeeDao().findById(id)?.takeUnless { it.isArchived }?.let {
+        EmployeeSummary(it.id, it.fullName, it.firstName, it.lastName, "", "", "", "")
+    }
     override suspend fun shipyard(id: String) = database.shipyardDao().findActive(id)
 
     override suspend fun personItems(id: String): List<AgentPossession> {

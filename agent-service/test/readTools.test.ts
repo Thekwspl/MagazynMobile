@@ -41,8 +41,8 @@ test("five discriminated requests and minimal results validate; hostile shapes f
 });
 
 test("catalog shipyard search uses aliases tags leader IDs and returns stable ID", () => {
-  const catalog = { revision: 1, people: [], products: [], taskPlaces: [], shipyards: [{ id: "s", name: "Ulstein", aliases: ["Elektro"], tags: ["pokład"], leaders: ["p"] }] };
-  for (const query of ["Ulstein", "Elektro", "pokład", "p"])
+  const catalog = { revision: 1, people: [{ id: "p", firstName: "Jan", lastName: "Kowalski" }], products: [], taskPlaces: [], shipyards: [{ id: "s", name: "Ulstein", aliases: ["Elektro"], tags: ["pokład"], leaders: ["p"] }] };
+  for (const query of ["Ulstein", "Elektro", "pokład", "p", "Kowalski"])
     assert.equal((searchCatalog(catalog, "search_shipyards", query)[0] as { id: string }).id, "s");
 });
 
