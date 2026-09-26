@@ -122,6 +122,47 @@ class RoomAgentDataSourceTest {
         assertEquals("product-1", repository.review(result).items.single().productId)
     }
 
+    @Test fun sessionReadsRealShipyardStockBeforeProposal() = runBlocking {
+        val db = environment.database
+        db.shipyardDao().insert(ShipyardEntity("yard-1", "Ulstein"))
+        db.shipyardDao().upsertStock(ShipyardStockBalanceEntity("yard-1", "product-1", -4.0))
+        val client = object : AgentClient {
+            override suspend fun authStatus() = JSONObject().put("account", JSONObject().put("type", "chatgpt"))
+            override suspend fun fullSync(catalog: JSONObject) { }
+            override suspend fun message(text: String) = reply("needs_data", JSONArray()
+                .put(request("yard-request", "get_shipyard_stock", JSONObject().put("shipyardId", "yard-1"))))
+            override suspend fun toolResults(sessionId: String, results: JSONObject): AgentReply {
+                assertEquals("same-session", sessionId)
+                val answer = results.getJSONArray("results").getJSONObject(0)
+                assertEquals("yard-request", answer.getString("requestId"))
+                assertEquals("get_shipyard_stock", answer.getString("tool"))
+                assertEquals(-4.0, answer.getJSONObject("data").getJSONArray("stocks").getJSONObject(0).getDouble("quantity"), 0.0)
+                return reply("proposal", JSONArray())
+            }
+            override suspend fun choice(sessionId: String, candidateId: String): AgentReply = error("Unexpected choice")
+        }
+        assertEquals(AgentStatus.PROPOSAL, AgentRepository(client, RoomAgentDataSource(db)) { 1 }.analyze("Na Ulstein").status)
+    }
+
+    @Test fun manualShipyardAssignmentOverridesUncertainHistoricalLabelsWithoutChangingThem() = runBlocking {
+        val db = environment.database
+        db.shipyardDao().insert(ShipyardEntity("yard-1", "Ulstein", aliases = "Stara"))
+        db.shipyardDao().insert(ShipyardEntity("yard-2", "Vard", aliases = "Stara"))
+        db.orderDao().upsertOrders(listOf(OrderEntity("o", null, null, "Stara", "Stara", "DRAFT", "2026-01-01", 1)))
+        db.movementDao().insertMovement(StockMovementEntity("m", "SHIPYARD_ISSUE", "warehouse-main", null, "Stara", "2026-01-01", 1))
+        db.movementDao().insertLine(StockMovementLineEntity("l", "m", "product-1", -2.0, "szt."))
+        val source = RoomAgentDataSource(db)
+        assertTrue(source.activeOrders(AgentRecipientKey("shipyard", "yard-1")).isEmpty())
+        assertTrue(source.recentIssues(AgentRecipientKey("shipyard", "yard-1"), 20).isEmpty())
+        assertEquals(1, db.orderDao().assignShipyard("o", "yard-2"))
+        assertEquals(1, db.movementDao().assignShipyard("m", "yard-2"))
+        assertEquals("Stara", db.orderDao().findById("o")!!.recipientLabel)
+        assertEquals("Stara", db.movementDao().findMovement("m")!!.recipientLabel)
+        assertEquals("yard-2", db.orderDao().findById("o")!!.shipyardId)
+        assertEquals(listOf("o"), source.activeOrders(AgentRecipientKey("shipyard", "yard-2")).map { it.orderId })
+        assertEquals(listOf("l"), source.recentIssues(AgentRecipientKey("shipyard", "yard-2"), 20).map { it.lineId })
+    }
+
     private fun request(id: String, tool: String, args: JSONObject) = JSONObject().put("id", id).put("tool", tool).put("arguments", args)
     private fun reply(status: String, reads: JSONArray) = AgentProtocol.parse(JSONObject().put("schemaVersion", 1)
         .put("sessionId", "same-session").put("status", status).put("intent", "ORDER")

@@ -10,8 +10,6 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -286,6 +284,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 if (order.status != "DRAFT") return@withTransaction true
                 val shipyard = if (selectedEmployeeId == null) selectedShipyardName?.let { label ->
                     database.shipyardDao().getAllNow().firstOrNull { it.name.equals(label, true) && !it.isArchived }
+                        ?: order.shipyardId?.let { database.shipyardDao().findActive(it) }
                 } else null
                 if (selectedEmployeeId == null && shipyard == null) return@withTransaction true
                 val allLines = database.orderDao().getLinesNow(orderId)

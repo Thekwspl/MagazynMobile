@@ -315,7 +315,9 @@ private fun OrderDetails(
     val lines by remember(order.id) { linesFlow() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val changes by remember(order.id) { changesFlow() }.collectAsStateWithLifecycle(initialValue = emptyList())
     var employeeId by rememberSaveable(order.id) { mutableStateOf(order.employeeId) }
-    var shipyardName by rememberSaveable(order.id) { mutableStateOf(order.siteLabel.takeIf { order.employeeId == null }) }
+    var shipyardName by rememberSaveable(order.id) { mutableStateOf(
+        shipyards.firstOrNull { it.id == order.shipyardId }?.name ?: order.siteLabel.takeIf { order.employeeId == null }
+    ) }
     var date by rememberSaveable(order.id) { mutableStateOf(order.plannedIssueDate) }
     var showRecipientPicker by remember { mutableStateOf(false) }
     var showNewPerson by remember { mutableStateOf(false) }

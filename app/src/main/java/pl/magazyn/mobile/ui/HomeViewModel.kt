@@ -491,9 +491,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     .forEach { (recipient, items) ->
                         val recipientKey = ImportParser.key(recipient)
                         val fixedRecipientId = items.mapNotNull { it.recipientId?.takeIf { _ -> it.recipientName == recipient } }.distinct().singleOrNull()
-                        val employee = employees.firstOrNull { it.id == fixedRecipientId && items.any { item -> item.recipientKind == "person" } } ?: employees.firstOrNull {
+                        val explicitYard = items.any { it.recipientKind == "shipyard" && it.recipientId == fixedRecipientId }
+                        val employee = if (explicitYard) null else (employees.firstOrNull { it.id == fixedRecipientId && items.any { item -> item.recipientKind == "person" } } ?: employees.firstOrNull {
                             ImportParser.key(it.fullName) == recipientKey || it.aliases.split(',').any { alias -> ImportParser.key(alias) == recipientKey }
-                        }
+                        })
                         val recipientShipyard = activeShipyards.firstOrNull { it.id == fixedRecipientId && items.any { item -> item.recipientKind == "shipyard" } }
                             ?: activeShipyards.firstOrNull { ImportParser.key(it.name) == recipientKey }
                         val orderId = UUID.randomUUID().toString()
