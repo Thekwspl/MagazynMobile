@@ -12,7 +12,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -64,17 +63,7 @@ fun PeopleScreen(
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(visible, key = { it.id }) { person ->
                 OutlinedCard(onClick = { selectedId = person.id }, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Person, null)
-                        Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                                Text(person.listDisplayName(), Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                                if (person.hrappkaDoNotHire) Text("Nie zatrudniać", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                                PersonPhoneAction(person.phoneNumbers)
-                            }
-                            if (person.positions.isNotBlank()) Text(person.positions, style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
+                    PersonRow(person)
                 }
             }
         }

@@ -56,7 +56,7 @@ class Migration17To24Test {
         }
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
-            .addMigrations(MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24)
+            .addMigrations(MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25)
             .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -102,11 +102,11 @@ class Migration17To24Test {
         }
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
-            .addMigrations(MIGRATION_22_23, MIGRATION_23_24)
+            .addMigrations(MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25)
             .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
-            assertEquals(24, scalarInt(sqlite, "PRAGMA user_version"))
+            assertEquals(25, scalarInt(sqlite, "PRAGMA user_version"))
             assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM employees WHERE id='employee-22' AND hrappkaId IS NULL AND hrappkaExternalId IS NULL AND hrappkaDoNotHire=0"))
             assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM stock_movements WHERE id='movement-22'"))
             assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM stock_movement_lines WHERE id='line-22'"))
@@ -146,11 +146,11 @@ class Migration17To24Test {
         }
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
-            .addMigrations(MIGRATION_23_24)
+            .addMigrations(MIGRATION_23_24, MIGRATION_24_25)
             .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
-            assertEquals(24, scalarInt(sqlite, "PRAGMA user_version"))
+            assertEquals(25, scalarInt(sqlite, "PRAGMA user_version"))
             assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM employee_hrappka_links WHERE hrappkaId=111 AND employeeId='employee-a' AND externalId='ABC' AND doNotHire=0"))
             assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM employee_hrappka_phones WHERE hrappkaId=111 AND employeeId='employee-a'"))
             assertEquals(1, scalarInt(sqlite, "SELECT COUNT(*) FROM employees WHERE id='employee-a' AND firstName='Piotr' AND lastName='Pawłowski' AND fullName='Piotr Pawłowski' AND phoneNumbers='+48 500 000 001' AND tags='tag' AND hrappkaId IS NULL AND hrappkaExternalId IS NULL AND hrappkaDoNotHire=0"))

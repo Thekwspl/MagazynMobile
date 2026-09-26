@@ -49,6 +49,7 @@ fun HomeScreen(
     val people by viewModel.people.collectAsStateWithLifecycle()
     val hrappkaAttentionEmployees by viewModel.hrappkaAttentionEmployees.collectAsStateWithLifecycle()
     val aiAnalysis by viewModel.aiAnalysis.collectAsStateWithLifecycle()
+    val codexAnalysis by viewModel.codexAnalysis.collectAsStateWithLifecycle()
     val duplicateDecisions by viewModel.duplicateDecisions.collectAsStateWithLifecycle()
     val query by viewModel.quickInput.collectAsStateWithLifecycle()
     val openTasks = remember(tasks) { tasks.filterNot { it.isCompleted } }
@@ -73,6 +74,13 @@ fun HomeScreen(
             onReview()
         }
     }
+    LaunchedEffect(codexAnalysis.result) {
+        codexAnalysis.result?.let {
+            viewModel.openReview(it)
+            viewModel.consumeCodexResult()
+            onReview()
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(contentPadding),
@@ -89,11 +97,16 @@ fun HomeScreen(
                         onChange = viewModel::updateQuickInput,
                         aiLoading = aiAnalysis.isLoading,
                         aiError = aiAnalysis.error,
+                        codexLoading = codexAnalysis.isLoading,
+                        codexError = codexAnalysis.error,
+                        codexChoice = codexAnalysis.reply,
                         onRecognizeLocal = {
                             viewModel.openReview(viewModel.recognize(query))
                             onReview()
                         },
                         onRecognizeAi = { viewModel.analyzeWithAi(query) },
+                        onRecognizeCodex = { viewModel.analyzeWithCodex(query) },
+                        onChooseCodex = viewModel::chooseCodexCandidate,
                     )
                     QuickButtons(
                         onNewOrder = {
@@ -241,7 +254,7 @@ fun ParsedNoteReviewScreen(
                         style = MaterialTheme.typography.titleLarge,
                     )
                     Text(
-                        if (note.analyzedByAi) "Propozycja AI · sprawdź każdą pozycję" else "Sprawdź dane przed zapisaniem",
+                        if (note.agentProposal) "Propozycja Codex · sprawdź każdą pozycję" else if (note.analyzedByAi) "Propozycja Gemini · sprawdź każdą pozycję" else "Sprawdź dane przed zapisaniem",
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
@@ -322,8 +335,13 @@ private fun SmartInput(
     onChange: (String) -> Unit,
     aiLoading: Boolean,
     aiError: String?,
+    codexLoading: Boolean,
+    codexError: String?,
+    codexChoice: pl.magazyn.mobile.agent.AgentReply?,
     onRecognizeLocal: () -> Unit,
     onRecognizeAi: () -> Unit,
+    onRecognizeCodex: () -> Unit,
+    onChooseCodex: (String) -> Unit,
 ) {
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(11.dp)) {
@@ -337,17 +355,30 @@ private fun SmartInput(
                 placeholder = { Text("Wklej zamówienie, zadanie albo wpisz osobę, miejsce lub przedmiot…") },
             )
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onRecognizeLocal, enabled = value.isNotBlank() && !aiLoading, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = onRecognizeLocal, enabled = value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.weight(1f)) {
                     Text(if (pl.magazyn.mobile.domain.TaskTextParser().looksLikeTask(value)) "Utwórz zadanie z tekstu" else "Offline")
                 }
-                Button(onClick = onRecognizeAi, enabled = value.isNotBlank() && !aiLoading, modifier = Modifier.weight(1f)) {
+                Button(onClick = onRecognizeAi, enabled = value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.weight(1f)) {
                     if (aiLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     else Icon(Icons.Default.AutoAwesome, null)
                     Spacer(Modifier.width(5.dp))
-                    Text(if (aiLoading) "Analizuję" else "Analizuj AI")
+                    Text(if (aiLoading) "Analizuję" else "Gemini")
                 }
             }
+            OutlinedButton(onClick = onRecognizeCodex, enabled = value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.fillMaxWidth().padding(top = 5.dp)) {
+                if (codexLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Text(if (codexLoading) " Analizuję w Codex…" else "Codex")
+            }
             aiError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
+            codexError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
+            if (codexChoice?.status == pl.magazyn.mobile.agent.AgentStatus.NEEDS_USER_CHOICE) {
+                codexChoice.questions.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                codexChoice.candidates.forEach { candidate ->
+                    OutlinedButton(onClick = { onChooseCodex(candidate.id) }, enabled = !codexLoading, modifier = Modifier.fillMaxWidth()) {
+                        Text("${candidate.label} (${candidate.kind})")
+                    }
+                }
+            }
             Text("AI tworzy tylko propozycję — niczego nie zapisuje automatycznie.", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
         }
     }
@@ -681,6 +712,7 @@ private fun ParsedNoteReviewContent(
     val addedPhones = remember(note) { mutableStateListOf<String>() }
     val sourceItems = remember(note) { mutableStateListOf<pl.magazyn.mobile.domain.ParsedItem>().apply { addAll(note.items) } }
     val editedItems = remember(note) { mutableStateListOf<pl.magazyn.mobile.domain.ParsedItem>().apply { addAll(note.items) } }
+    val itemKeys = remember(note) { mutableStateListOf<String>().apply { note.items.forEachIndexed { index, item -> add(recognizedItemKey(item, index)) } } }
     val approvedItems = remember(note) { mutableStateMapOf<Int, Boolean>().apply { note.items.indices.forEach { put(it, true) } } }
     val quantityTexts = remember(note) { mutableStateMapOf<Int, String>().apply { note.items.forEachIndexed { index, item -> put(index, item.quantity.toString()) } } }
     val tagTexts = remember(note) { mutableStateMapOf<Int, String>() }
@@ -694,6 +726,7 @@ private fun ParsedNoteReviewContent(
     var plannedIssueDate by rememberSaveable(note) { mutableStateOf(note.suggestedIssueDate ?: java.time.LocalDate.now().toString()) }
     var showPlannedDatePicker by remember { mutableStateOf(false) }
     val recognizedShipyard = shipyardName?.let { name -> shipyards.firstOrNull { it.name.equals(name, true) } }
+    val productIndex = remember(products) { RecognizedProductIndex(products) }
     LazyColumn(
         Modifier.fillMaxSize().imePadding(),
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
@@ -713,6 +746,7 @@ private fun ParsedNoteReviewContent(
             ReviewRow(name, note.person?.position?.let { p -> "stanowisko: $p" } ?: "rozpoznana osoba")
         }
         if (note.kind == ParsedInputKind.ORDER) {
+            if (note.agentProposal) Text("Propozycja Codex — sprawdź odbiorcę, produkty i dostępność przed zapisaniem szkicu.", color = MaterialTheme.colorScheme.primary)
             Text("Domyślny odbiorca", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = !defaultRecipientIsShipyard, onClick = { defaultRecipientIsShipyard = false; defaultRecipientName = "" }, label = { Text("Osoba") }, leadingIcon = if (!defaultRecipientIsShipyard) { { Icon(Icons.Default.Person, null) } } else null)
@@ -741,7 +775,7 @@ private fun ParsedNoteReviewContent(
             OutlinedButton(
                 onClick = {
                     val recipient = defaultRecipientName.trim().takeIf(String::isNotBlank) ?: return@OutlinedButton
-                    editedItems.indices.filter { editedItems[it].recipientName.isNullOrBlank() }.forEach { i -> editedItems[i] = editedItems[i].copy(recipientName = recipient) }
+                    editedItems.indices.filter { editedItems[it].recipientName.isNullOrBlank() }.forEach { i -> editedItems[i] = editedItems[i].copy(recipientName = recipient, recipientId = null, recipientKind = null) }
                 },
                 enabled = defaultRecipientName.isNotBlank(), modifier = Modifier.fillMaxWidth(),
             ) { Text("Zastosuj do wszystkich bez odbiorcy") }
@@ -784,13 +818,14 @@ private fun ParsedNoteReviewContent(
         }
         itemsIndexed(
             items = editedItems,
-            key = { index, _ -> index },
+            key = { index, _ -> itemKeys.getOrElse(index) { "recognized-item-$index" } },
         ) { index, item ->
             // Dopasowanie katalogu jest najcięższą częścią tego ekranu. Liczymy je ponownie
             // tylko po zmianie nazwy/wariantu lub katalogu, nie po każdej zmianie ilości,
             // odbiorcy, checkboxa ani po zwykłej recomposition całej listy.
-            val productMatches = remember(item.name, item.variant, products, note.analyzedByAi) {
-                matchingProducts(item, products, strictOfflineMatching = !note.analyzedByAi)
+            val productMatches = remember(item.name, item.variant, item.productId, productIndex, note.analyzedByAi) {
+                item.productId?.let { id -> products.filter { it.id == id } }
+                    ?: productIndex.matches(item, strictOfflineMatching = !note.analyzedByAi)
             }
             val productMatch = productMatches.singleOrNull()
             val recipientQuery = item.recipientName.orEmpty()
@@ -798,31 +833,21 @@ private fun ParsedNoteReviewContent(
             val personMatch = remember(recipientQuery, people) { recognizedPerson(recipientQuery, people) }
             val shipyardMatches = remember(recipientQuery, shipyards) { matchingShipyards(recipientQuery, shipyards) }
             val recipientShipyard = remember(recipientQuery, shipyards) { recognizedRecipientShipyard(recipientQuery, shipyards) }
-            val details = listOfNotNull(
-                item.recipientName?.let { name -> "dla: ${personMatch?.listDisplayName() ?: recipientShipyard?.name ?: name}" }
-                    ?: recognizedShipyard?.let { "dla stoczni: ${it.name} (domyślnie)" },
-                item.variant?.let { v -> "rozmiar $v" },
-                formatWholeQuantity(item.quantity) + " " + item.unit,
-                item.notes.takeIf(String::isNotBlank),
-            ).joinToString(" · ")
             Column {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(approvedItems[index] == true, { approvedItems[index] = it })
                     Column(Modifier.weight(1f)) {
-                        Text(item.name, fontWeight = FontWeight.SemiBold)
-                        Text(details, style = MaterialTheme.typography.labelMedium)
+                        Text(productTitle(productMatch?.name ?: item.name, productMatch?.variant ?: item.variant), fontWeight = FontWeight.SemiBold)
+                        item.notes.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                         if (productMatches.isEmpty()) Text("Nie rozpoznano przedmiotu", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                         else if (productMatch == null) Text("Kilka pasujących przedmiotów — wybierz właściwy", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                        else {
-                            Text("Proponowany przedmiot", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                            ProductInfo(productMatch.name, productMatch.variant, productMatch.groupName, productMatch.subgroupName)
-                            if (productMatch.isHidden) Text("Ten przedmiot jest ukryty — możesz wybrać inną aktywną pozycję.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                        }
+                        else if (productMatch.isHidden) Text("Ten przedmiot jest ukryty — możesz wybrać inną aktywną pozycję.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                         when {
-                            recipientQuery.isBlank() && defaultRecipientName.isNotBlank() -> Text("Odbiorca domyślny: ${defaultRecipientName}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                            isDefaultRecipient(recipientQuery, defaultRecipientName) -> Unit
+                            recipientQuery.isBlank() && defaultRecipientName.isNotBlank() -> Unit
                             recipientQuery.isBlank() -> Text("Brak odbiorcy przy tej pozycji", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                            personMatch != null -> Text("Osoba: ${personMatch.listDisplayName()}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                            recipientShipyard != null -> Text("Stocznia: ${recipientShipyard.name}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                            personMatch != null -> Text("Odbiorca: ${personMatch.listDisplayName()}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                            recipientShipyard != null -> Text("Odbiorca: ${recipientShipyard.name}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                             else -> {
                                 Text("Nie rozpoznano odbiorcy w bazie", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                                 TextButton(onClick = { newPersonItemIndex = index }) {
@@ -833,8 +858,13 @@ private fun ParsedNoteReviewContent(
                             }
                         }
                     }
-                    TextButton(onClick = { editingItem = if (editingItem == index) null else index }) {
-                        Text(if (editingItem == index) "Zamknij" else "Popraw")
+                    Text(
+                        "${formatWholeQuantity(item.quantity)} ${item.unit}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    IconButton(onClick = { editingItem = if (editingItem == index) null else index }) {
+                        Icon(if (editingItem == index) Icons.Default.Close else Icons.Default.Edit, if (editingItem == index) "Zamknij edycję" else "Popraw")
                     }
                 }
                 if (editingItem == index) {
@@ -843,7 +873,7 @@ private fun ParsedNoteReviewContent(
                         Text("1. Odbiorca", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                         OutlinedTextField(
                             item.recipientName.orEmpty(),
-                            { editedItems[index] = item.copy(recipientName = it.ifBlank { null }) },
+                            { editedItems[index] = item.copy(recipientName = it.ifBlank { null }, recipientId = null, recipientKind = null) },
                             Modifier.fillMaxWidth().keepAboveKeyboard(),
                             label = { Text("Osoba lub stocznia") },
                             placeholder = { defaultRecipientName.takeIf(String::isNotBlank)?.let { Text("Domyślnie: $it") } },
@@ -854,7 +884,7 @@ private fun ParsedNoteReviewContent(
                         if (personMatches.isNotEmpty()) {
                             Text("Proponowane osoby", style = MaterialTheme.typography.labelMedium)
                             SuggestionList(personMatches, key = { it.id }) { person ->
-                                OutlinedButton(onClick = { editedItems[index] = item.copy(recipientName = person.listDisplayName()) }, Modifier.fillMaxWidth()) {
+                                OutlinedButton(onClick = { editedItems[index] = item.copy(recipientName = person.listDisplayName(), recipientId = person.id, recipientKind = "person") }, Modifier.fillMaxWidth()) {
                                     Icon(Icons.Default.Person, null)
                                     Spacer(Modifier.width(6.dp))
                                     Text(person.listDisplayName() + person.positions.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty(), Modifier.weight(1f))
@@ -864,7 +894,7 @@ private fun ParsedNoteReviewContent(
                         if (shipyardMatches.isNotEmpty()) {
                             Text("Proponowane stocznie", style = MaterialTheme.typography.labelMedium)
                             SuggestionList(shipyardMatches, key = { it.id }) { shipyard ->
-                                OutlinedButton(onClick = { editedItems[index] = item.copy(recipientName = shipyard.name) }, Modifier.fillMaxWidth()) {
+                                OutlinedButton(onClick = { editedItems[index] = item.copy(recipientName = shipyard.name, recipientId = shipyard.id, recipientKind = "shipyard") }, Modifier.fillMaxWidth()) {
                                     Icon(Icons.Default.Business, null)
                                     Spacer(Modifier.width(6.dp))
                                     Text(shipyard.name)
@@ -873,11 +903,11 @@ private fun ParsedNoteReviewContent(
                         }
                         HorizontalDivider(Modifier.padding(vertical = 3.dp))
                         Text("2. Przedmiot", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                        OutlinedTextField(item.name, { editedItems[index] = item.copy(name = it) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Nazwa, alias lub tag") })
+                        OutlinedTextField(item.name, { editedItems[index] = item.copy(name = it, productId = null) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Nazwa, alias lub tag") })
                         if (productMatches.isNotEmpty()) {
                             Text("Proponowane przedmioty", style = MaterialTheme.typography.labelMedium)
                             SuggestionList(productMatches, key = { it.id }) { product ->
-                                OutlinedButton(onClick = { editedItems[index] = item.copy(name = product.name, variant = product.variant, unit = product.unit) }, Modifier.fillMaxWidth()) {
+                                OutlinedButton(onClick = { editedItems[index] = item.copy(name = product.name, variant = product.variant, unit = product.unit, productId = product.id) }, Modifier.fillMaxWidth()) {
                                     ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.weight(1f), stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit)
                                 }
                             }
@@ -889,7 +919,7 @@ private fun ParsedNoteReviewContent(
                         HorizontalDivider(Modifier.padding(vertical = 3.dp))
                         Text("3. Szczegóły", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(item.variant.orEmpty(), { editedItems[index] = item.copy(variant = it.ifBlank { null }) }, Modifier.weight(1f).keepAboveKeyboard(), label = { Text("Wariant") })
+                            OutlinedTextField(item.variant.orEmpty(), { editedItems[index] = item.copy(variant = it.ifBlank { null }, productId = null) }, Modifier.weight(1f).keepAboveKeyboard(), label = { Text("Wariant") })
                             OutlinedTextField(
                                 quantityTexts[index].orEmpty(),
                                 { value ->
@@ -902,7 +932,7 @@ private fun ParsedNoteReviewContent(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             )
                         }
-                        OutlinedTextField(item.unit, { editedItems[index] = item.copy(unit = it) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Jednostka") })
+                        OutlinedTextField(item.unit, { editedItems[index] = item.copy(unit = it, productId = null) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Jednostka") })
                         OutlinedTextField(item.notes, { editedItems[index] = item.copy(notes = it) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Uwagi") })
                     }
                     }
@@ -927,6 +957,7 @@ private fun ParsedNoteReviewContent(
                     val newIndex = editedItems.size
                     sourceItems.add(added)
                     editedItems.add(added)
+                    itemKeys.add(recognizedItemKey(added, newIndex))
                     approvedItems[newIndex] = true
                     quantityTexts[newIndex] = "1"
                     editingItem = newIndex
@@ -951,7 +982,7 @@ private fun ParsedNoteReviewContent(
                         onSaveOrder(
                             editedItems.mapIndexedNotNull { index, corrected ->
                             if (approvedItems[index] == true) sourceItems.getOrNull(index)?.let { source ->
-                                val withDefault = if (corrected.recipientName.isNullOrBlank() && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim()) else corrected
+                                val withDefault = if (corrected.recipientName.isNullOrBlank() && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim(), recipientId = null, recipientKind = null) else corrected
                                 val storageRecipient = withDefault.recipientName?.let { recipient -> recognizedPerson(recipient, people)?.fullName ?: recipient }
                                 source to withDefault.copy(recipientName = storageRecipient)
                             } else null
@@ -1073,41 +1104,6 @@ private fun ConfidenceLabel(confidence: pl.magazyn.mobile.domain.ParseConfidence
         pl.magazyn.mobile.domain.ParseConfidence.REVIEW -> "Sprawdź"
     }
     Text(text, color = if (confidence == pl.magazyn.mobile.domain.ParseConfidence.REVIEW) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-}
-
-private fun matchingProducts(
-    item: pl.magazyn.mobile.domain.ParsedItem,
-    products: List<pl.magazyn.mobile.data.ProductWithStock>,
-    strictOfflineMatching: Boolean,
-): List<pl.magazyn.mobile.data.ProductWithStock> {
-    if (!strictOfflineMatching) {
-        val nameKey = pl.magazyn.mobile.domain.ImportParser.key(item.name)
-        val variantKey = pl.magazyn.mobile.domain.ImportParser.key(item.variant.orEmpty())
-        return products.mapNotNull { product ->
-            val labels = listOf(product.name) + product.aliases.split(',') + product.tags.split(',')
-            val nameScore = when {
-                pl.magazyn.mobile.domain.ImportParser.key(product.name) == nameKey -> 4
-                labels.any { pl.magazyn.mobile.domain.ImportParser.key(it) == nameKey } -> 3
-                pl.magazyn.mobile.domain.matchesSearch(item.name, product.name, product.aliases, product.tags) -> 1
-                else -> 0
-            }
-            if (nameScore == 0) null else {
-                val variantMatches = variantKey.isBlank() ||
-                    pl.magazyn.mobile.domain.ImportParser.key(product.variant.orEmpty()) == variantKey ||
-                    (product.aliases.split(',') + product.tags.split(',')).any { pl.magazyn.mobile.domain.ImportParser.key(it) == variantKey }
-                if (!variantMatches) null else product to nameScore
-            }
-        }.sortedWith(compareByDescending<Pair<pl.magazyn.mobile.data.ProductWithStock, Int>> { it.second }.thenBy { it.first.name }.thenBy { it.first.variant.orEmpty() }).map { it.first }
-    }
-    val scored = products.mapNotNull { product ->
-        pl.magazyn.mobile.domain.offlineProductMatchScore(
-            item.name, item.variant, product.name, product.variant, product.aliases, product.tags,
-        )?.let { score -> product to score }
-    }
-    val bestScore = scored.maxOfOrNull { it.second } ?: return emptyList()
-    return scored.filter { it.second == bestScore }
-        .sortedWith(compareBy<Pair<pl.magazyn.mobile.data.ProductWithStock, Int>> { it.first.name }.thenBy { it.first.variant.orEmpty() })
-        .map { it.first }
 }
 
 private fun matchingPeople(query: String, people: List<pl.magazyn.mobile.data.EmployeeSummary>): List<pl.magazyn.mobile.data.EmployeeSummary> {

@@ -19,6 +19,9 @@ data class ParsedItem(
     val confidence: Float,
     val recipientName: String? = null,
     val notes: String = "",
+    val productId: String? = null,
+    val recipientId: String? = null,
+    val recipientKind: String? = null,
 )
 
 enum class ParsedInputKind { ORDER, TASK, CONTACT, NOTE }
@@ -34,6 +37,7 @@ data class ParsedNote(
     val shipyardName: String? = null,
     val suggestedIssueDate: String? = null,
     val taskDraft: ParsedTaskDraft? = null,
+    val agentProposal: Boolean = false,
 )
 
 /**

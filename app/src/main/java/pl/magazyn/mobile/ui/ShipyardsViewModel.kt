@@ -58,6 +58,10 @@ class ShipyardsViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun renameShipyard(id: String, name: String) {
+        updateShipyard(id, name, null, null)
+    }
+
+    fun updateShipyard(id: String, name: String, aliases: String?, tags: String?) {
         val normalized = normalizeDisplayName(name)
         if (normalized.isBlank()) return
         viewModelScope.launch {
@@ -65,7 +69,7 @@ class ShipyardsViewModel(application: Application) : AndroidViewModel(applicatio
             if (all.any { it.id != id && it.name.equals(normalized, true) && !it.isArchived }) return@launch
             val previous = all.firstOrNull { it.id == id } ?: return@launch
             database.withTransaction {
-                database.shipyardDao().updateName(id, normalized)
+                database.shipyardDao().updateDetails(id, normalized, aliases ?: previous.aliases, tags ?: previous.tags)
                 database.shipyardDao().renameOrderSiteLabels(previous.name, normalized)
                 database.shipyardDao().renameOrderRecipients(previous.name, normalized)
                 database.shipyardDao().renameMovementRecipients(previous.name, normalized)
@@ -96,6 +100,7 @@ class ShipyardsViewModel(application: Application) : AndroidViewModel(applicatio
                         effectiveDate = effectiveDate,
                         createdAtEpochMillis = System.currentTimeMillis(),
                         note = "Wydanie dla stoczni",
+                        shipyardId = shipyard.id,
                     ),
                 )
                 resolvedItems.forEach { resolved ->
@@ -132,7 +137,7 @@ class ShipyardsViewModel(application: Application) : AndroidViewModel(applicatio
                 if (valid.any { (database.shipyardDao().findStock(shipyard.id, it.productId)?.quantity ?: 0.0) < it.quantity }) return@withTransaction true
                 val movementId = UUID.randomUUID().toString()
                 database.movementDao().insertMovement(
-                    StockMovementEntity(movementId, "SHIPYARD_RETURN", "warehouse-main", null, shipyard.name, effectiveDate, System.currentTimeMillis(), "Zwrot ze stoczni"),
+                    StockMovementEntity(movementId, "SHIPYARD_RETURN", "warehouse-main", null, shipyard.name, effectiveDate, System.currentTimeMillis(), "Zwrot ze stoczni", shipyard.id),
                 )
                 resolvedItems.forEach { resolved ->
                     val item = resolved.request

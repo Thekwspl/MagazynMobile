@@ -49,6 +49,35 @@ class AiKeyStore(context: Context) {
         secretPreferences.edit().remove(KEY_CIPHERTEXT).remove(KEY_IV).apply()
     }
 
+    /** Reuses the existing Keystore-backed, backup-excluded secret file for the agent credential. */
+    fun saveAgentClientToken(value: String) {
+        val clean = value.trim()
+        require(clean.isNotEmpty() && clean.none(Char::isWhitespace)) { "Token klienta nie może być pusty ani zawierać spacji" }
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey())
+        val encrypted = cipher.doFinal(clean.toByteArray(Charsets.UTF_8))
+        check(secretPreferences.edit()
+            .putString(KEY_AGENT_CIPHERTEXT, Base64.encodeToString(encrypted, Base64.NO_WRAP))
+            .putString(KEY_AGENT_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+            .commit()) { "Nie udało się zapisać tokenu klienta" }
+    }
+
+    fun readAgentClientToken(): String? = runCatching {
+        val encrypted = secretPreferences.getString(KEY_AGENT_CIPHERTEXT, null) ?: return null
+        val iv = secretPreferences.getString(KEY_AGENT_IV, null) ?: return null
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, getOrCreateSecretKey(), GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP)))
+        cipher.doFinal(Base64.decode(encrypted, Base64.NO_WRAP)).toString(Charsets.UTF_8)
+    }.getOrNull()
+
+    fun hasAgentClientToken(): Boolean = readAgentClientToken()?.isNotBlank() == true
+
+    fun clearAgentClientToken() {
+        check(secretPreferences.edit().remove(KEY_AGENT_CIPHERTEXT).remove(KEY_AGENT_IV).commit()) {
+            "Nie udało się usunąć tokenu klienta"
+        }
+    }
+
     var redactPhoneNumbers: Boolean
         get() = settingsPreferences.getBoolean(KEY_REDACT_PHONES, true)
         set(value) { settingsPreferences.edit().putBoolean(KEY_REDACT_PHONES, value).apply() }
@@ -120,6 +149,8 @@ class AiKeyStore(context: Context) {
         const val KEY_ALIAS = "magazyn_mobile_gemini_key"
         const val KEY_CIPHERTEXT = "api_key_ciphertext"
         const val KEY_IV = "api_key_iv"
+        const val KEY_AGENT_CIPHERTEXT = "agent_client_token_ciphertext"
+        const val KEY_AGENT_IV = "agent_client_token_iv"
         const val KEY_REDACT_PHONES = "redact_phone_numbers"
         const val KEY_LAST_ATTEMPT = "last_attempt"
         const val KEY_LAST_SUCCESS = "last_success"

@@ -248,6 +248,12 @@ interface WarehouseDao {
 
 @Dao
 interface ShipyardDao {
+    @Query("SELECT * FROM shipyards WHERE id = :id AND isArchived = 0 LIMIT 1")
+    suspend fun findActive(id: String): ShipyardEntity?
+
+    @Query("UPDATE shipyards SET name = :name, aliases = :aliases, tags = :tags WHERE id = :id")
+    suspend fun updateDetails(id: String, name: String, aliases: String, tags: String)
+
     @Query("SELECT * FROM shipyards WHERE isArchived = 0 ORDER BY name")
     fun observeAll(): Flow<List<ShipyardEntity>>
 
@@ -304,7 +310,17 @@ interface ShipyardDao {
         ORDER BY p.name, p.variant
     """)
     fun observeStock(shipyardId: String): Flow<List<ShipyardStockItem>>
+
+    @Query("""
+        SELECT b.productId, p.unit, b.quantity FROM shipyard_stock_balances b
+        JOIN products p ON p.id = b.productId
+        WHERE b.shipyardId = :shipyardId AND b.quantity != 0
+        ORDER BY b.productId LIMIT 100
+    """)
+    suspend fun agentStock(shipyardId: String): List<AgentShipyardStock>
 }
+
+data class AgentShipyardStock(val productId: String, val unit: String, val quantity: Double)
 
 data class ShipyardStockItem(
     val productId: String,
@@ -357,6 +373,61 @@ data class NegativeStockItem(
 
 @Dao
 interface MovementDao {
+    @Query("UPDATE stock_movements SET shipyardId = :shipyardId WHERE id = :movementId AND employeeId IS NULL AND type IN ('SHIPYARD_ISSUE','SHIPYARD_RETURN','HISTORICAL_SHIPYARD_IMPORT','HISTORICAL_ISSUE_IMPORT')")
+    suspend fun assignShipyard(movementId: String, shipyardId: String): Int
+
+    @Query("SELECT * FROM stock_movements WHERE id = :movementId LIMIT 1")
+    suspend fun findMovement(movementId: String): StockMovementEntity?
+
+    @Query("""
+        SELECT c.productId, p.unit, c.quantity, c.issuedDate FROM custodies c
+        JOIN products p ON p.id = c.productId
+        WHERE c.employeeId = :employeeId AND c.returnedDate IS NULL
+        ORDER BY c.issuedDate DESC, c.id LIMIT 100
+    """)
+    suspend fun agentCustodies(employeeId: String): List<AgentCustody>
+
+    @Query("""
+        SELECT l.id AS lineId, m.id AS movementId,
+          COALESCE(a.replacementProductId,l.productId) AS productId, p.unit AS unit,
+          CASE WHEN a.id IS NULL THEN -l.quantityDelta ELSE a.replacementQuantity END AS quantity,
+          COALESCE(a.replacementDate,m.effectiveDate) AS issuedDate
+        FROM stock_movements m JOIN stock_movement_lines l ON l.movementId = m.id
+        LEFT JOIN issue_amendments a ON a.id = (SELECT ia.id FROM issue_amendments ia WHERE ia.originalLineId = l.id ORDER BY ia.createdAtEpochMillis DESC,ia.id DESC LIMIT 1)
+        JOIN products p ON p.id = COALESCE(a.replacementProductId,l.productId)
+        WHERE m.employeeId = :employeeId AND m.type IN ('ISSUE','HISTORICAL_ISSUE_IMPORT') AND COALESCE(a.isDeleted,0) = 0
+          AND (CASE WHEN a.id IS NULL THEN -l.quantityDelta ELSE a.replacementQuantity END) > 0
+        ORDER BY COALESCE(a.replacementDate,m.effectiveDate) DESC,m.createdAtEpochMillis DESC,l.id DESC LIMIT :limit
+    """)
+    suspend fun agentPersonIssues(employeeId: String, limit: Int): List<AgentIssue>
+
+    @Query("""
+        SELECT l.id AS lineId,m.id AS movementId,l.productId,p.unit,-l.quantityDelta AS quantity,m.effectiveDate AS issuedDate
+        FROM stock_movements m JOIN stock_movement_lines l ON l.movementId = m.id
+        JOIN products p ON p.id = l.productId
+        WHERE m.employeeId IS NULL AND m.shipyardId = :shipyardId
+          AND m.type IN ('SHIPYARD_ISSUE','HISTORICAL_ISSUE_IMPORT') AND l.quantityDelta < 0
+        ORDER BY m.effectiveDate DESC,m.createdAtEpochMillis DESC,l.id DESC LIMIT :limit
+    """)
+    suspend fun agentShipyardIssues(shipyardId: String, limit: Int): List<AgentIssue>
+
+    @Query("""
+        SELECT l.id AS lineId,m.id AS movementId,l.productId,p.unit,-l.quantityDelta AS quantity,m.effectiveDate AS issuedDate
+        FROM stock_movements m JOIN stock_movement_lines l ON l.movementId = m.id
+        JOIN products p ON p.id = l.productId
+        WHERE m.employeeId IS NULL AND m.shipyardId IS NULL
+          AND m.type IN ('SHIPYARD_ISSUE','HISTORICAL_ISSUE_IMPORT') AND m.recipientLabel IN (:labels)
+          AND l.quantityDelta < 0
+        ORDER BY m.effectiveDate DESC,m.createdAtEpochMillis DESC,l.id DESC LIMIT :limit
+    """)
+    suspend fun agentLegacyShipyardIssues(labels: List<String>, limit: Int): List<AgentIssue>
+
+    @Query("""
+        SELECT DISTINCT m.id,m.recipientLabel FROM stock_movements m
+        WHERE m.employeeId IS NULL AND m.shipyardId IS NULL AND m.type = 'SHIPYARD_ISSUE' AND m.recipientLabel IN (:labels)
+        LIMIT :limit
+    """)
+    suspend fun legacyShipyardMovements(labels: List<String>, limit: Int): List<AgentLegacyMovement>
     @Insert
     suspend fun insertMovement(item: StockMovementEntity)
 
@@ -394,7 +465,7 @@ interface MovementDao {
     suspend fun returnedQuantityForLine(lineId: String): Double
 
     @Query("""
-        SELECT m.id, m.type, m.effectiveDate, m.createdAtEpochMillis, m.note,
+        SELECT m.id, m.type, m.employeeId, m.shipyardId, m.recipientLabel, m.effectiveDate, m.createdAtEpochMillis, m.note,
                COALESCE(w.name, '') AS warehouseName,
                COALESCE(GROUP_CONCAT(DISTINCT p.category), '') AS categories,
                COALESCE(GROUP_CONCAT(DISTINCT p.tags), '') AS tags,
@@ -473,6 +544,9 @@ data class EmployeePossession(
 data class HistoryEntry(
     val id: String,
     val type: String,
+    val employeeId: String?,
+    val shipyardId: String?,
+    val recipientLabel: String,
     val effectiveDate: String,
     val createdAtEpochMillis: Long,
     val note: String,
@@ -483,6 +557,10 @@ data class HistoryEntry(
     val categories: String,
     val tags: String,
 )
+
+data class AgentCustody(val productId: String, val unit: String, val quantity: Double, val issuedDate: String)
+data class AgentIssue(val lineId: String, val movementId: String, val productId: String, val unit: String, val quantity: Double, val issuedDate: String)
+data class AgentLegacyMovement(val id: String, val recipientLabel: String)
 
 data class HistoryLine(
     val id: String,
@@ -557,11 +635,29 @@ interface ProductDictionaryDao {
 
 @Dao
 interface OrderDao {
+    @Query("SELECT * FROM orders WHERE employeeId IS NULL AND status IN ('ISSUED','CANCELLED') AND (recipientLabel LIKE '%' || :query || '%' OR siteLabel LIKE '%' || :query || '%' OR id LIKE :query || '%') ORDER BY createdAtEpochMillis DESC LIMIT 50")
+    suspend fun searchHistoricalShipyardOrders(query: String): List<OrderEntity>
+
+    @Query("UPDATE orders SET shipyardId = :shipyardId WHERE id = :orderId AND employeeId IS NULL")
+    suspend fun assignShipyard(orderId: String, shipyardId: String): Int
+
+    @Query("SELECT * FROM orders WHERE employeeId = :employeeId AND status NOT IN ('ISSUED','CANCELLED') ORDER BY createdAtEpochMillis DESC LIMIT 20")
+    suspend fun agentPersonOrders(employeeId: String): List<OrderEntity>
+
+    @Query("SELECT * FROM orders WHERE employeeId IS NULL AND shipyardId = :shipyardId AND status NOT IN ('ISSUED','CANCELLED') ORDER BY createdAtEpochMillis DESC LIMIT 20")
+    suspend fun agentShipyardOrders(shipyardId: String): List<OrderEntity>
+
+    @Query("SELECT * FROM orders WHERE employeeId IS NULL AND shipyardId IS NULL AND status NOT IN ('ISSUED','CANCELLED') AND recipientLabel IN (:labels) ORDER BY createdAtEpochMillis DESC LIMIT 20")
+    suspend fun agentLegacyShipyardOrders(labels: List<String>): List<OrderEntity>
+
+    @Query("SELECT productId,quantity,unit FROM order_lines WHERE orderId = :orderId AND productId IS NOT NULL ORDER BY rowid LIMIT 30")
+    suspend fun agentOrderLines(orderId: String): List<AgentOrderLine>
+
     @Query("SELECT * FROM orders WHERE status NOT IN ('ISSUED', 'CANCELLED') ORDER BY plannedIssueDate, createdAtEpochMillis")
     fun observeOpenOrders(): Flow<List<OrderEntity>>
 
     @Query("""
-        SELECT o.id, o.notebookId, n.rawText AS originalText,
+        SELECT o.id, o.notebookId, o.shipyardId, n.rawText AS originalText,
                o.employeeId, COALESCE(NULLIF(TRIM(e.lastName || ' ' || e.firstName), ''), o.recipientLabel) AS recipient, o.siteLabel,
                o.status, o.plannedIssueDate, o.createdAtEpochMillis,
                COUNT(l.id) AS lineCount,
@@ -619,8 +715,8 @@ interface OrderDao {
     @Insert
     suspend fun insertChange(item: OrderChangeEntity)
 
-    @Query("UPDATE orders SET employeeId = :employeeId, recipientLabel = :recipientLabel, siteLabel = :siteLabel, plannedIssueDate = :date WHERE id = :orderId")
-    suspend fun updateOrder(orderId: String, employeeId: String?, recipientLabel: String, siteLabel: String?, date: String)
+    @Query("UPDATE orders SET employeeId = :employeeId, recipientLabel = :recipientLabel, siteLabel = :siteLabel, shipyardId = :shipyardId, plannedIssueDate = :date WHERE id = :orderId")
+    suspend fun updateOrder(orderId: String, employeeId: String?, recipientLabel: String, siteLabel: String?, date: String, shipyardId: String? = null)
 
     @Query("UPDATE orders SET status = :status WHERE id = :orderId")
     suspend fun setStatus(orderId: String, status: String)
@@ -656,6 +752,7 @@ interface OrderDao {
 data class OrderSummary(
     val id: String,
     val notebookId: String?,
+    val shipyardId: String?,
     val originalText: String?,
     val employeeId: String?,
     val recipient: String,
@@ -667,6 +764,8 @@ data class OrderSummary(
     val preparedCount: Int,
     val unmappedCount: Int,
 )
+
+data class AgentOrderLine(val productId: String, val quantity: Double, val unit: String)
 
 data class OrderDetailLine(
     val id: String,
