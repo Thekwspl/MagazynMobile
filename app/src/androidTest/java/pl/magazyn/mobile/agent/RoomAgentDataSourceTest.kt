@@ -71,6 +71,16 @@ class RoomAgentDataSourceTest {
         db.movementDao().insertIssueReturn(IssueReturnEntity("return-1", "l1", 1.0, "2026-01-02", 3))
         db.movementDao().insertMovement(StockMovementEntity("y1", "SHIPYARD_ISSUE", "warehouse-main", null, "Ulstein", "2026-01-01", 1, shipyardId = "yard-1"))
         db.movementDao().insertLine(StockMovementLineEntity("yl1", "y1", "product-1", -4.0, "szt."))
+        db.movementDao().insertMovement(StockMovementEntity("y2", "HISTORICAL_ISSUE_IMPORT", "warehouse-main", null, "Stara nazwa", "2026-01-02", 2))
+        db.movementDao().insertLine(StockMovementLineEntity("yl2", "y2", "product-1", -3.0, "szt."))
+        assertEquals(1, db.movementDao().assignShipyard("y2", "yard-1"))
+        db.movementDao().insertMovement(StockMovementEntity("y3", "HISTORICAL_ISSUE_IMPORT", "warehouse-main", null, "Elektro", "2026-01-03", 3))
+        db.movementDao().insertLine(StockMovementLineEntity("yl3", "y3", "product-1", -2.0, "szt."))
+        db.movementDao().insertMovement(StockMovementEntity("employee-history", "HISTORICAL_ISSUE_IMPORT", "warehouse-main", "employee-1", "Elektro", "2026-01-04", 4))
+        db.movementDao().insertLine(StockMovementLineEntity("employee-history-line", "employee-history", "product-1", -5.0, "szt."))
+        assertEquals(0, db.movementDao().assignShipyard("employee-history", "yard-1"))
+        db.movementDao().insertMovement(StockMovementEntity("yard-stock-import", "HISTORICAL_SHIPYARD_IMPORT", "warehouse-main", null, "Ulstein", "2026-01-05", 5, shipyardId = "yard-1"))
+        db.movementDao().insertLine(StockMovementLineEntity("yard-stock-import-line", "yard-stock-import", "product-1", -6.0, "szt."))
         db.notebookDao().insertNotebook(OrderNotebookEntity("notebook", "Tekst", "VERIFIED", "ORDER", 1))
         db.orderDao().upsertOrders(listOf(
             OrderEntity("o1", null, "employee-1", "Jan", null, "DRAFT", "2026-03-01", 1),
@@ -85,9 +95,12 @@ class RoomAgentDataSourceTest {
         assertEquals(listOf(-3.0, 4.0), source.shipyardStock("yard-1").map { it.quantity })
         assertEquals(listOf("o1"), source.activeOrders(AgentRecipientKey("person", "employee-1")).map { it.orderId })
         assertEquals(listOf("notebook"), source.activeOrders(AgentRecipientKey("shipyard", "yard-1")).map { it.orderId })
-        assertEquals(2, source.recentIssues(AgentRecipientKey("person", "employee-1"), 20).size)
+        assertEquals(3, source.recentIssues(AgentRecipientKey("person", "employee-1"), 20).size)
         assertEquals("l2", source.recentIssues(AgentRecipientKey("person", "employee-1"), 1).single().lineId)
-        assertEquals(1, source.recentIssues(AgentRecipientKey("shipyard", "yard-1"), 20).size)
+        val yardIssues = source.recentIssues(AgentRecipientKey("shipyard", "yard-1"), 20)
+        assertEquals(listOf("yl3", "yl2", "yl1"), yardIssues.map { it.lineId })
+        assertFalse(yardIssues.any { it.lineId == "employee-history-line" })
+        assertFalse(yardIssues.any { it.lineId == "yard-stock-import-line" })
         try { source.personItems("missing"); fail("Unknown person") } catch (_: AgentFailure) { }
         try { source.shipyardStock("missing"); fail("Unknown shipyard") } catch (_: AgentFailure) { }
         try { source.recentIssues(AgentRecipientKey("person", "employee-1"), 21); fail("Unbounded history") } catch (_: AgentFailure) { }

@@ -23,8 +23,58 @@ class ShipyardResolverTest {
         assertTrue(ShipyardResolver.resolve(null, "Nieznane", yards).candidates.isEmpty())
     }
 
+    @Test fun `all text signals participate equally in ambiguity detection`() {
+        fun resolution(vararg shipyards: ShipyardEntity) = ShipyardResolver.resolve(null, "Wspolna", shipyards.toList())
+
+        assertEquals("name", resolution(ShipyardEntity("name", "Wspolna")).confirmedId)
+        assertEquals("alias", resolution(ShipyardEntity("alias", "Inna", aliases = "Wspolna")).confirmedId)
+        assertEquals("tag", resolution(ShipyardEntity("tag", "Inna", tags = "Wspolna")).confirmedId)
+        assertEquals("same", resolution(ShipyardEntity("same", "Wspolna", aliases = "Wspolna", tags = "Wspolna")).confirmedId)
+
+        val aliasAlias = resolution(
+            ShipyardEntity("a", "Pierwsza", aliases = "Wspolna"),
+            ShipyardEntity("b", "Druga", aliases = "Wspolna"),
+        )
+        assertNull(aliasAlias.confirmedId)
+        assertEquals(setOf("a", "b"), aliasAlias.candidates.toSet())
+
+        val nameAlias = resolution(
+            ShipyardEntity("a", "Wspolna"),
+            ShipyardEntity("b", "Druga", aliases = "Wspolna"),
+        )
+        assertNull(nameAlias.confirmedId)
+        assertEquals(setOf("a", "b"), nameAlias.candidates.toSet())
+
+        val nameTag = resolution(
+            ShipyardEntity("a", "Wspolna"),
+            ShipyardEntity("b", "Druga", tags = "Wspolna"),
+        )
+        assertNull(nameTag.confirmedId)
+        assertEquals(setOf("a", "b"), nameTag.candidates.toSet())
+
+        val aliasTag = resolution(
+            ShipyardEntity("a", "Pierwsza", aliases = "Wspolna"),
+            ShipyardEntity("b", "Druga", tags = "Wspolna"),
+        )
+        assertNull(aliasTag.confirmedId)
+        assertEquals(setOf("a", "b"), aliasTag.candidates.toSet())
+
+        val tagTag = resolution(
+            ShipyardEntity("a", "Pierwsza", tags = "Wspolna"),
+            ShipyardEntity("b", "Druga", tags = "Wspolna"),
+        )
+        assertNull(tagTag.confirmedId)
+        assertEquals(setOf("a", "b"), tagTag.candidates.toSet())
+    }
+
     @Test fun `manual stable identity overrides labels and is never re-guessed`() {
         assertEquals("s2", ShipyardResolver.resolve("s2", "Ulstein Elektro", yards).confirmedId)
         assertNull(ShipyardResolver.resolve("missing", "Ulstein Elektro", yards).confirmedId)
+    }
+
+    @Test fun `leader cannot resolve a conflict between text candidates`() {
+        val result = ShipyardResolver.resolve(null, "Verft", yards, leaders, "p")
+        assertNull(result.confirmedId)
+        assertEquals(setOf("s1", "s2"), result.candidates.toSet())
     }
 }

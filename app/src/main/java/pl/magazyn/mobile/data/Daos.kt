@@ -405,7 +405,8 @@ interface MovementDao {
         SELECT l.id AS lineId,m.id AS movementId,l.productId,p.unit,-l.quantityDelta AS quantity,m.effectiveDate AS issuedDate
         FROM stock_movements m JOIN stock_movement_lines l ON l.movementId = m.id
         JOIN products p ON p.id = l.productId
-        WHERE m.employeeId IS NULL AND m.shipyardId = :shipyardId AND m.type = 'SHIPYARD_ISSUE' AND l.quantityDelta < 0
+        WHERE m.employeeId IS NULL AND m.shipyardId = :shipyardId
+          AND m.type IN ('SHIPYARD_ISSUE','HISTORICAL_ISSUE_IMPORT') AND l.quantityDelta < 0
         ORDER BY m.effectiveDate DESC,m.createdAtEpochMillis DESC,l.id DESC LIMIT :limit
     """)
     suspend fun agentShipyardIssues(shipyardId: String, limit: Int): List<AgentIssue>
@@ -414,7 +415,8 @@ interface MovementDao {
         SELECT l.id AS lineId,m.id AS movementId,l.productId,p.unit,-l.quantityDelta AS quantity,m.effectiveDate AS issuedDate
         FROM stock_movements m JOIN stock_movement_lines l ON l.movementId = m.id
         JOIN products p ON p.id = l.productId
-        WHERE m.employeeId IS NULL AND m.shipyardId IS NULL AND m.type = 'SHIPYARD_ISSUE' AND m.recipientLabel IN (:labels)
+        WHERE m.employeeId IS NULL AND m.shipyardId IS NULL
+          AND m.type IN ('SHIPYARD_ISSUE','HISTORICAL_ISSUE_IMPORT') AND m.recipientLabel IN (:labels)
           AND l.quantityDelta < 0
         ORDER BY m.effectiveDate DESC,m.createdAtEpochMillis DESC,l.id DESC LIMIT :limit
     """)
