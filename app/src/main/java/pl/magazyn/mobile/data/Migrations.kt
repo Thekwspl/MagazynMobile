@@ -733,3 +733,25 @@ private fun ensureColumn(db: SupportSQLiteDatabase, table: String, column: Strin
     }
     if (!exists) db.execSQL("ALTER TABLE $table ADD COLUMN $column $definition")
 }
+
+/** Exact, unique historical names only; uncertain relationships remain unassigned for manual review. */
+val MIGRATION_24_25 = object : Migration(24, 25) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE shipyards ADD COLUMN aliases TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE shipyards ADD COLUMN tags TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE orders ADD COLUMN shipyardId TEXT")
+        db.execSQL("ALTER TABLE stock_movements ADD COLUMN shipyardId TEXT")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_orders_shipyardId ON orders(shipyardId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_stock_movements_shipyardId ON stock_movements(shipyardId)")
+        db.execSQL("""
+            UPDATE orders SET shipyardId = (SELECT id FROM shipyards WHERE name = orders.recipientLabel)
+            WHERE employeeId IS NULL AND siteLabel = recipientLabel
+              AND (SELECT COUNT(*) FROM shipyards WHERE name = orders.recipientLabel) = 1
+        """.trimIndent())
+        db.execSQL("""
+            UPDATE stock_movements SET shipyardId = (SELECT id FROM shipyards WHERE name = stock_movements.recipientLabel)
+            WHERE employeeId IS NULL AND type IN ('SHIPYARD_ISSUE', 'SHIPYARD_RETURN', 'HISTORICAL_SHIPYARD_IMPORT')
+              AND (SELECT COUNT(*) FROM shipyards WHERE name = stock_movements.recipientLabel) = 1
+        """.trimIndent())
+    }
+}

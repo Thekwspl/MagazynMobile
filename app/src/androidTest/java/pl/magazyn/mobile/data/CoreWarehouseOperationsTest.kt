@@ -103,12 +103,14 @@ class CoreWarehouseOperationsTest {
         assertEquals(6.0, stock(), 0.0)
         assertEquals(4.0, database.shipyardDao().findStock("shipyard-1", "product-1")?.quantity ?: Double.NaN, 0.0)
         assertEquals(-4.0, movementDelta("SHIPYARD_ISSUE"), 0.0)
+        assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movements WHERE type='SHIPYARD_ISSUE' AND shipyardId='shipyard-1'"))
 
         viewModel.returnToMainWarehouse(shipyard, listOf(ShipyardIssueRequest("product-1", 2)), "2026-09-16")
         eventually("Zwrot ze stoczni nie został zapisany") { movementCount("SHIPYARD_RETURN") == 1L }
         assertEquals(8.0, stock(), 0.0)
         assertEquals(2.0, database.shipyardDao().findStock("shipyard-1", "product-1")?.quantity ?: Double.NaN, 0.0)
         assertEquals(2.0, movementDelta("SHIPYARD_RETURN"), 0.0)
+        assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movements WHERE type='SHIPYARD_RETURN' AND shipyardId='shipyard-1'"))
     }
 
     @Test
