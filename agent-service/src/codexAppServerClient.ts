@@ -56,7 +56,10 @@ export class CodexAppServerClient {
         "-c", `mcp_servers.warehouse_catalog.env.WAREHOUSE_CATALOG_TOKEN=${JSON.stringify(mcp.token)}`,
         "-c", "mcp_servers.warehouse_catalog.required=true",
       ] : [];
-      const child = spawn(command, [...overrides, "app-server", "--listen", "stdio://"], { stdio: ["pipe", "pipe", "pipe"] });
+      // The client Bearer secret belongs to this HTTP boundary, not the Codex subprocess.
+      const { AGENT_CLIENT_TOKEN: _clientToken, ...childEnv } = process.env;
+      const child = spawn(command, [...overrides, "app-server", "--listen", "stdio://"],
+        { stdio: ["pipe", "pipe", "pipe"], env: childEnv });
       const stdout = createInterface({ input: child.stdout });
       // Drain stderr continuously; log only bounded generic diagnostics, never auth tokens or catalog data.
       child.stderr.on("data", () => { /* intentionally consumed */ });

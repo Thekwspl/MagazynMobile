@@ -54,6 +54,10 @@ Docelowy adapter Codex powinien uruchamiać `thread/start`, a kolejne wiadomośc
 
 Wersja debug wysyła pełny katalog przed każdą wiadomością, odczytuje wyłącznie `get_current_stock` z Room i odsyła wyniki opatrzone `requestId`. Wybór niejednoznacznego kandydata przechodzi przez `/v1/sessions/{sessionId}/choice` w tym samym wątku. `proposal` jest adaptowany do istniejącego ekranu review, bez zapisu do momentu jawnego przycisku tworzącego szkic. Lokalny HTTP jest dozwolony wyłącznie w debug na `127.0.0.1` z `adb reverse`; release nie ma domyślnego endpointu.
 
+## Transport i uwierzytelnienie — Paczka E
+
+Publiczne `/v1/*` wymagają losowego tokenu klienta Bearer w `AGENT_CLIENT_TOKEN`; po stronie Androida token jest szyfrowany przez istniejący Android Keystore i pozostaje poza Auto Backup i kopią `.magazynbackup`. Codex app-server przechowuje swoje osobne logowanie ChatGPT wyłącznie na serwerze. Sekret MCP nie jest tokenem Androida. Anonimowe `/health` zwraca tylko status, a proxy wystawia wyłącznie `/v1/*` po poprawnym TLS. Serwer Node nadal domyślnie nasłuchuje tylko na `127.0.0.1`. Nie włączamy publicznego VPS ani domeny w tej paczce; przykład Caddy i generowanie tokenu znajdują się w `agent-service/README.md`.
+
 ## Ograniczenia i dalsze kroki
 
 To nadal POC developerski: brak autoryzacji transportu usługi i trwałych sesji wyklucza wystawianie jej na sieć. Przed produkcją potrzebne są uwierzytelnienie samej usługi i bezpieczny transport.

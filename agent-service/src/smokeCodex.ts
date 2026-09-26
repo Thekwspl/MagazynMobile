@@ -17,21 +17,22 @@ await once(service.server, "listening");
 const address = service.server.address();
 if (!address || typeof address === "string") throw new Error("Brak adresu serwera.");
 const root = `http://127.0.0.1:${address.port}`;
+const authorized = { authorization: `Bearer ${process.env.AGENT_CLIENT_TOKEN}` };
 const post = async (path: string, payload: unknown): Promise<AgentResponse> => {
-  const reply = await fetch(root + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+  const reply = await fetch(root + path, { method: "POST", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify(payload) });
   const result = await reply.json() as AgentResponse & { error?: { message: string } | string };
   if (!reply.ok) throw new Error(`HTTP ${reply.status}: ${JSON.stringify(result)}`);
   return result;
 };
 try {
-  const authReply = await fetch(root + "/v1/auth/status");
+  const authReply = await fetch(root + "/v1/auth/status", { headers: authorized });
   if (!authReply.ok) throw new Error(`Nie można uruchomić Codexa: HTTP ${authReply.status}`);
   const auth = await authReply.json() as { account?: { type?: string } };
   if (auth.account?.type !== "chatgpt") {
     console.error("CHATGPT_AUTH_REQUIRED. Zaloguj się kontem ChatGPT przez POST /v1/auth/chatgpt/device-code, otwórz verificationUrl, wpisz userCode i ponów smoke test. Możesz też uruchomić: codex login --device-auth.");
     process.exitCode = 1;
   } else {
-    const sync = await fetch(root + "/v1/catalog/full-sync", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(fixture) });
+    const sync = await fetch(root + "/v1/catalog/full-sync", { method: "PUT", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify(fixture) });
     if (!sync.ok) throw new Error(`Synchronizacja fixture: HTTP ${sync.status}`);
     const first = await post("/v1/sessions/message", { message: "Kowalski jutro 2 rękawice XL i okulary" });
     if (first.status !== "needs_data" || first.items.length !== 2 || first.needsData.length !== 1)

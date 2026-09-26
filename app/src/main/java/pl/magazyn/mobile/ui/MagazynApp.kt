@@ -226,6 +226,7 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
                 contentPadding = padding,
                 onBack = { navController.popBackStack() },
                 onAiSettings = { navController.navigate("ai-settings") },
+                onCodexSettings = { navController.navigate("codex-settings") },
                 onUpdates = { navController.navigate("updates") },
                 onLearningRules = { navController.navigate("learning-rules") },
                 onDataExchange = { navController.navigate("data-exchange") },
@@ -234,6 +235,7 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
         }
         composable("hr-synchro-import") { HrSynchroImportScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
         composable("ai-settings") { AiSettingsScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
+        composable("codex-settings") { AgentSettingsScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
         composable("learning-rules") { LearningRulesScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
         composable("updates") { UpdateScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
     }

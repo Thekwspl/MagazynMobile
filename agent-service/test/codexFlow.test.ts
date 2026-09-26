@@ -12,6 +12,8 @@ const fixture: CatalogSnapshot = { revision: 1,
   people: [{ id: "p1", firstName: "Jan", lastName: "Kowalski" }],
   products: [{ id: "g", name: "Rękawice", variant: "XL", unit: "para" }, { id: "o", name: "Okulary", unit: "szt." }],
   shipyards: [], taskPlaces: [] };
+const clientToken = "fixture-token-" + "x".repeat(64);
+const authorized = { authorization: `Bearer ${clientToken}` };
 const response = (sessionId: string, status: AgentResponse["status"]): AgentResponse => ({
   schemaVersion: 1, sessionId, status, intent: "ORDER", recipient: { id: "p1", label: "Jan Kowalski", kind: "person" },
   deliveryDate: null, error: null,
@@ -105,7 +107,7 @@ test("no write tool, and catalog reads are bounded", async () => {
 });
 test("HTTP message endpoint uses Codex adapter", async () => {
   const fake = new FakeRunner();
-  const service = createAgentService({ mode: "codex", codex: {
+  const service = createAgentService({ mode: "codex", clientToken, codex: {
     ...fake, start: fake.start.bind(fake), accountRead: fake.accountRead.bind(fake),
     runStructuredOrder: fake.runStructuredOrder.bind(fake), close() {},
     async startChatGptDeviceLogin() { return {}; }, async startChatGptLogin() { return {}; },
@@ -114,8 +116,8 @@ test("HTTP message endpoint uses Codex adapter", async () => {
   const address = service.server.address(); assert.ok(address && typeof address !== "string");
   const base = `http://127.0.0.1:${address.port}`;
   try {
-    await fetch(`${base}/v1/catalog/full-sync`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(fixture) });
-    const result = await fetch(`${base}/v1/sessions/message`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: "Kowalski rękawice" }) });
+    await fetch(`${base}/v1/catalog/full-sync`, { method: "PUT", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify(fixture) });
+    const result = await fetch(`${base}/v1/sessions/message`, { method: "POST", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify({ message: "Kowalski rękawice" }) });
     assert.equal((await result.json() as AgentResponse).status, "needs_data");
     assert.equal(fake.calls.length, 1);
     const denied = await fetch(`${base}/_internal/catalog/search`, { method: "POST", body: "{}" });
@@ -124,7 +126,7 @@ test("HTTP message endpoint uses Codex adapter", async () => {
 });
 test("HTTP choice endpoint preserves session and rejects unknown candidate", async () => {
   const fake = new FakeRunner(); fake.resultStatus = "needs_user_choice";
-  const service = createAgentService({ mode: "codex", codex: {
+  const service = createAgentService({ mode: "codex", clientToken, codex: {
     start: fake.start.bind(fake), accountRead: fake.accountRead.bind(fake),
     runStructuredOrder: fake.runStructuredOrder.bind(fake), close() {},
     async startChatGptDeviceLogin() { return {}; }, async startChatGptLogin() { return {}; },
@@ -133,9 +135,9 @@ test("HTTP choice endpoint preserves session and rejects unknown candidate", asy
   const address = service.server.address(); assert.ok(address && typeof address !== "string");
   const base = `http://127.0.0.1:${address.port}`;
   try {
-    await fetch(`${base}/v1/catalog/full-sync`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(fixture) });
+    await fetch(`${base}/v1/catalog/full-sync`, { method: "PUT", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify(fixture) });
     const send = async (path: string, payload: unknown) => fetch(`${base}${path}`, {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
+      method: "POST", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify(payload),
     }).then(reply => reply.json() as Promise<AgentResponse>);
     const first = await send("/v1/sessions/message", { message: "Kowalski rękawice" });
     const invalid = await send(`/v1/sessions/${first.sessionId}/choice`, { candidateId: "unknown" });

@@ -53,15 +53,13 @@ import pl.magazyn.mobile.data.NotebookTaskStepEntity
 import pl.magazyn.mobile.data.NotebookTaskStepPersonEntity
 import pl.magazyn.mobile.data.TaskPlaceEntity
 import pl.magazyn.mobile.data.ProductVisibilityStore
-import pl.magazyn.mobile.agent.AgentCandidate
-import pl.magazyn.mobile.agent.AgentClient
 import pl.magazyn.mobile.agent.AgentFailure
 import pl.magazyn.mobile.agent.AgentReply
 import pl.magazyn.mobile.agent.AgentRepository
 import pl.magazyn.mobile.agent.AgentRevision
 import pl.magazyn.mobile.agent.AgentStatus
-import pl.magazyn.mobile.agent.HttpAgentClient
 import pl.magazyn.mobile.agent.RoomAgentDataSource
+import pl.magazyn.mobile.agent.AgentConnectionStore
 
 data class HomeUiState(
     val employeeCount: Int = 0,
@@ -100,10 +98,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val aiAnalysis: StateFlow<AiAnalysisUiState> = _aiAnalysis.asStateFlow()
     private val _codexAnalysis = MutableStateFlow(CodexAnalysisUiState())
     val codexAnalysis: StateFlow<CodexAnalysisUiState> = _codexAnalysis.asStateFlow()
-    private val agentRepository by lazy {
-        val endpoint = if (pl.magazyn.mobile.BuildConfig.DEBUG) "http://127.0.0.1:8787" else ""
-        AgentRepository(HttpAgentClient(endpoint), RoomAgentDataSource(database), AgentRevision(application)::next)
-    }
+    private val agentConnection = AgentConnectionStore(application, pl.magazyn.mobile.BuildConfig.DEBUG)
+    private var activeAgentRepository: AgentRepository? = null
     private val _quickInput = MutableStateFlow("")
     val quickInput: StateFlow<String> = _quickInput.asStateFlow()
     private val _noteReview = MutableStateFlow<NoteReviewUiState?>(null)
@@ -294,7 +290,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (text.isBlank()) return
         viewModelScope.launch {
             _codexAnalysis.value = CodexAnalysisUiState(isLoading = true)
-            runCatching { showCodexReply(agentRepository.analyze(text)) }.onFailure {
+            runCatching {
+                val repository = AgentRepository(agentConnection.client(), RoomAgentDataSource(database), AgentRevision(getApplication<Application>())::next)
+                activeAgentRepository = repository
+                showCodexReply(repository, repository.analyze(text))
+            }.onFailure {
                 _codexAnalysis.value = CodexAnalysisUiState(error = it.message ?: "Analiza Codex nie powiodła się.")
             }
         }
@@ -304,15 +304,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val reply = _codexAnalysis.value.reply ?: return
         viewModelScope.launch {
             _codexAnalysis.value = CodexAnalysisUiState(isLoading = true, reply = reply)
-            runCatching { showCodexReply(agentRepository.choose(reply, candidateId)) }.onFailure {
+            runCatching {
+                val repository = activeAgentRepository ?: throw AgentFailure("Sesja Codex wygasła. Uruchom analizę ponownie.")
+                showCodexReply(repository, repository.choose(reply, candidateId))
+            }.onFailure {
                 _codexAnalysis.value = CodexAnalysisUiState(error = it.message ?: "Nie udało się wznowić sesji.", reply = reply)
             }
         }
     }
 
-    private suspend fun showCodexReply(reply: AgentReply) {
+    private suspend fun showCodexReply(repository: AgentRepository, reply: AgentReply) {
         _codexAnalysis.value = when (reply.status) {
-            AgentStatus.PROPOSAL -> CodexAnalysisUiState(result = agentRepository.review(reply))
+            AgentStatus.PROPOSAL -> CodexAnalysisUiState(result = repository.review(reply))
             AgentStatus.NEEDS_USER_CHOICE -> CodexAnalysisUiState(reply = reply)
             AgentStatus.ERROR -> CodexAnalysisUiState(error = reply.error ?: "Agent zwrócił błąd.")
             AgentStatus.NEEDS_DATA -> CodexAnalysisUiState(error = "Agent wymaga dodatkowych danych.")

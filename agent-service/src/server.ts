@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import { CatalogStore, type CatalogDelta, type CatalogSnapshot } from "./catalog.js";
@@ -25,9 +25,16 @@ const body = async <T>(request: IncomingMessage): Promise<T> => {
 };
 
 type ServiceCodex = CodexRunner & Pick<CodexAppServerClient, "close" | "startChatGptDeviceLogin" | "startChatGptLogin">;
-export function createAgentService(options: { mode?: "local" | "codex"; codex?: ServiceCodex } = {}) {
+export function createAgentService(options: { mode?: "local" | "codex"; codex?: ServiceCodex;
+  clientToken?: string; rateLimit?: { max: number; windowMs: number; now?: () => number } } = {}) {
   const mode = options.mode ?? (process.env.AGENT_MODE ?? "local");
   if (mode !== "local" && mode !== "codex") throw new Error("AGENT_MODE musi mieć wartość local albo codex.");
+  const clientToken = options.clientToken ?? process.env.AGENT_CLIENT_TOKEN;
+  if (!clientToken || clientToken.length < 43 || /\s/.test(clientToken))
+    throw new Error("Skonfiguruj silny AGENT_CLIENT_TOKEN przed uruchomieniem usługi.");
+  const clientTokenHash = createHash("sha256").update(clientToken).digest();
+  const rateLimit = options.rateLimit ?? { max: 60, windowMs: 60_000 };
+  const recentSessionRequests: number[] = [];
   const catalog = new CatalogStore();
   const local = new WarehouseAgent(() => catalog.read());
   const codex = options.codex ?? new CodexAppServerClient();
@@ -45,7 +52,21 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
         return json(response, 200, searchCatalog(catalog.read(), payload.tool, payload.query));
       }
       if (request.method === "GET" && url.pathname === "/health")
-        return json(response, 200, { status: "ok", mode, catalogRevision: catalog.read().revision });
+        return json(response, 200, { status: "ok" });
+      if (url.pathname.startsWith("/v1/")) {
+        const supplied = request.headers.authorization?.match(/^Bearer ([^\s]+)$/i)?.[1];
+        const suppliedHash = createHash("sha256").update(supplied ?? "").digest();
+        if (!supplied || !timingSafeEqual(suppliedHash, clientTokenHash))
+          return json(response, 401, { error: "unauthorized" });
+        if (url.pathname.startsWith("/v1/sessions/") || url.pathname.startsWith("/v1/auth/chatgpt/")) {
+          const now = (rateLimit.now ?? Date.now)();
+          while (recentSessionRequests.length && recentSessionRequests[0] <= now - rateLimit.windowMs)
+            recentSessionRequests.shift();
+          if (recentSessionRequests.length >= rateLimit.max)
+            return json(response, 429, { error: "rate_limited" });
+          recentSessionRequests.push(now);
+        }
+      }
       if (request.method === "PUT" && url.pathname === "/v1/catalog/full-sync") {
         catalog.fullSync(await body<CatalogSnapshot>(request)); return json(response, 204, null);
       }
@@ -81,6 +102,7 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
       if (request.method === "POST" && url.pathname === "/v1/auth/chatgpt/start") {
         await codex.start("codex", mcp()); return json(response, 200, await codex.startChatGptLogin());
       }
+      if (url.pathname.startsWith("/v1/")) return json(response, 403, { error: "forbidden" });
       return json(response, 404, { error: "not_found" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown_error";

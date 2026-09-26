@@ -7,6 +7,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import pl.magazyn.mobile.data.EmployeeSummary
 import pl.magazyn.mobile.data.ProductEntity
@@ -141,20 +142,102 @@ class AgentIntegrationTest {
 
     @Test fun `HTTP adapter handles refused connection timeout error and invalid JSON`() {
         val port = ServerSocket(0).use { it.localPort }
-        runBlocking { try { HttpAgentClient("http://127.0.0.1:$port", 200, 200).message("test"); fail("Connection accepted") }
+        runBlocking { try { HttpAgentClient("http://127.0.0.1:$port", "test-token", true, 200, 200).message("test"); fail("Connection accepted") }
             catch (e: AgentFailure) { assertTrue(e.message!!.contains("połączyć")) } }
         oneResponse("{}", 503) { p ->
-            try { HttpAgentClient("http://127.0.0.1:$p").authStatus(); fail("HTTP accepted") }
+            try { HttpAgentClient("http://127.0.0.1:$p", "test-token", true).authStatus(); fail("HTTP accepted") }
             catch (e: AgentFailure) { assertTrue(e.message!!.contains("503")) }
         }
         oneResponse("broken") { p ->
-            try { HttpAgentClient("http://127.0.0.1:$p").message("test"); fail("JSON accepted") }
+            try { HttpAgentClient("http://127.0.0.1:$p", "test-token", true).message("test"); fail("JSON accepted") }
             catch (e: AgentFailure) { assertTrue(e.message!!.contains("JSON")) }
         }
         oneResponse(null, pauseMs = 200) { p ->
-            try { HttpAgentClient("http://127.0.0.1:$p", 100, 30).authStatus(); fail("Timeout accepted") }
+            try { HttpAgentClient("http://127.0.0.1:$p", "test-token", true, 100, 30).authStatus(); fail("Timeout accepted") }
             catch (e: AgentFailure) { assertTrue(e.message!!.contains("czas")) }
         }
-        try { HttpAgentClient("http://192.168.1.2:8787"); fail("Cleartext LAN accepted") } catch (_: AgentFailure) { }
+        try { HttpAgentClient("http://192.168.1.2:8787", "token", true); fail("Cleartext LAN accepted") } catch (_: AgentFailure) { }
+    }
+
+    @Test fun `base URL checks HTTPS and debug loopback only`() {
+        assertEquals("https://agent.example.invalid:443", AgentEndpoint.validate("https://agent.example.invalid:443/", false))
+        assertEquals("http://127.0.0.1:8787", AgentEndpoint.validate("http://127.0.0.1:8787", true))
+        for (invalid in listOf("http://127.0.0.1:8787", "http://192.168.1.2", "https://user:pass@example.invalid",
+            "https://example.invalid/v1", "https://example.invalid?q=1", "https://example.invalid#fragment", "://broken")) {
+            try { AgentEndpoint.validate(invalid, false); fail("Accepted $invalid") } catch (_: AgentFailure) { }
+        }
+        try { AgentEndpoint.validate("http://localhost:8787", true); fail("Accepted alternate debug host") } catch (_: AgentFailure) { }
+        try { HttpAgentClient("https://example.invalid", "", false); fail("Accepted missing token") } catch (e: AgentFailure) {
+            assertTrue(e.message!!.contains("Brak tokenu"))
+        }
+    }
+
+    @Test fun `Bearer stays in header and connection test checks only ChatGPT status`() {
+        val captured = AtomicReference<String>()
+        ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
+            val worker = thread {
+                server.accept().use { socket ->
+                    val reader = socket.getInputStream().bufferedReader()
+                    val headers = generateSequence { reader.readLine() }.takeWhile { it.isNotEmpty() }.toList()
+                    captured.set(headers.joinToString("\n"))
+                    val payload = """{"account":{"type":"chatgpt"}}""".toByteArray()
+                    socket.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Length: ${payload.size}\r\nConnection: close\r\n\r\n").toByteArray())
+                    socket.getOutputStream().write(payload)
+                }
+            }
+            val result = runBlocking { HttpAgentClient("http://127.0.0.1:${server.localPort}", "secret-fixture", true).authStatus() }
+            assertTrue(AgentConnectionCheck.describe(result).contains("Połączenie działa"))
+            worker.join(2_000)
+        }
+        assertTrue(captured.get().startsWith("GET /v1/auth/status HTTP/1.1"))
+        assertTrue(captured.get().contains("Bearer secret-fixture"))
+        assertFalse(captured.get().contains("?secret-fixture"))
+        assertEquals("Agent-service odpowiada, ale Codex nie jest zalogowany kontem ChatGPT.",
+            AgentConnectionCheck.describe(JSONObject().put("account", JSONObject.NULL)))
+        oneResponse("{}", 401) { p ->
+            try { HttpAgentClient("http://127.0.0.1:$p", "wrong", true).authStatus(); fail("401 accepted") }
+            catch (e: AgentFailure) { assertTrue(e.message!!.contains("Token klienta")) }
+        }
+    }
+
+    @Test fun `Bearer is absent from message URL and JSON body`() {
+        val requestText = AtomicReference<String>()
+        ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
+            val worker = thread {
+                server.accept().use { socket ->
+                    val reader = socket.getInputStream().bufferedReader()
+                    val headers = generateSequence { reader.readLine() }.takeWhile { it.isNotEmpty() }.toList()
+                    val size = headers.first { it.startsWith("Content-Length:", true) }.substringAfter(':').trim().toInt()
+                    val content = CharArray(size)
+                    var received = 0
+                    while (received < size) received += reader.read(content, received, size - received)
+                    requestText.set(headers.first() + "\n" + String(content))
+                    val payload = response("needs_data").toByteArray()
+                    socket.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Length: ${payload.size}\r\nConnection: close\r\n\r\n").toByteArray())
+                    socket.getOutputStream().write(payload)
+                }
+            }
+            runBlocking { HttpAgentClient("http://127.0.0.1:${server.localPort}", "secret-fixture", true).message("order") }
+            worker.join(2_000)
+        }
+        assertTrue(requestText.get().startsWith("POST /v1/sessions/message HTTP/1.1"))
+        assertFalse(requestText.get().contains("secret-fixture"))
+    }
+
+    @Test fun `TLS failure is distinct from unavailable service`() {
+        ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
+            val worker = thread {
+                runCatching { server.accept().use { socket ->
+                    socket.soTimeout = 1_000
+                    socket.getInputStream().read() // TLS ClientHello, answered with invalid plaintext.
+                    socket.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                } }
+            }
+            runBlocking {
+                try { HttpAgentClient("https://127.0.0.1:${server.localPort}", "token", false, 500, 500).authStatus(); fail("Accepted invalid TLS") }
+                catch (e: AgentFailure) { assertTrue(e.message!!.contains("TLS")) }
+            }
+            worker.join(2_000)
+        }
     }
 }
