@@ -110,13 +110,13 @@ fun HistoryScreen(contentPadding: PaddingValues, viewModel: HistoryViewModel = v
     selected?.let { entry ->
         val lines by viewModel.lines(entry.id).collectAsStateWithLifecycle(initialValue = emptyList())
         ModalBottomSheet(onDismissRequest = { selected = null }) {
-            HistoryDetails(entry, lines, onClose = { selected = null })
             if (entry.employeeId == null && entry.type in setOf("SHIPYARD_ISSUE", "SHIPYARD_RETURN", "HISTORICAL_SHIPYARD_IMPORT", "HISTORICAL_ISSUE_IMPORT") && entry.recipientLabel.isNotBlank()) {
                 val fresh = entries.firstOrNull { it.id == entry.id } ?: entry
                 ShipyardAssignment(fresh.shipyardId, entry.recipientLabel, shipyards, leaders) {
                     viewModel.assignShipyard(entry.id, it)
                 }
             }
+            HistoryDetails(entry, lines, onClose = { selected = null })
         }
     }
     datePickerFor?.let { target ->

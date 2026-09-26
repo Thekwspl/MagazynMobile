@@ -106,6 +106,10 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
                             Text("← Wszyscy odbiorcy")
                         }
                     }
+                    if (part.employeeId == null) ShipyardAssignment(
+                        part.shipyardId, part.recipient, shipyards, leaders,
+                        onAssign = { viewModel.assignShipyard(part.id, it) },
+                    )
                     OrderDetails(
                         part, people, shipyards, products, jobPositions,
                         linesFlow = { viewModel.lines(part.id) },
@@ -124,10 +128,6 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
                         onRealize = { employeeId, shipyardName, date, lineIds ->
                             viewModel.realize(part.id, employeeId, shipyardName, date, lineIds)
                         },
-                    )
-                    if (part.employeeId == null) ShipyardAssignment(
-                        part.shipyardId, part.recipient, shipyards, leaders,
-                        onAssign = { viewModel.assignShipyard(part.id, it) },
                     )
                 }
             }

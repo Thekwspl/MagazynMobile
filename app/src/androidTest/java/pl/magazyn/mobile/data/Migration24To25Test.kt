@@ -31,6 +31,7 @@ class Migration24To25Test {
             execSQL("INSERT INTO orders(id,notebookId,employeeId,recipientLabel,siteLabel,status,plannedIssueDate,createdAtEpochMillis) VALUES('b',NULL,NULL,'Nieznana','Nieznana','DRAFT','2026-01-01',1)")
             execSQL("INSERT INTO stock_movements(id,type,warehouseId,employeeId,recipientLabel,effectiveDate,createdAtEpochMillis,note) VALUES('m','SHIPYARD_ISSUE','warehouse-main',NULL,'Ulstein','2026-01-01',1,'')")
             execSQL("INSERT INTO stock_movements(id,type,warehouseId,employeeId,recipientLabel,effectiveDate,createdAtEpochMillis,note) VALUES('n','SHIPYARD_ISSUE','warehouse-main',NULL,'ulstein','2026-01-01',1,'')")
+            execSQL("INSERT INTO stock_movements(id,type,warehouseId,employeeId,recipientLabel,effectiveDate,createdAtEpochMillis,note) VALUES('h','HISTORICAL_SHIPYARD_IMPORT','warehouse-main',NULL,'Ulstein','2026-01-01',1,'')")
             close()
         }
         val db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(MIGRATION_24_25).build()
@@ -45,6 +46,7 @@ class Migration24To25Test {
             assertEquals(1, count("SELECT COUNT(*) FROM orders WHERE id='b' AND shipyardId IS NULL AND recipientLabel='Nieznana'"))
             assertEquals(1, count("SELECT COUNT(*) FROM stock_movements WHERE id='m' AND shipyardId='s' AND recipientLabel='Ulstein'"))
             assertEquals(1, count("SELECT COUNT(*) FROM stock_movements WHERE id='n' AND shipyardId IS NULL AND recipientLabel='ulstein'"))
+            assertEquals(1, count("SELECT COUNT(*) FROM stock_movements WHERE id='h' AND shipyardId='s' AND recipientLabel='Ulstein'"))
             sqlite.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
         } finally { db.close(); context.deleteDatabase(name) }
     }

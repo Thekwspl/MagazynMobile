@@ -750,7 +750,7 @@ val MIGRATION_24_25 = object : Migration(24, 25) {
         """.trimIndent())
         db.execSQL("""
             UPDATE stock_movements SET shipyardId = (SELECT id FROM shipyards WHERE name = stock_movements.recipientLabel)
-            WHERE employeeId IS NULL AND type IN ('SHIPYARD_ISSUE', 'SHIPYARD_RETURN')
+            WHERE employeeId IS NULL AND type IN ('SHIPYARD_ISSUE', 'SHIPYARD_RETURN', 'HISTORICAL_SHIPYARD_IMPORT')
               AND (SELECT COUNT(*) FROM shipyards WHERE name = stock_movements.recipientLabel) = 1
         """.trimIndent())
     }
