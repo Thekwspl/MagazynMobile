@@ -9,7 +9,7 @@ object AgentEndpoint {
         val raw = value.trim()
         val uri = runCatching { URI(raw) }.getOrNull()
         if (uri == null || uri.host.isNullOrBlank() || uri.userInfo != null || uri.rawQuery != null ||
-            uri.rawFragment != null || uri.path !in listOf("", "/") || uri.port !in -1..65535 || uri.port == 0 ||
+            uri.rawFragment != null || uri.rawPath !in listOf("", "/") || uri.port !in -1..65535 || uri.port == 0 ||
             (uri.scheme?.lowercase() != "https" && !(allowDebugLoopback && uri.scheme?.lowercase() == "http" && uri.host == "127.0.0.1")))
             throw AgentFailure("Niepoprawny adres. Wpisz bazowy adres HTTPS bez ścieżki i parametrów.")
         return uri.toASCIIString().trimEnd('/')

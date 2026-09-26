@@ -46,7 +46,9 @@ agent.example.invalid {
     handle @api {
         reverse_proxy 127.0.0.1:8787
     }
-    respond 404
+    handle {
+        respond 404
+    }
 }
 ```
 

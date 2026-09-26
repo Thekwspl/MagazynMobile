@@ -163,7 +163,7 @@ class AgentIntegrationTest {
         assertEquals("https://agent.example.invalid:443", AgentEndpoint.validate("https://agent.example.invalid:443/", false))
         assertEquals("http://127.0.0.1:8787", AgentEndpoint.validate("http://127.0.0.1:8787", true))
         for (invalid in listOf("http://127.0.0.1:8787", "http://192.168.1.2", "https://user:pass@example.invalid",
-            "https://example.invalid/v1", "https://example.invalid?q=1", "https://example.invalid#fragment", "://broken")) {
+            "https://example.invalid/v1", "https://example.invalid/%2F", "https://example.invalid?q=1", "https://example.invalid#fragment", "://broken")) {
             try { AgentEndpoint.validate(invalid, false); fail("Accepted $invalid") } catch (_: AgentFailure) { }
         }
         try { AgentEndpoint.validate("http://localhost:8787", true); fail("Accepted alternate debug host") } catch (_: AgentFailure) { }
