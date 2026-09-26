@@ -58,6 +58,26 @@ jobs:
       - name: Szybkie testy PR
         run: gradle test assembleDebugAndroidTest lintDebug --no-daemon --max-workers=1
 
+      - name: Zbuduj testowe APK MagazynMobile
+        if: github.event.pull_request.number == 9
+        run: gradle assembleDebug --no-daemon --max-workers=1
+
+      - name: Sprawdź izolację testowego APK
+        if: github.event.pull_request.number == 9
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          BADGING="$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$APK")"
+          grep -Fq "package: name='pl.magazyn.mobile.test'" <<< "$BADGING"
+          grep -Fq "application-label:'MagazynMobile TEST'" <<< "$BADGING"
+          grep -Fq 'applicationId = "pl.magazyn.mobile"' app/build.gradle.kts
+          grep -Fq 'versionCode = 67' app/build.gradle.kts
+          grep -Fq 'versionName = "1.0.0"' app/build.gradle.kts
+          grep -Fq 'const val DATABASE_SCHEMA_VERSION = 25' app/src/main/java/pl/magazyn/mobile/data/DatabaseSchema.kt
+          cp "$APK" "$RUNNER_TEMP/MagazynMobile-TEST.apk"
+
       - name: Sprawdź Room schema
         shell: bash
         run: |
@@ -114,6 +134,14 @@ jobs:
           name: room-schema-pr-${{ github.event.pull_request.number }}
           path: app/schemas/pl.magazyn.mobile.data.AppDatabase/*.json
           if-no-files-found: warn
+
+      - name: Zachowaj testowe APK do ręcznej instalacji
+        if: github.event.pull_request.number == 9
+        uses: actions/upload-artifact@v4
+        with:
+          name: MagazynMobile-TEST
+          path: ${{ runner.temp }}/MagazynMobile-TEST.apk
+          if-no-files-found: error
 
       - name: Podsumowanie
         if: success()
