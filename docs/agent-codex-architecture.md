@@ -38,7 +38,7 @@ Każda odpowiedź zawiera `schemaVersion: 1`, `sessionId`, intencję `ORDER` ora
 
 Przykład „Kowalski jutro 2 rękawice XL i okulary” najpierw rozwiązuje osobę i produkty na podstawie zsynchronizowanego katalogu, a następnie zwraca `needs_data` dla bieżących stanów. Dopiero po dostarczeniu wyników odczytu zwraca `proposal`. Dwóch Kowalskich daje `needs_user_choice`; brak produktu daje ostrzeżenie i pytanie. Żaden etap nie tworzy zamówienia i nie wydaje towaru.
 
-Kontrakt przewiduje docelowe odczyty `search_people`, `search_products`, `search_shipyards`, `get_current_stock`, `get_person_current_items`, `get_recent_issues`, `get_shipyard_stock` i `get_active_orders`. W wykonywalnym POC allowlista obejmuje wyłącznie potrzebne w scenariuszu `get_current_stock`; pozostałe odczyty wymagają osobnego dodania wraz z walidacją. Pełny i przyrostowy sync mogą zostać ponowione po okresie offline, a odrzucona rewizja bazowa wymusza naprawczy full sync.
+Stabilne osoby, produkty, stocznie (ID, nazwa, aliasy, tagi, ID prowadzących) i miejsca trafiają do katalogu/MCP. Pięć dynamicznych odczytów wykonuje wyłącznie Android na telefonie przez `needs_data → Room → tool-results`: `get_current_stock`, `get_person_current_items`, `get_shipyard_stock`, `get_active_orders`, `get_recent_issues`. Każdy wynik jest związany z żądanym `requestId` i tą samą sesją Codexa; agent nigdy nie otrzymuje bezpośredniego połączenia do Room. Pełny i przyrostowy sync mogą zostać ponowione po okresie offline, a odrzucona rewizja bazowa wymusza naprawczy full sync.
 
 Docelowy adapter Codex powinien uruchamiać `thread/start`, a kolejne wiadomości kierować przez `thread/resume` i `turn/start` z `outputSchema`. Oficjalny protokół przewiduje trwałe identyfikatory wątków i zdarzenie `turn/completed`, co pozwala wznowić rozmowę po dostarczeniu danych. Klient POC zawiera obsługę tych operacji i wymusza `approvalPolicy: never` oraz sandbox tylko do odczytu.
 
@@ -52,14 +52,18 @@ Docelowy adapter Codex powinien uruchamiać `thread/start`, a kolejne wiadomośc
 
 ## Klient Android — Paczka D
 
-Wersja debug wysyła pełny katalog przed każdą wiadomością, odczytuje wyłącznie `get_current_stock` z Room i odsyła wyniki opatrzone `requestId`. Wybór niejednoznacznego kandydata przechodzi przez `/v1/sessions/{sessionId}/choice` w tym samym wątku. `proposal` jest adaptowany do istniejącego ekranu review, bez zapisu do momentu jawnego przycisku tworzącego szkic. Lokalny HTTP jest dozwolony wyłącznie w debug na `127.0.0.1` z `adb reverse`; release nie ma domyślnego endpointu.
+Wersja debug wysyła pełny katalog przed każdą wiadomością, wykonuje żądane odczyty dynamiczne z Room i odsyła wyniki opatrzone `requestId`. Wybór niejednoznacznego kandydata przechodzi przez `/v1/sessions/{sessionId}/choice` w tym samym wątku. `proposal` jest adaptowany do istniejącego ekranu review, bez zapisu do momentu jawnego przycisku tworzącego szkic. Lokalny HTTP jest dozwolony wyłącznie w debug na `127.0.0.1` z `adb reverse`; release nie ma domyślnego endpointu.
 
 ## Transport i uwierzytelnienie — Paczka E
 
 Publiczne `/v1/*` wymagają losowego tokenu klienta Bearer w `AGENT_CLIENT_TOKEN`; po stronie Androida token jest szyfrowany przez istniejący Android Keystore i pozostaje poza Auto Backup i kopią `.magazynbackup`. Codex app-server przechowuje swoje osobne logowanie ChatGPT wyłącznie na serwerze. Sekret MCP nie jest tokenem Androida. Anonimowe `/health` zwraca tylko status, a proxy wystawia wyłącznie `/v1/*` po poprawnym TLS. Serwer Node nadal domyślnie nasłuchuje tylko na `127.0.0.1`. Nie włączamy publicznego VPS ani domeny w tej paczce; przykład Caddy i generowanie tokenu znajdują się w `agent-service/README.md`.
 
+## Room 25 i historyczne stocznie
+
+Nowe zamówienia oraz ruchy stoczni zapisują stabilne `shipyardId`. Migracja 24→25 dodaje również aliasy/tagi stoczni. Dawne rekordy otrzymują ID tylko po dokładnej i jednoznacznej nazwie; inne pozostają bez ID i są dostępne do ręcznego przypisania w istniejących ekranach zamówień/historii. Resolver używa nazwy, aliasu, tagu i prowadzącego jako sygnałów, ale nigdy nie uznaje samego prowadzącego za dowód. Odczyty agenta pomijają niejednoznaczne dane historyczne. Propozycja nadal nie zapisuje magazynu, a ostrzeżenie o ponownym wydaniu nie jest blokadą.
+
 ## Ograniczenia i dalsze kroki
 
-To nadal POC developerski: brak autoryzacji transportu usługi i trwałych sesji wyklucza wystawianie jej na sieć. Przed produkcją potrzebne są uwierzytelnienie samej usługi i bezpieczny transport.
+To nadal POC developerski: mimo uwierzytelniania Bearer i wymagania HTTPS dla zdalnego Androida brak trwałego magazynu sesji wymaga dalszej pracy przed produkcją. Samodzielne pytania informacyjne nie należą do intentu ORDER w protokole v1.
 
-Istniejący parser offline i integracja Gemini pozostają bez zmian. Schemat Room pozostaje w wersji 24.
+Istniejący parser offline i integracja Gemini pozostają bez zmian. Schemat Room ma wersję 25.

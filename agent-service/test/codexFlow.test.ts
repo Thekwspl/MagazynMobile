@@ -100,7 +100,7 @@ test("no write tool, and catalog reads are bounded", async () => {
   const { agent } = setup();
   try {
     const first = await agent.start("Kowalski rękawice");
-    assert.equal((await agent.resumeWithData(first.sessionId, [{ requestId: "req1", tool: "issue_items", data: { stocks: [] } }])).error?.code, "TOOL_NOT_ALLOWED");
+    assert.equal((await agent.resumeWithData(first.sessionId, [{ requestId: "req1", tool: "issue_items" as "get_current_stock", data: { stocks: [] } }])).error?.code, "TOOL_NOT_ALLOWED");
     assert.deepEqual(searchCatalog(fixture, "search_people", "Kowal").map((p: any) => p.id), ["p1"]);
     assert.ok(!["search_people", "search_products", "search_shipyards", "search_task_places"].includes("write_stock"));
   } finally { agent.close(); }

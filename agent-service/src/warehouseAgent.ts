@@ -6,6 +6,7 @@ import {
   type Candidate,
   type OrderItemProposal,
   type ReadOnlyToolResult,
+  validToolResult,
 } from "./contracts.js";
 
 interface SessionState {
@@ -56,13 +57,13 @@ export class WarehouseAgent {
       return this.error(sessionId, "INVALID_STATE", "Sesja nie oczekuje na dane.");
     }
 
-    const requested = new Set(state.response.needsData.map((request) => request.id));
+    const requests = state.response.needsData;
+    if (!Array.isArray(results) || results.length !== requests.length || new Set(results.map(r => r?.requestId)).size !== results.length ||
+      results.some(r => !requests.some(q => q.id === r?.requestId && validToolResult(r, q))))
+      return this.error(sessionId, "TOOL_NOT_ALLOWED", "Niepoprawne wyniki żądanych odczytów.");
     const stockByProduct = new Map<string, number>();
     for (const result of results) {
-      if (!requested.has(result.requestId) || result.tool !== "get_current_stock") {
-        return this.error(sessionId, "TOOL_NOT_ALLOWED", "Dozwolone są wyłącznie żądane odczyty magazynowe.");
-      }
-      for (const stock of result.data.stocks) stockByProduct.set(stock.productId, stock.available);
+      if (result.tool === "get_current_stock") for (const stock of result.data.stocks) stockByProduct.set(stock.productId, stock.available);
     }
 
     const missing = state.response.items.filter((item) => !stockByProduct.has(item.productId));

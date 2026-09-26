@@ -59,7 +59,8 @@ test("builds a versioned needs_data request for a recognized order", () => {
       { productId: "product-glasses", quantity: 1 },
     ],
   );
-  assert.deepEqual(response.needsData[0].arguments.productIds, [
+  assert.equal(response.needsData[0].tool, "get_current_stock");
+  assert.deepEqual((response.needsData[0] as Extract<(typeof response.needsData)[number], {tool: "get_current_stock"}>).arguments.productIds, [
     "product-gloves-xl",
     "product-glasses",
   ]);
@@ -107,7 +108,7 @@ test("rejects a write tool result", () => {
   const response = agent.resumeWithData(initial.sessionId, [
     {
       requestId: initial.needsData[0].id,
-      tool: "issue_items",
+      tool: "issue_items" as "get_current_stock",
       data: { stocks: [] },
     },
   ]);

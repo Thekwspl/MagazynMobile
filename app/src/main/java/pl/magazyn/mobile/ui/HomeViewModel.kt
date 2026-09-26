@@ -508,6 +508,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                                     status = "DRAFT",
                                     plannedIssueDate = note.suggestedIssueDate ?: java.time.LocalDate.now().toString(),
                                     createdAtEpochMillis = now,
+                                    shipyardId = if (employee == null) recipientShipyard?.id else null,
                                 ),
                             ),
                         )
@@ -704,7 +705,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         val existing = database.shipyardDao().getAllNow().firstOrNull { ImportParser.key(it.name) == shipyardKey }
                         val shipyard = existing?.copy(isArchived = false) ?: ShipyardEntity(UUID.randomUUID().toString(), shipyardName)
                         if (existing == null) database.shipyardDao().insert(shipyard) else database.shipyardDao().restoreById(shipyard.id)
-                        insertResolvedMovement("HISTORICAL_SHIPYARD_IMPORT", null, shipyard.name, item, product)
+                        insertResolvedMovement("HISTORICAL_SHIPYARD_IMPORT", null, shipyard.name, item, product, shipyard.id)
                         val current = database.shipyardDao().findStock(shipyard.id, product.id)?.quantity ?: 0.0
                         database.shipyardDao().upsertStock(ShipyardStockBalanceEntity(shipyard.id, product.id, current + item.quantity))
                     }
@@ -722,6 +723,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         recipientLabel: String,
         item: PendingImportDetail,
         product: ProductEntity,
+        shipyardId: String? = null,
     ) {
         val movementId = UUID.randomUUID().toString()
         database.movementDao().insertMovement(
@@ -734,6 +736,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 effectiveDate = item.effectiveDate,
                 createdAtEpochMillis = System.currentTimeMillis(),
                 note = "Uzupełniono mapowanie importu: ${item.sourceFileName} (bez zmiany magazynu głównego)",
+                shipyardId = shipyardId,
             ),
         )
         database.movementDao().insertLine(

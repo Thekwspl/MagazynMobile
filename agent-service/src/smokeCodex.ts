@@ -39,6 +39,7 @@ try {
       throw new Error(`Codex nie zwrócił oczekiwanego needs_data: ${JSON.stringify(first)}`);
     // The adapter rejects the turn unless a completed warehouse_catalog MCP call occurred.
     const request = first.needsData[0];
+    if (request.tool !== "get_current_stock") throw new Error("Smoke wymaga get_current_stock.");
     const final = await post(`/v1/sessions/${first.sessionId}/tool-results`, { results: [{
       requestId: request.id, tool: "get_current_stock", data: { stocks: request.arguments.productIds.map(productId => ({ productId, available: 10 })) },
     }] });

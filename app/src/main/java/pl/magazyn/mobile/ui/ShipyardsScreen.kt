@@ -145,7 +145,7 @@ fun ShipyardsScreen(
                 editId = editShipyardId,
                 onEdit = { editShipyardId = it },
                 onAdd = { viewModel.addShipyard(newName); newName = "" },
-                onRename = { id, name -> viewModel.renameShipyard(id, name); editShipyardId = null },
+                onRename = { id, name, aliases, tags -> viewModel.updateShipyard(id, name, aliases, tags); editShipyardId = null },
                 onDelete = { pendingDeleteId = it },
                 onDismiss = { manageDialog = false; editShipyardId = null },
             )
@@ -380,7 +380,7 @@ private fun ShipyardManagementDialog(
     editId: String?,
     onEdit: (String?) -> Unit,
     onAdd: () -> Unit,
-    onRename: (String, String) -> Unit,
+    onRename: (String, String, String, String) -> Unit,
     onDelete: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -416,11 +416,17 @@ private fun ShipyardManagementDialog(
     editId?.let { id ->
         val shipyard = shipyards.firstOrNull { it.id == id } ?: return@let
         var editedName by rememberSaveable(id) { mutableStateOf(shipyard.name) }
+        var editedAliases by rememberSaveable(id) { mutableStateOf(shipyard.aliases) }
+        var editedTags by rememberSaveable(id) { mutableStateOf(shipyard.tags) }
         AlertDialog(
             onDismissRequest = { onEdit(null) },
             title = { Text("Edytuj stocznię") },
-            text = { OutlinedTextField(editedName, { editedName = it }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Nazwa") }, singleLine = true) },
-            confirmButton = { Button(onClick = { onRename(id, editedName) }, enabled = editedName.isNotBlank()) { Text("Zapisz") } },
+            text = { Column {
+                OutlinedTextField(editedName, { editedName = it }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Nazwa") }, singleLine = true)
+                OutlinedTextField(editedAliases, { editedAliases = it }, Modifier.fillMaxWidth(), label = { Text("Aliasy (po przecinku)") })
+                OutlinedTextField(editedTags, { editedTags = it }, Modifier.fillMaxWidth(), label = { Text("Tagi (po przecinku)") })
+            } },
+            confirmButton = { Button(onClick = { onRename(id, editedName, editedAliases, editedTags) }, enabled = editedName.isNotBlank()) { Text("Zapisz") } },
             dismissButton = { TextButton(onClick = { onEdit(null) }) { Text("Anuluj") } },
         )
     }

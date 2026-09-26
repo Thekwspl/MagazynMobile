@@ -46,13 +46,18 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
     val products by viewModel.products.collectAsStateWithLifecycle()
     val jobPositions by viewModel.jobPositions.collectAsStateWithLifecycle()
     val shipyards by viewModel.shipyards.collectAsStateWithLifecycle()
+    val leaders by viewModel.shipyardLeaders.collectAsStateWithLifecycle()
     val issueWarning by viewModel.issueWarning.collectAsStateWithLifecycle()
+    val historicalOrders by viewModel.historicalOrders.collectAsStateWithLifecycle()
+    var historicalOpen by rememberSaveable { mutableStateOf(false) }
+    var historicalQuery by rememberSaveable { mutableStateOf("") }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedPartId by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = orders.firstOrNull { it.id == selectedId }
 
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
         Text("Zamówienia", Modifier.padding(16.dp), style = MaterialTheme.typography.headlineSmall)
+        TextButton(onClick = { historicalOpen = true }) { Text("Powiąż historyczne zamówienie ze stocznią") }
         if (orders.isEmpty()) {
             Text("Brak aktywnych szkiców zamówień.", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
@@ -66,6 +71,25 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
             }
         }
     }
+    if (historicalOpen) AlertDialog(
+        onDismissRequest = { historicalOpen = false },
+        title = { Text("Historyczne zamówienia stoczni") },
+        text = { Column(Modifier.heightIn(max = 520.dp)) {
+            OutlinedTextField(historicalQuery, { historicalQuery = it; viewModel.searchHistoricalOrders(it) },
+                Modifier.fillMaxWidth(), label = { Text("Nazwa odbiorcy lub ID zamówienia") })
+            Text("Wpisz co najmniej 2 znaki. Powiązanie nie zmieni historycznej nazwy.")
+            LazyColumn {
+                items(historicalOrders, key = { it.id }) { order ->
+                    Text("${order.recipientLabel} · ${order.status} · ${order.id.take(8)}")
+                    ShipyardAssignment(order.shipyardId, order.recipientLabel, shipyards, leaders) {
+                        viewModel.assignShipyard(order.id, it)
+                    }
+                    HorizontalDivider()
+                }
+            }
+        } },
+        confirmButton = { TextButton(onClick = { historicalOpen = false }) { Text("Gotowe") } },
+    )
     selected?.let { group ->
         ModalBottomSheet(onDismissRequest = { selectedId = null; selectedPartId = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             val part = group.parts.firstOrNull { it.id == selectedPartId }
@@ -100,6 +124,10 @@ fun OrdersScreen(contentPadding: PaddingValues, viewModel: OrdersViewModel = vie
                         onRealize = { employeeId, shipyardName, date, lineIds ->
                             viewModel.realize(part.id, employeeId, shipyardName, date, lineIds)
                         },
+                    )
+                    if (part.employeeId == null) ShipyardAssignment(
+                        part.shipyardId, part.recipient, shipyards, leaders,
+                        onAssign = { viewModel.assignShipyard(part.id, it) },
                     )
                 }
             }

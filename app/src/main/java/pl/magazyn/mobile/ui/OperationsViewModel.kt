@@ -71,6 +71,7 @@ class OperationsViewModel(application: Application) : AndroidViewModel(applicati
                             WarehouseOperationType.SHIPYARD_RETURN -> "Zwrot ze stoczni ${shipyard?.name.orEmpty()}"
                             else -> type.label
                         },
+                        shipyardId = shipyard?.id.takeIf { type == WarehouseOperationType.SHIPYARD_RETURN },
                     ),
                 )
                 resolvedLines.forEach { resolved ->

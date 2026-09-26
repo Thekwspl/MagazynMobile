@@ -28,6 +28,8 @@ private enum class HistoryDateField { FROM, TO }
 @Composable
 fun HistoryScreen(contentPadding: PaddingValues, viewModel: HistoryViewModel = viewModel()) {
     val entries by viewModel.entries.collectAsStateWithLifecycle()
+    val shipyards by viewModel.shipyards.collectAsStateWithLifecycle()
+    val leaders by viewModel.shipyardLeaders.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     var filterName by rememberSaveable { mutableStateOf(HistoryFilter.ALL.name) }
     var selected by remember { mutableStateOf<HistoryEntry?>(null) }
@@ -109,6 +111,12 @@ fun HistoryScreen(contentPadding: PaddingValues, viewModel: HistoryViewModel = v
         val lines by viewModel.lines(entry.id).collectAsStateWithLifecycle(initialValue = emptyList())
         ModalBottomSheet(onDismissRequest = { selected = null }) {
             HistoryDetails(entry, lines, onClose = { selected = null })
+            if (entry.employeeId == null && entry.type in setOf("SHIPYARD_ISSUE", "SHIPYARD_RETURN", "HISTORICAL_SHIPYARD_IMPORT", "HISTORICAL_ISSUE_IMPORT") && entry.recipientLabel.isNotBlank()) {
+                val fresh = entries.firstOrNull { it.id == entry.id } ?: entry
+                ShipyardAssignment(fresh.shipyardId, entry.recipientLabel, shipyards, leaders) {
+                    viewModel.assignShipyard(entry.id, it)
+                }
+            }
         }
     }
     datePickerFor?.let { target ->

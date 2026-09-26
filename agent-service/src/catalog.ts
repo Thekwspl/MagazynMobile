@@ -21,6 +21,7 @@ export interface ShipyardRecord {
   id: string;
   name: string;
   aliases?: string[];
+  tags?: string[];
   leaders?: string[];
 }
 
