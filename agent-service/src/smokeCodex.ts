@@ -35,17 +35,75 @@ try {
     const sync = await fetch(root + "/v1/catalog/full-sync", { method: "PUT", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify(fixture) });
     if (!sync.ok) throw new Error(`Synchronizacja fixture: HTTP ${sync.status}`);
     const first = await post("/v1/sessions/message", { message: "Kowalski jutro 2 rękawice XL i okulary" });
-    if (first.status !== "needs_data" || first.items.length !== 2 || first.needsData.length !== 1)
+    if (first.status !== "needs_data" || first.items.length !== 2 || first.needsData.length < 1)
       throw new Error(`Codex nie zwrócił oczekiwanego needs_data: ${JSON.stringify(first)}`);
-    // The adapter rejects the turn unless a completed warehouse_catalog MCP call occurred.
-    const request = first.needsData[0];
-    if (request.tool !== "get_current_stock") throw new Error("Smoke wymaga get_current_stock.");
-    const final = await post(`/v1/sessions/${first.sessionId}/tool-results`, { results: [{
-      requestId: request.id, tool: "get_current_stock", data: { stocks: request.arguments.productIds.map(productId => ({ productId, available: 10 })) },
-    }] });
-    if (final.status !== "proposal" || final.sessionId !== first.sessionId || final.items.some(i => i.available !== 10))
+
+    const results = first.needsData.map(request => {
+      switch (request.tool) {
+        case "get_current_stock":
+          return {
+            requestId: request.id,
+            tool: request.tool,
+            data: {
+              stocks: request.arguments.productIds.map(productId => ({
+                productId,
+                available: 10,
+              })),
+            },
+          };
+
+        case "get_person_current_items":
+          return {
+            requestId: request.id,
+            tool: request.tool,
+            data: {
+              personId: request.arguments.personId,
+              items: [],
+            },
+          };
+
+        case "get_shipyard_stock":
+          return {
+            requestId: request.id,
+            tool: request.tool,
+            data: {
+              shipyardId: request.arguments.shipyardId,
+              stocks: [],
+            },
+          };
+
+        case "get_active_orders":
+          return {
+            requestId: request.id,
+            tool: request.tool,
+            data: {
+              recipientKind: request.arguments.recipientKind,
+              recipientId: request.arguments.recipientId,
+              orders: [],
+            },
+          };
+
+        case "get_recent_issues":
+          return {
+            requestId: request.id,
+            tool: request.tool,
+            data: {
+              recipientKind: request.arguments.recipientKind,
+              recipientId: request.arguments.recipientId,
+              issues: [],
+            },
+          };
+      }
+    });
+
+    const final = await post(`/v1/sessions/${first.sessionId}/tool-results`, { results });
+
+    if (final.status !== "proposal" ||
+        final.sessionId !== first.sessionId ||
+        final.items.some(i => i.available !== 10))
       throw new Error(`Wznowiony turn nie zwrócił proposal: ${JSON.stringify(final)}`);
-    console.log(`PASS: rzeczywisty Codex turn i MCP search → needs_data → ten sam thread → proposal (sessionId ${first.sessionId}).`);
+
+    console.log(`PASS: rzeczywisty Codex turn i MCP search → needs_data (${first.needsData.length} odczytów) → ten sam thread → proposal (sessionId ${first.sessionId}).`);
   }
 } catch (error) {
   process.exitCode = 1;

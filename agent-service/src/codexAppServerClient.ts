@@ -93,7 +93,7 @@ export class CodexAppServerClient {
     const thread = threadId
       ? await this.request<{ thread: { id: string } }>("thread/resume", { threadId })
       : await this.request<{ thread: { id: string } }>("thread/start", {
-          cwd, approvalPolicy: "never", sandbox: "readOnly", serviceName: "magazyn_mobile_agent_service",
+          cwd, approvalPolicy: "never", sandbox: "read-only", serviceName: "magazyn_mobile_agent_service",
         });
     const id = thread.thread?.id;
     if (!id) throw new Error("CODEX_PROTOCOL_ERROR: brak threadId.");

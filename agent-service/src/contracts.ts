@@ -110,17 +110,99 @@ export const agentResponseJsonSchema = {
         } },
     },
     needsData: {
-      type: "array", items: { type: "object", additionalProperties: false,
-        required: ["id", "tool", "arguments"], properties: {
-          id: { type: "string" }, tool: { enum: ["get_current_stock", "get_person_current_items", "get_shipyard_stock", "get_active_orders", "get_recent_issues"] },
-          arguments: { type: "object", additionalProperties: false,
+      type: "array",
+      items: {
+        anyOf: [
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "tool", "arguments"],
             properties: {
-              productIds: { type: "array", items: { type: "string" } },
-              personId: { type: "string" }, shipyardId: { type: "string" },
-              recipientKind: { enum: ["person", "shipyard"] }, recipientId: { type: "string" },
-              limit: { type: "number" },
-            } },
-        } },
+              id: { type: "string" },
+              tool: { enum: ["get_current_stock"] },
+              arguments: {
+                type: "object",
+                additionalProperties: false,
+                required: ["productIds"],
+                properties: {
+                  productIds: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "tool", "arguments"],
+            properties: {
+              id: { type: "string" },
+              tool: { enum: ["get_person_current_items"] },
+              arguments: {
+                type: "object",
+                additionalProperties: false,
+                required: ["personId"],
+                properties: {
+                  personId: { type: "string" },
+                },
+              },
+            },
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "tool", "arguments"],
+            properties: {
+              id: { type: "string" },
+              tool: { enum: ["get_shipyard_stock"] },
+              arguments: {
+                type: "object",
+                additionalProperties: false,
+                required: ["shipyardId"],
+                properties: {
+                  shipyardId: { type: "string" },
+                },
+              },
+            },
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "tool", "arguments"],
+            properties: {
+              id: { type: "string" },
+              tool: { enum: ["get_active_orders"] },
+              arguments: {
+                type: "object",
+                additionalProperties: false,
+                required: ["recipientKind", "recipientId"],
+                properties: {
+                  recipientKind: { enum: ["person", "shipyard"] },
+                  recipientId: { type: "string" },
+                },
+              },
+            },
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "tool", "arguments"],
+            properties: {
+              id: { type: "string" },
+              tool: { enum: ["get_recent_issues"] },
+              arguments: {
+                type: "object",
+                additionalProperties: false,
+                required: ["recipientKind", "recipientId", "limit"],
+                properties: {
+                  recipientKind: { enum: ["person", "shipyard"] },
+                  recipientId: { type: "string" },
+                  limit: { type: "number" },
+                },
+              },
+            },
+          },
+        ],
+      },
     },
     error: { type: ["object", "null"], additionalProperties: false,
       required: ["code", "message"], properties: {
@@ -132,8 +214,9 @@ export const agentResponseJsonSchema = {
 // Validate the entire model response at the trust boundary, including nested objects.
 type Schema = { type?: string | readonly string[]; const?: unknown; enum?: readonly unknown[];
   required?: readonly string[]; additionalProperties?: boolean;
-  properties?: Record<string, Schema>; items?: Schema };
+  properties?: Record<string, Schema>; items?: Schema; anyOf?: readonly Schema[] };
 const validate = (value: unknown, schema: Schema): boolean => {
+  if (schema.anyOf) return schema.anyOf.some(candidate => validate(value, candidate));
   if (Array.isArray(schema.type)) {
     if (value === null && schema.type.includes("null")) return true;
     return validate(value, { ...schema, type: schema.type.find(type => type !== "null") });
