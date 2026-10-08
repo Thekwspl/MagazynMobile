@@ -12,6 +12,29 @@ export interface Candidate {
   kind: "person" | "product" | "shipyard" | "task_place";
 }
 
+export type ClarificationType = "choice" | "yes_no" | "text";
+
+export interface ClarificationQuestion {
+  id: string;
+  question: string;
+  type: ClarificationType;
+  candidates: Candidate[];
+  required: boolean;
+}
+
+export interface ClarificationAnswer {
+  questionId: string;
+  candidateId?: string;
+  text?: string;
+}
+
+export interface ResolvedClarificationAnswer {
+  questionId: string;
+  question: string;
+  answer: string;
+  candidate?: Candidate;
+}
+
 export interface OrderItemProposal {
   productId: string;
   label: string;
@@ -37,8 +60,11 @@ export interface AgentResponse {
   deliveryDate?: string | null;
   items: OrderItemProposal[];
   warnings: string[];
+  /** @deprecated Compatibility only. Use clarifications. */
   questions: string[];
+  /** @deprecated Compatibility only. Use clarifications[].candidates. */
   candidates: Candidate[];
+  clarifications: ClarificationQuestion[];
   needsData: ReadOnlyToolRequest[];
   error?: { code: string; message: string } | null;
 }
@@ -62,6 +88,7 @@ export const agentResponseJsonSchema = {
     "warnings",
     "questions",
     "candidates",
+    "clarifications",
     "needsData",
     "recipient",
     "deliveryDate",
@@ -108,6 +135,33 @@ export const agentResponseJsonSchema = {
           id: { type: "string" }, label: { type: "string" },
           kind: { enum: ["person", "product", "shipyard", "task_place"] },
         } },
+    },
+    clarifications: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "question", "type", "candidates", "required"],
+        properties: {
+          id: { type: "string" },
+          question: { type: "string" },
+          type: { enum: ["choice", "yes_no", "text"] },
+          candidates: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "label", "kind"],
+              properties: {
+                id: { type: "string" },
+                label: { type: "string" },
+                kind: { enum: ["person", "product", "shipyard", "task_place"] },
+              },
+            },
+          },
+          required: { type: "boolean" },
+        },
+      },
     },
     needsData: {
       type: "array",
@@ -225,6 +279,7 @@ const validate = (value: unknown, schema: Schema): boolean => {
   if (schema.enum && !schema.enum.includes(value)) return false;
   if (schema.type === "string") return typeof value === "string";
   if (schema.type === "number") return typeof value === "number" && Number.isFinite(value);
+  if (schema.type === "boolean") return typeof value === "boolean";
   if (schema.type === "array") return Array.isArray(value) && value.every((item) => validate(item, schema.items!));
   if (schema.type === "object") {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -245,6 +300,8 @@ export function parseAgentResponse(text: string): AgentResponse {
   if (parsed.needsData.length > 4 || new Set(parsed.needsData.map(r => r.id)).size !== parsed.needsData.length ||
     parsed.needsData.some(r => !validToolRequest(r)))
     throw new Error("CODEX_PROTOCOL_ERROR: nieprawidłowe żądanie odczytu.");
+  if (!validClarifications(parsed))
+    throw new Error("CODEX_PROTOCOL_ERROR: nieprawidłowy zestaw pytań doprecyzowujących.");
   return value as AgentResponse;
 }
 
@@ -253,10 +310,55 @@ const object = (value: unknown): value is Record<string, unknown> =>
 const shape = (value: unknown, keys: string[]): value is Record<string, unknown> =>
   object(value) && Object.keys(value).length === keys.length && keys.every(k => k in value);
 const id = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 128;
+const nonBlank = (value: unknown, max: number): value is string =>
+  typeof value === "string" && value.trim().length > 0 && value.length <= max;
 const quantity = (value: unknown, positive = false): value is number =>
   typeof value === "number" && Number.isFinite(value) && (!positive || value > 0);
 const recipient = (value: Record<string, unknown>): boolean =>
   (value.recipientKind === "person" || value.recipientKind === "shipyard") && id(value.recipientId);
+
+function validClarifications(response: AgentResponse): boolean {
+  const questions = response.clarifications;
+  if (questions.length > 20 || new Set(questions.map(question => question.id)).size !== questions.length) return false;
+  if ((response.status === "needs_user_choice") !== (questions.length > 0)) return false;
+  return questions.every(question => {
+    if (!id(question.id) || !nonBlank(question.question, 1000) || typeof question.required !== "boolean") return false;
+    if (question.type === "choice") return question.candidates.length > 0 &&
+      question.candidates.length <= 100 && new Set(question.candidates.map(candidate => candidate.id)).size === question.candidates.length &&
+      question.candidates.every(candidate => id(candidate.id) && nonBlank(candidate.label, 500));
+    return (question.type === "yes_no" || question.type === "text") && question.candidates.length === 0;
+  });
+}
+
+export function resolveClarificationAnswers(questions: ClarificationQuestion[], value: unknown):
+  { ok: true; answers: ResolvedClarificationAnswer[] } | { ok: false; message: string } {
+  if (!Array.isArray(value)) return { ok: false, message: "Odpowiedzi muszą być tablicą." };
+  const raw = value as unknown[];
+  const records = raw.filter(object);
+  if (records.length !== raw.length) return { ok: false, message: "Niepoprawny format odpowiedzi." };
+  const ids = records.map(answer => answer.questionId);
+  if (new Set(ids).size !== ids.length) return { ok: false, message: "Każde pytanie może mieć tylko jedną odpowiedź." };
+  const resolved: ResolvedClarificationAnswer[] = [];
+  for (const answer of records) {
+    if (!id(answer.questionId)) return { ok: false, message: "Niepoprawne ID pytania." };
+    const question = questions.find(item => item.id === answer.questionId);
+    if (!question) return { ok: false, message: "Pytanie nie należy do aktualnej rundy." };
+    if (question.type === "choice") {
+      if (!shape(answer, ["questionId", "candidateId"]) || !id(answer.candidateId))
+        return { ok: false, message: "Pytanie wyboru wymaga kandydata." };
+      const candidate = question.candidates.find(item => item.id === answer.candidateId);
+      if (!candidate) return { ok: false, message: "Kandydat nie należy do wskazanego pytania." };
+      resolved.push({ questionId: question.id, question: question.question, answer: candidate.label, candidate });
+    } else {
+      if (!shape(answer, ["questionId", "text"]) || !nonBlank(answer.text, 2000))
+        return { ok: false, message: "Pytanie wymaga odpowiedzi tekstowej." };
+      resolved.push({ questionId: question.id, question: question.question, answer: answer.text.trim() });
+    }
+  }
+  if (questions.some(question => question.required && !resolved.some(answer => answer.questionId === question.id)))
+    return { ok: false, message: "Brakuje odpowiedzi na wymagane pytanie." };
+  return { ok: true, answers: resolved };
+}
 
 export function validToolRequest(value: unknown): value is ReadOnlyToolRequest {
   if (!shape(value, ["id", "tool", "arguments"]) || !id(value.id) || !object(value.arguments)) return false;

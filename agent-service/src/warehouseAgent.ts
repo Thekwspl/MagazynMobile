@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { CatalogSnapshot, PersonRecord, ProductRecord } from "./catalog.js";
 import {
   PROTOCOL_VERSION,
+  resolveClarificationAnswers,
   type AgentResponse,
   type Candidate,
+  type ClarificationAnswer,
   type OrderItemProposal,
   type ReadOnlyToolResult,
   validToolResult,
@@ -96,8 +98,21 @@ export class WarehouseAgent {
     const state = this.sessions.get(sessionId);
     if (!state) return this.error(sessionId, "SESSION_NOT_FOUND", "Nie znaleziono sesji.");
     if (state.response.status !== "needs_user_choice") return this.error(sessionId, "INVALID_STATE", "Sesja nie oczekuje na wybór.");
-    const candidate = state.response.candidates.find(item => item.id === candidateId);
-    if (!candidate) return this.error(sessionId, "INVALID_CHOICE", "Nie znaleziono wskazanego kandydata.");
+    const matches = state.response.clarifications.filter(question => question.type === "choice" &&
+      question.candidates.some(candidate => candidate.id === candidateId));
+    if (matches.length !== 1 || state.response.clarifications.length !== 1)
+      return this.error(sessionId, "INVALID_CHOICE", "Stary endpoint wyboru obsługuje tylko jedno pytanie choice.");
+    return this.resumeWithAnswers(sessionId, [{ questionId: matches[0].id, candidateId }]);
+  }
+
+  resumeWithAnswers(sessionId: string, answers: ClarificationAnswer[] | unknown): AgentResponse {
+    const state = this.sessions.get(sessionId);
+    if (!state) return this.error(sessionId, "SESSION_NOT_FOUND", "Nie znaleziono sesji.");
+    if (state.response.status !== "needs_user_choice") return this.error(sessionId, "INVALID_STATE", "Sesja nie oczekuje na odpowiedzi.");
+    const validated = resolveClarificationAnswers(state.response.clarifications, answers);
+    if (!validated.ok) return this.error(sessionId, "INVALID_ANSWERS", validated.message);
+    const candidate = validated.answers.length === 1 ? validated.answers[0].candidate : undefined;
+    if (!candidate) return this.error(sessionId, "INVALID_ANSWERS", "Tryb lokalny oczekuje pojedynczego wyboru.");
     const response = this.resolve(sessionId, state.message, candidate);
     this.sessions.set(sessionId, { ...state, response });
     return structuredClone(response);
@@ -135,6 +150,16 @@ export class WarehouseAgent {
             kind: "shipyard" as const,
           })),
         ],
+        clarifications: [{
+          id: "recipient-choice",
+          question: "Którą osobę lub stocznię masz na myśli?",
+          type: "choice",
+          candidates: [
+            ...people.map((person) => ({ id: person.id, label: `${person.firstName} ${person.lastName}`, kind: "person" as const })),
+            ...shipyards.map((shipyard) => ({ id: shipyard.id, label: shipyard.name, kind: "shipyard" as const })),
+          ],
+          required: true,
+        }],
       };
     }
     if (people.length + shipyards.length === 0) {
@@ -147,6 +172,14 @@ export class WarehouseAgent {
           label: `${person.firstName} ${person.lastName}`,
           kind: "person" as const,
         })), ...catalog.shipyards.map((yard) => ({ id: yard.id, label: yard.name, kind: "shipyard" as const }))],
+        clarifications: [{
+          id: "recipient-choice",
+          question: "Nie rozpoznano odbiorcy. Wybierz osobę lub stocznię.",
+          type: "choice",
+          candidates: [...catalog.people.map((person) => ({ id: person.id, label: `${person.firstName} ${person.lastName}`, kind: "person" as const })),
+            ...catalog.shipyards.map((yard) => ({ id: yard.id, label: yard.name, kind: "shipyard" as const }))],
+          required: true,
+        }],
       };
     }
 
@@ -178,6 +211,8 @@ export class WarehouseAgent {
         status: "needs_user_choice",
         questions: ["Który produkt lub wariant masz na myśli?"],
         candidates,
+        clarifications: [{ id: "product-choice", question: "Który produkt lub wariant masz na myśli?",
+          type: "choice", candidates, required: true }],
       };
     }
     const matchedProducts = productMatches.map(({ product }) => product);
@@ -197,6 +232,15 @@ export class WarehouseAgent {
         candidates: catalog.products.filter(product => !product.hidden).map(product => ({
           id: product.id, label: productLabel(product), kind: "product" as const,
         })),
+        clarifications: [{
+          id: "product-choice",
+          question: "Jaki produkt dodać do zamówienia?",
+          type: "choice",
+          candidates: catalog.products.filter(product => !product.hidden).map(product => ({
+            id: product.id, label: productLabel(product), kind: "product" as const,
+          })),
+          required: true,
+        }],
       };
     }
 
@@ -255,6 +299,7 @@ export class WarehouseAgent {
       warnings: [],
       questions: [],
       candidates: [],
+      clarifications: [],
       needsData: [],
     };
   }

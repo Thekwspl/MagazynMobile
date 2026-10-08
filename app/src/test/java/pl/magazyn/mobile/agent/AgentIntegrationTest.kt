@@ -27,6 +27,9 @@ class AgentIntegrationTest {
             .put("quantity", 2).put("unit", "para").put("available", if (status == "proposal") 0 else JSONObject.NULL)) } })
         .put("warnings", JSONArray()).put("questions", JSONArray().put("Który produkt?"))
         .put("candidates", JSONArray().put(JSONObject().put("id", "g").put("label", "Rękawice XL").put("kind", "product")))
+        .put("clarifications", JSONArray().apply { if (status == "needs_user_choice") put(JSONObject()
+            .put("id", "q-product").put("question", "Który produkt?").put("type", "choice").put("required", true)
+            .put("candidates", JSONArray().put(JSONObject().put("id", "g").put("label", "Rękawice XL").put("kind", "product")))) })
         .put("needsData", JSONArray().apply { if (status == "needs_data") put(JSONObject().put("id", "r1")
             .put("tool", "get_current_stock").put("arguments", JSONObject().put("productIds", JSONArray(products)))) })
         .put("error", if (status == "error") JSONObject().put("code", "X").put("message", "Błąd agenta") else JSONObject.NULL)
@@ -69,6 +72,8 @@ class AgentIntegrationTest {
     private inner class Client(private val initial: String) : AgentClient {
         var sent: JSONObject? = null
         var chosen: String? = null
+        var answerCalls = 0
+        var sentAnswers: List<AgentClarificationAnswer>? = null
         override suspend fun authStatus() = JSONObject().put("account", JSONObject().put("type", "chatgpt"))
         override suspend fun fullSync(catalog: JSONObject) { assertEquals(1L, catalog.getLong("revision")) }
         override suspend fun message(text: String) = AgentProtocol.parse(initial)
@@ -76,6 +81,12 @@ class AgentIntegrationTest {
             assertEquals("s1", sessionId)
             sent = results
             return AgentProtocol.parse(response("proposal"))
+        }
+        override suspend fun answers(sessionId: String, answers: List<AgentClarificationAnswer>): AgentReply {
+            assertEquals("s1", sessionId)
+            answerCalls++
+            sentAnswers = answers
+            return AgentProtocol.parse(response("needs_data"))
         }
         override suspend fun choice(sessionId: String, candidateId: String): AgentReply {
             assertEquals("s1", sessionId)
@@ -118,6 +129,33 @@ class AgentIntegrationTest {
         assertNull(choiceClient.chosen)
         assertEquals(AgentStatus.PROPOSAL, repo.choose(pending, "g").status)
         assertEquals("g", choiceClient.chosen)
+    }
+
+    @Test fun `phone keeps mixed answers locally and repository sends one batch request`() = runBlocking {
+        val questions = JSONArray()
+            .put(JSONObject().put("id", "q1").put("question", "Który kask?").put("type", "choice").put("required", true)
+                .put("candidates", JSONArray().put(JSONObject().put("id", "helmet-yellow").put("label", "Kask Żółty").put("kind", "product"))))
+            .put(JSONObject().put("id", "q2").put("question", "Czy chodzi o 2 opakowania rękawic?").put("type", "yes_no")
+                .put("required", true).put("candidates", JSONArray()))
+            .put(JSONObject().put("id", "q3").put("question", "Jaki rozmiar?").put("type", "text")
+                .put("required", true).put("candidates", JSONArray()))
+        val mixed = JSONObject(response("needs_user_choice")).put("clarifications", questions).toString()
+        val client = Client(mixed)
+        val repository = AgentRepository(client, Source(mapOf("g" to 4.0)), { 1 })
+        val pending = repository.analyze("Kowalski jutro 2 rękawice Monterskie 10 i kask")
+        val partial = listOf(
+            AgentClarificationAnswer("q1", candidateId = "helmet-yellow"),
+            AgentClarificationAnswer("q2", text = "Tak"),
+        )
+        assertFalse(areRequiredClarificationsAnswered(pending.clarifications, partial))
+        try { repository.answer(pending, partial); fail("Accepted incomplete answers") } catch (_: AgentFailure) { }
+        assertEquals(0, client.answerCalls)
+
+        val complete = partial + AgentClarificationAnswer("q3", text = "10")
+        assertTrue(areRequiredClarificationsAnswered(pending.clarifications, complete))
+        assertEquals(AgentStatus.PROPOSAL, repository.answer(pending, complete).status)
+        assertEquals(1, client.answerCalls)
+        assertEquals(listOf("q1", "q2", "q3"), client.sentAnswers!!.map { it.questionId })
     }
 
     private fun oneResponse(reply: String?, status: Int = 200, pauseMs: Long = 0, test: suspend (Int) -> Unit) = runBlocking {

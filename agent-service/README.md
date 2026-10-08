@@ -24,7 +24,7 @@ Sprawdź `GET /v1/auth/status`. Konto musi mieć `account.type = "chatgpt"`; log
 
 `PUT /v1/catalog/full-sync` przyjmuje stabilny katalog (`revision`, `people`, `products`, `shipyards`, `taskPlaces`). `POST /v1/sessions/message` przyjmuje `{ "message": "..." }`. Jeśli odpowiedź ma `status: "needs_data"`, klient odczytuje potrzebne dane z telefonu i wysyła `POST /v1/sessions/{sessionId}/tool-results` z `{ "results": [{ "requestId": "...", "tool": "get_current_stock", "data": { "stocks": [{ "productId": "...", "available": 10 }] } }] }`. Wynik `proposal` wymaga późniejszego zatwierdzenia w aplikacji.
 
-Jeśli agent zwróci `needs_user_choice`, Android pokazuje pytanie i kandydatów. Dopiero ręczny wybór wywołuje `POST /v1/sessions/{sessionId}/choice` z `{ "candidateId": "..." }`. Usługa wznawia ten sam wątek i zwraca kolejną odpowiedź v1.
+Jeśli agent zwróci `needs_user_choice`, Android pokazuje wszystkie strukturalne `clarifications` bieżącej rundy. Każde pytanie ma własne `id`, `type`, `required` i — dla `choice` — własnych kandydatów. Po uzupełnieniu wszystkich wymaganych odpowiedzi Android wysyła je razem przez `POST /v1/sessions/{sessionId}/answers` z `{ "answers": [...] }`. Usługa waliduje cały zestaw, wznawia ten sam wątek Codex dokładnie raz i może zwrócić następną rundę pytań. Stary `/choice` pozostaje tylko dla zgodności z pojedynczym pytaniem `choice`.
 
 ## Test developerski Androida
 

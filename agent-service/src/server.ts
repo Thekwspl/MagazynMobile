@@ -5,7 +5,7 @@ import { CatalogStore, type CatalogDelta, type CatalogSnapshot } from "./catalog
 import { searchCatalog, SEARCH_TOOLS, type SearchTool } from "./catalogTools.js";
 import { CodexAppServerClient } from "./codexAppServerClient.js";
 import { CodexWarehouseAgent, type CodexRunner } from "./codexWarehouseAgent.js";
-import type { ReadOnlyToolResult } from "./contracts.js";
+import type { ClarificationAnswer, ReadOnlyToolResult } from "./contracts.js";
 import { WarehouseAgent } from "./warehouseAgent.js";
 
 const json = (response: ServerResponse, status: number, value: unknown): void => {
@@ -84,6 +84,14 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
         return json(response, 200, mode === "codex"
           ? await agent.resumeWithData(sessionId, payload.results)
           : local.resumeWithData(sessionId, payload.results));
+      }
+      const answers = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/answers$/);
+      if (request.method === "POST" && answers) {
+        const payload = await body<{ answers: ClarificationAnswer[] }>(request);
+        const sessionId = decodeURIComponent(answers[1]);
+        return json(response, 200, mode === "codex"
+          ? await agent.resumeWithAnswers(sessionId, payload.answers)
+          : local.resumeWithAnswers(sessionId, payload.answers));
       }
       const choice = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/choice$/);
       if (request.method === "POST" && choice) {

@@ -20,6 +20,8 @@ const response = (sessionId: string, status: AgentResponse["status"]): AgentResp
   items: [{ productId: "g", label: "Rękawice XL", quantity: 2, unit: "para", available: status === "proposal" ? 3 : null }],
   warnings: [], questions: status === "needs_user_choice" ? ["Którego Kowalskiego?"] : [],
   candidates: status === "needs_user_choice" ? [{ id: "p1", label: "Jan Kowalski", kind: "person" }] : [],
+  clarifications: status === "needs_user_choice" ? [{ id: "recipient-1", question: "Którego Kowalskiego?", type: "choice",
+    candidates: [{ id: "p1", label: "Jan Kowalski", kind: "person" }], required: true }] : [],
   needsData: status === "needs_data" ?
     [{ id: "req1", tool: "get_current_stock", arguments: { productIds: ["g"] } }] : [],
 });
@@ -35,7 +37,7 @@ class FakeRunner implements CodexRunner {
     this.calls.push({ prompt, threadId });
     const sessionId = prompt.match(/sessionId[: ]+([\da-f-]{36})/)?.[1] ?? "";
     const value = response(sessionId, threadId
-      ? (prompt.includes("ręcznie wybrał") && !this.forceProposalOnChoice ? "needs_data" : "proposal")
+      ? (prompt.includes("odpowiedział na wszystkie pytania") && !this.forceProposalOnChoice ? "needs_data" : "proposal")
       : this.resultStatus);
     if (this.malformed) (value as unknown as Record<string, unknown>).candidates = [{}];
     return { threadId: threadId ?? `thread-${sessionId}`, response: parseAgentResponse(JSON.stringify(value)), toolCalls: 2 };
@@ -67,7 +69,7 @@ test("choice, auth gate and invalid response", async () => {
     fake.auth = true; fake.resultStatus = "needs_user_choice";
     const choice = await agent.start("Kowalski");
     assert.equal(choice.status, "needs_user_choice");
-    assert.equal(choice.candidates[0].id, "p1");
+    assert.equal(choice.clarifications[0].candidates[0].id, "p1");
     fake.malformed = true;
     await assert.rejects(agent.start("Kowalski"), /CODEX_PROTOCOL_ERROR/);
   } finally { agent.close(); }
@@ -124,7 +126,7 @@ test("HTTP message endpoint uses Codex adapter", async () => {
     assert.equal(denied.status, 403);
   } finally { service.close(); }
 });
-test("HTTP choice endpoint preserves session and rejects unknown candidate", async () => {
+test("HTTP answers endpoint preserves session and rejects unknown candidate", async () => {
   const fake = new FakeRunner(); fake.resultStatus = "needs_user_choice";
   const service = createAgentService({ mode: "codex", clientToken, codex: {
     start: fake.start.bind(fake), accountRead: fake.accountRead.bind(fake),
@@ -140,9 +142,11 @@ test("HTTP choice endpoint preserves session and rejects unknown candidate", asy
       method: "POST", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify(payload),
     }).then(reply => reply.json() as Promise<AgentResponse>);
     const first = await send("/v1/sessions/message", { message: "Kowalski rękawice" });
-    const invalid = await send(`/v1/sessions/${first.sessionId}/choice`, { candidateId: "unknown" });
-    assert.equal(invalid.error?.code, "INVALID_CHOICE");
-    const next = await send(`/v1/sessions/${first.sessionId}/choice`, { candidateId: "p1" });
+    const invalid = await send(`/v1/sessions/${first.sessionId}/answers`,
+      { answers: [{ questionId: "recipient-1", candidateId: "unknown" }] });
+    assert.equal(invalid.error?.code, "INVALID_ANSWERS");
+    const next = await send(`/v1/sessions/${first.sessionId}/answers`,
+      { answers: [{ questionId: "recipient-1", candidateId: "p1" }] });
     assert.equal(next.sessionId, first.sessionId);
     assert.equal(next.status, "needs_data");
     const final = await send(`/v1/sessions/${first.sessionId}/tool-results`, { results: [{ requestId: "req1", tool: "get_current_stock", data: { stocks: [{ productId: "g", available: 3 }] } }] });

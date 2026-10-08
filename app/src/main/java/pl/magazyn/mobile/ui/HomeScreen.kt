@@ -26,6 +26,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import pl.magazyn.mobile.domain.ParsedNote
 import pl.magazyn.mobile.domain.ParsedInputKind
+import pl.magazyn.mobile.agent.AgentClarificationAnswer
+import pl.magazyn.mobile.agent.AgentClarificationType
+import pl.magazyn.mobile.agent.areRequiredClarificationsAnswered
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -100,13 +103,16 @@ fun HomeScreen(
                         codexLoading = codexAnalysis.isLoading,
                         codexError = codexAnalysis.error,
                         codexChoice = codexAnalysis.reply,
+                        codexAnswers = codexAnalysis.answers,
                         onRecognizeLocal = {
                             viewModel.openReview(viewModel.recognize(query))
                             onReview()
                         },
                         onRecognizeAi = { viewModel.analyzeWithAi(query) },
                         onRecognizeCodex = { viewModel.analyzeWithCodex(query) },
-                        onChooseCodex = viewModel::chooseCodexCandidate,
+                        onSelectCodexChoice = viewModel::setCodexChoiceAnswer,
+                        onChangeCodexText = viewModel::setCodexTextAnswer,
+                        onSubmitCodexAnswers = viewModel::submitCodexAnswers,
                     )
                     QuickButtons(
                         onNewOrder = {
@@ -338,10 +344,13 @@ private fun SmartInput(
     codexLoading: Boolean,
     codexError: String?,
     codexChoice: pl.magazyn.mobile.agent.AgentReply?,
+    codexAnswers: Map<String, AgentClarificationAnswer>,
     onRecognizeLocal: () -> Unit,
     onRecognizeAi: () -> Unit,
     onRecognizeCodex: () -> Unit,
-    onChooseCodex: (String) -> Unit,
+    onSelectCodexChoice: (String, String) -> Unit,
+    onChangeCodexText: (String, String) -> Unit,
+    onSubmitCodexAnswers: () -> Unit,
 ) {
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(11.dp)) {
@@ -372,12 +381,55 @@ private fun SmartInput(
             aiError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
             codexError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
             if (codexChoice?.status == pl.magazyn.mobile.agent.AgentStatus.NEEDS_USER_CHOICE) {
-                codexChoice.questions.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                codexChoice.candidates.forEach { candidate ->
-                    OutlinedButton(onClick = { onChooseCodex(candidate.id) }, enabled = !codexLoading, modifier = Modifier.fillMaxWidth()) {
-                        Text("${candidate.label} (${candidate.kind})")
+                codexChoice.clarifications.forEach { question ->
+                    val answer = codexAnswers[question.id]
+                    Column(Modifier.fillMaxWidth().padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(question.question, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        when (question.type) {
+                            AgentClarificationType.CHOICE -> question.candidates.forEach { candidate ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable(enabled = !codexLoading) {
+                                        onSelectCodexChoice(question.id, candidate.id)
+                                    },
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    RadioButton(
+                                        selected = answer?.candidateId == candidate.id,
+                                        onClick = { onSelectCodexChoice(question.id, candidate.id) },
+                                        enabled = !codexLoading,
+                                    )
+                                    Text(candidate.label)
+                                }
+                            }
+                            AgentClarificationType.YES_NO -> {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(selected = answer?.text == "Tak", onClick = { onChangeCodexText(question.id, "Tak") },
+                                        enabled = !codexLoading, label = { Text("Tak") })
+                                    FilterChip(selected = answer?.text == "Nie", onClick = { onChangeCodexText(question.id, "Nie") },
+                                        enabled = !codexLoading, label = { Text("Nie") })
+                                }
+                                OutlinedTextField(
+                                    value = answer?.text?.takeUnless { it == "Tak" || it == "Nie" }.orEmpty(),
+                                    onValueChange = { onChangeCodexText(question.id, it) },
+                                    enabled = !codexLoading,
+                                    label = { Text("Inna odpowiedź") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                            AgentClarificationType.TEXT -> OutlinedTextField(
+                                value = answer?.text.orEmpty(),
+                                onValueChange = { onChangeCodexText(question.id, it) },
+                                enabled = !codexLoading,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                 }
+                Button(
+                    onClick = onSubmitCodexAnswers,
+                    enabled = !codexLoading && areRequiredClarificationsAnswered(codexChoice.clarifications, codexAnswers.values),
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                ) { Text("Wyślij odpowiedzi") }
             }
             Text("AI tworzy tylko propozycję — niczego nie zapisuje automatycznie.", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
         }

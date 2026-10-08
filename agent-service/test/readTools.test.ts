@@ -22,7 +22,7 @@ const results: ReadOnlyToolResult[] = [
 const reply = (sessionId: string, needsData: ReadOnlyToolRequest[], status: AgentResponse["status"] = "needs_data"): AgentResponse => ({
   schemaVersion: 1, sessionId, status, intent: "ORDER", recipient: { id: "p", label: "Jan", kind: "person" }, deliveryDate: null,
   items: [{ productId: "g", label: "Rękawice", unit: "szt.", quantity: 1, available: status === "proposal" ? -2 : null }],
-  warnings: [], questions: [], candidates: [], needsData, error: null,
+  warnings: [], questions: [], candidates: [], clarifications: [], needsData, error: null,
 });
 
 test("five discriminated requests and minimal results validate; hostile shapes fail", () => {

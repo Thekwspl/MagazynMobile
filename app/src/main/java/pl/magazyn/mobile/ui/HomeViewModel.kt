@@ -54,12 +54,15 @@ import pl.magazyn.mobile.data.NotebookTaskStepPersonEntity
 import pl.magazyn.mobile.data.TaskPlaceEntity
 import pl.magazyn.mobile.data.ProductVisibilityStore
 import pl.magazyn.mobile.agent.AgentFailure
+import pl.magazyn.mobile.agent.AgentClarificationAnswer
+import pl.magazyn.mobile.agent.AgentClarificationType
 import pl.magazyn.mobile.agent.AgentReply
 import pl.magazyn.mobile.agent.AgentRepository
 import pl.magazyn.mobile.agent.AgentRevision
 import pl.magazyn.mobile.agent.AgentStatus
 import pl.magazyn.mobile.agent.RoomAgentDataSource
 import pl.magazyn.mobile.agent.AgentConnectionStore
+import pl.magazyn.mobile.agent.areRequiredClarificationsAnswered
 
 data class HomeUiState(
     val employeeCount: Int = 0,
@@ -80,6 +83,7 @@ data class CodexAnalysisUiState(
     val error: String? = null,
     val reply: AgentReply? = null,
     val result: ParsedNote? = null,
+    val answers: Map<String, AgentClarificationAnswer> = emptyMap(),
 )
 
 data class NoteReviewUiState(
@@ -309,6 +313,41 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 showCodexReply(repository, repository.choose(reply, candidateId))
             }.onFailure {
                 _codexAnalysis.value = CodexAnalysisUiState(error = it.message ?: "Nie udało się wznowić sesji.", reply = reply)
+            }
+        }
+    }
+
+    fun setCodexChoiceAnswer(questionId: String, candidateId: String) {
+        val state = _codexAnalysis.value
+        val question = state.reply?.clarifications?.firstOrNull { it.id == questionId } ?: return
+        if (question.type != AgentClarificationType.CHOICE || question.candidates.none { it.id == candidateId }) return
+        _codexAnalysis.value = state.copy(answers = state.answers +
+            (questionId to AgentClarificationAnswer(questionId, candidateId = candidateId)))
+    }
+
+    fun setCodexTextAnswer(questionId: String, text: String) {
+        val state = _codexAnalysis.value
+        val question = state.reply?.clarifications?.firstOrNull { it.id == questionId } ?: return
+        if (question.type == AgentClarificationType.CHOICE) return
+        val answers = if (text.isBlank()) state.answers - questionId else state.answers +
+            (questionId to AgentClarificationAnswer(questionId, text = text))
+        _codexAnalysis.value = state.copy(answers = answers)
+    }
+
+    fun submitCodexAnswers() {
+        val state = _codexAnalysis.value
+        if (state.isLoading) return
+        val reply = state.reply ?: return
+        val answers = reply.clarifications.mapNotNull { state.answers[it.id] }
+        if (!areRequiredClarificationsAnswered(reply.clarifications, answers)) return
+        _codexAnalysis.value = state.copy(isLoading = true, error = null)
+        viewModelScope.launch {
+            runCatching {
+                val repository = activeAgentRepository ?: throw AgentFailure("Sesja Codex wygasła. Uruchom analizę ponownie.")
+                showCodexReply(repository, repository.answer(reply, answers))
+            }.onFailure {
+                _codexAnalysis.value = state.copy(isLoading = false,
+                    error = it.message ?: "Nie udało się wysłać odpowiedzi.")
             }
         }
     }

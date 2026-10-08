@@ -8,6 +8,15 @@ class AgentFailure(message: String, cause: Throwable? = null) : Exception(messag
 
 enum class AgentStatus { NEEDS_DATA, NEEDS_USER_CHOICE, PROPOSAL, ERROR }
 data class AgentCandidate(val id: String, val label: String, val kind: String)
+enum class AgentClarificationType { CHOICE, YES_NO, TEXT }
+data class AgentClarificationQuestion(
+    val id: String,
+    val question: String,
+    val type: AgentClarificationType,
+    val candidates: List<AgentCandidate>,
+    val required: Boolean,
+)
+data class AgentClarificationAnswer(val questionId: String, val candidateId: String? = null, val text: String? = null)
 data class AgentRecipient(val id: String, val label: String, val kind: String)
 data class AgentItem(val productId: String, val label: String, val quantity: Double, val unit: String, val available: Double?)
 sealed interface AgentToolRequest {
@@ -31,14 +40,34 @@ data class AgentReply(
     val deliveryDate: String?,
     val items: List<AgentItem>,
     val warnings: List<String>,
+    @Deprecated("Compatibility only; use clarifications")
     val questions: List<String>,
+    @Deprecated("Compatibility only; use clarifications[].candidates")
     val candidates: List<AgentCandidate>,
+    val clarifications: List<AgentClarificationQuestion>,
     val needsData: List<AgentToolRequest>,
     val error: String?,
 )
 
 private fun <T> JSONArray.typed(block: (JSONObject) -> T): List<T> = (0 until length()).map { block(getJSONObject(it)) }
 private fun JSONArray.strings(): List<String> = (0 until length()).map { getString(it) }
+
+fun areRequiredClarificationsAnswered(
+    questions: List<AgentClarificationQuestion>,
+    answers: Collection<AgentClarificationAnswer>,
+): Boolean {
+    if (answers.map { it.questionId }.distinct().size != answers.size) return false
+    if (answers.any { answer ->
+            val question = questions.firstOrNull { it.id == answer.questionId } ?: return@any true
+            when (question.type) {
+                AgentClarificationType.CHOICE -> answer.text != null ||
+                    question.candidates.none { it.id == answer.candidateId }
+                AgentClarificationType.YES_NO, AgentClarificationType.TEXT ->
+                    answer.candidateId != null || answer.text.isNullOrBlank() || (answer.text?.length ?: 0) > 2000
+            }
+        }) return false
+    return questions.none { question -> question.required && answers.none { it.questionId == question.id } }
+}
 
 object AgentProtocol {
     private fun JSONObject.exact(vararg expected: String) {
@@ -54,6 +83,30 @@ object AgentProtocol {
         val kind = args.text("recipientKind")
         if (kind != "person" && kind != "shipyard") throw AgentFailure("Niepoprawny rodzaj odbiorcy agenta.")
         return AgentRecipientKey(kind, args.text("recipientId"))
+    }
+    private fun candidate(json: JSONObject): AgentCandidate {
+        json.exact("id", "label", "kind")
+        val candidate = AgentCandidate(json.text("id"), json.getString("label"), json.getString("kind"))
+        if (candidate.label.isBlank() || candidate.label.length > 500 ||
+            candidate.kind !in setOf("person", "product", "shipyard", "task_place"))
+            throw AgentFailure("Niepoprawny kandydat odpowiedzi agenta.")
+        return candidate
+    }
+    private fun clarification(json: JSONObject): AgentClarificationQuestion {
+        json.exact("id", "question", "type", "candidates", "required")
+        val type = when (json.getString("type")) {
+            "choice" -> AgentClarificationType.CHOICE
+            "yes_no" -> AgentClarificationType.YES_NO
+            "text" -> AgentClarificationType.TEXT
+            else -> throw AgentFailure("Nieobsługiwany typ pytania agenta.")
+        }
+        val question = json.getString("question")
+        val candidates = json.getJSONArray("candidates").typed(::candidate)
+        if (question.isBlank() || question.length > 1000 ||
+            (type == AgentClarificationType.CHOICE && (candidates.isEmpty() || candidates.map { it.id }.distinct().size != candidates.size)) ||
+            (type != AgentClarificationType.CHOICE && candidates.isNotEmpty()))
+            throw AgentFailure("Niepoprawne pytanie doprecyzowujące agenta.")
+        return AgentClarificationQuestion(json.text("id"), question, type, candidates, json.getBoolean("required"))
     }
     private fun request(json: JSONObject): AgentToolRequest {
         json.exact("id", "tool", "arguments")
@@ -82,7 +135,7 @@ object AgentProtocol {
     }
     fun parse(body: String): AgentReply = try {
         val json = JSONObject(body)
-        for (field in listOf("schemaVersion", "sessionId", "status", "intent", "items", "warnings", "questions", "candidates", "needsData"))
+        for (field in listOf("schemaVersion", "sessionId", "status", "intent", "items", "warnings", "questions", "candidates", "clarifications", "needsData"))
             if (!json.has(field) || json.isNull(field)) throw AgentFailure("Niekompletna odpowiedź agenta.")
         if (json.getInt("schemaVersion") != 1) throw AgentFailure("Nieobsługiwana wersja protokołu agenta.")
         if (json.getString("intent") != "ORDER") throw AgentFailure("Nieobsługiwany typ odpowiedzi agenta.")
@@ -107,6 +160,7 @@ object AgentProtocol {
             json.getJSONArray("candidates").typed {
                 AgentCandidate(it.getString("id"), it.getString("label"), it.getString("kind"))
             },
+            json.getJSONArray("clarifications").typed(::clarification),
             json.getJSONArray("needsData").typed(::request),
             if (json.isNull("error")) null else json.getJSONObject("error").getString("message"),
         )
@@ -114,7 +168,8 @@ object AgentProtocol {
             reply.candidates.any { it.kind !in setOf("person", "product", "shipyard", "task_place") } ||
             (status == AgentStatus.NEEDS_DATA && reply.needsData.isEmpty()) || reply.needsData.size > 4 ||
             reply.needsData.map { it.id }.distinct().size != reply.needsData.size ||
-            (status == AgentStatus.NEEDS_USER_CHOICE && (reply.questions.isEmpty() || reply.candidates.isEmpty())) ||
+            reply.clarifications.map { it.id }.distinct().size != reply.clarifications.size || reply.clarifications.size > 20 ||
+            ((status == AgentStatus.NEEDS_USER_CHOICE) != reply.clarifications.isNotEmpty()) ||
             (status == AgentStatus.ERROR && reply.error.isNullOrBlank()) ||
             (status == AgentStatus.PROPOSAL && reply.items.isEmpty())) throw AgentFailure("Niekompletna odpowiedź agenta.")
         reply
@@ -127,6 +182,14 @@ object AgentProtocol {
             .put("shipyards", shipyards).put("taskPlaces", taskPlaces)
 
     fun toolResults(results: List<JSONObject>): JSONObject = JSONObject().put("results", JSONArray(results))
+    fun answers(answers: List<AgentClarificationAnswer>): JSONObject = JSONObject().put("answers", JSONArray().apply {
+        answers.forEach { answer ->
+            put(JSONObject().put("questionId", answer.questionId).apply {
+                answer.candidateId?.let { put("candidateId", it) }
+                answer.text?.let { put("text", it) }
+            })
+        }
+    })
     fun result(id: String, tool: String, data: JSONObject): JSONObject =
         JSONObject().put("requestId", id).put("tool", tool).put("data", data)
 }

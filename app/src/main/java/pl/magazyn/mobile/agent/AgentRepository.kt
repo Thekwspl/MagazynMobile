@@ -135,6 +135,15 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
         return advance(client.choice(reply.sessionId, candidateId))
     }
 
+    suspend fun answer(reply: AgentReply, answers: List<AgentClarificationAnswer>): AgentReply {
+        if (reply.status != AgentStatus.NEEDS_USER_CHOICE || reply.clarifications.isEmpty() ||
+            !areRequiredClarificationsAnswered(reply.clarifications, answers))
+            throw AgentFailure("Uzupełnij wszystkie wymagane odpowiedzi.")
+        val next = client.answers(reply.sessionId, answers)
+        if (next.sessionId != reply.sessionId) throw AgentFailure("Agent zmienił sesję podczas wysyłania odpowiedzi.")
+        return advance(next)
+    }
+
     private suspend fun advance(first: AgentReply): AgentReply {
         var reply = first
         repeat(4) {

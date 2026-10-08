@@ -41,6 +41,7 @@ test("public v1 endpoints require Bearer and internal MCP keeps a different secr
       ["/v1/catalog/full-sync", "PUT", fixture], ["/v1/catalog/delta-sync", "PATCH", {}],
       ["/v1/sessions/message", "POST", { message: "Kowalski rękawice" }],
       ["/v1/sessions/s1/tool-results", "POST", { results: [] }],
+      ["/v1/sessions/s1/answers", "POST", { answers: [] }],
       ["/v1/sessions/s1/choice", "POST", { candidateId: "p1" }],
       ["/v1/auth/status", "GET", undefined],
       ["/v1/auth/chatgpt/start", "POST", {}], ["/v1/auth/chatgpt/device-code", "POST", {}],

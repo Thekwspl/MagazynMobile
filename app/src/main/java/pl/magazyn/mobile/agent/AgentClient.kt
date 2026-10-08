@@ -14,6 +14,7 @@ interface AgentClient {
     suspend fun fullSync(catalog: JSONObject)
     suspend fun message(text: String): AgentReply
     suspend fun toolResults(sessionId: String, results: JSONObject): AgentReply
+    suspend fun answers(sessionId: String, answers: List<AgentClarificationAnswer>): AgentReply
     suspend fun choice(sessionId: String, candidateId: String): AgentReply
 }
 
@@ -59,6 +60,8 @@ class HttpAgentClient(endpoint: String, token: String, allowDebugLoopback: Boole
     override suspend fun message(text: String) = AgentProtocol.parse(request("POST", "/v1/sessions/message", JSONObject().put("message", text)))
     override suspend fun toolResults(sessionId: String, results: JSONObject) =
         AgentProtocol.parse(request("POST", "/v1/sessions/${encode(sessionId)}/tool-results", results))
+    override suspend fun answers(sessionId: String, answers: List<AgentClarificationAnswer>) =
+        AgentProtocol.parse(request("POST", "/v1/sessions/${encode(sessionId)}/answers", AgentProtocol.answers(answers)))
     override suspend fun choice(sessionId: String, candidateId: String) =
         AgentProtocol.parse(request("POST", "/v1/sessions/${encode(sessionId)}/choice", JSONObject().put("candidateId", candidateId)))
 

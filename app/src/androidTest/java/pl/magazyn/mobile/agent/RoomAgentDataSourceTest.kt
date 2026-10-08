@@ -125,6 +125,7 @@ class RoomAgentDataSourceTest {
                 received = results
                 return reply("proposal", JSONArray())
             }
+            override suspend fun answers(sessionId: String, answers: List<AgentClarificationAnswer>): AgentReply = error("Unexpected answers")
             override suspend fun choice(sessionId: String, candidateId: String): AgentReply = error("Unexpected choice")
         }
         val repository = AgentRepository(client, RoomAgentDataSource(db)) { 1 }
@@ -155,6 +156,7 @@ class RoomAgentDataSourceTest {
                 assertEquals(-4.0, answer.getJSONObject("data").getJSONArray("stocks").getJSONObject(0).getDouble("quantity"), 0.0)
                 return reply("proposal", JSONArray())
             }
+            override suspend fun answers(sessionId: String, answers: List<AgentClarificationAnswer>): AgentReply = error("Unexpected answers")
             override suspend fun choice(sessionId: String, candidateId: String): AgentReply = error("Unexpected choice")
         }
         assertEquals(AgentStatus.PROPOSAL, AgentRepository(client, RoomAgentDataSource(db)) { 1 }.analyze("Na Ulstein").status)
@@ -185,6 +187,6 @@ class RoomAgentDataSourceTest {
         .put("recipient", JSONObject().put("id", "employee-1").put("label", "Jan").put("kind", "person"))
         .put("deliveryDate", JSONObject.NULL).put("items", JSONArray().put(JSONObject().put("productId", "product-1")
             .put("label", "Produkt").put("quantity", 1).put("unit", "szt.").put("available", if (status == "proposal") 0 else JSONObject.NULL)))
-        .put("warnings", JSONArray()).put("questions", JSONArray()).put("candidates", JSONArray()).put("needsData", reads)
+        .put("warnings", JSONArray()).put("questions", JSONArray()).put("candidates", JSONArray()).put("clarifications", JSONArray()).put("needsData", reads)
         .put("error", JSONObject.NULL).toString())
 }
