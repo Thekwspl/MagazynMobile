@@ -45,6 +45,13 @@ class RecognitionRulesTest {
         assertEquals(1, parsed.items.size)
         assertEquals("52", parsed.items.single().variant)
         assertEquals(2L, parsed.items.single().quantity)
+        val onePiece = item("Kombinezon jednoczęściowy")
+        val conflicting = rule("Komplet monterski").copy(triggerKey = ImportParser.key(onePiece.name))
+        assertEquals(listOf(onePiece), RecognitionRules.products(onePiece, listOf(conflicting)))
+        val trousers = item("spodnie")
+        assertEquals(listOf(trousers), RecognitionRules.products(trousers, listOf(conflicting.copy(triggerKey = "spodnie"))))
+        val red = item("kask czerwony")
+        assertEquals(listOf(red), RecognitionRules.products(red, listOf(rule("Kask Biały").copy(triggerKey = "kask czerwony"))))
     }
     @Test fun offlineAndGeminiUseSameProductRulesWithoutReexpanding() {
         val rules = listOf(rule())

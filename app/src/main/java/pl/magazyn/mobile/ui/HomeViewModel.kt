@@ -359,10 +359,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun analyzeWithCodex(text: String) {
         val input = _quickInput.value
-        if (!input.mode.supportsCodex) {
-            _codexAnalysis.value = CodexAnalysisUiState(error = "Codex obsługuje obecnie tylko zamówienia. Użyj Offline lub Gemini.")
-            return
-        }
         if (text.isBlank() || text != input.text || _aiAnalysis.value.isLoading || _codexAnalysis.value.isLoading || _reviewSave.value.isSaving) return
         val request = beginAnalysis()
         _codexAnalysis.value = CodexAnalysisUiState(isLoading = true, request = request)

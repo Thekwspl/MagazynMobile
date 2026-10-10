@@ -28,6 +28,15 @@ Jeśli brak ilości, domyślna ilość to 1. Zachowaj podaną ilość. Nie zgadu
     fun product(item: ParsedItem, rules: List<ParserLearningRuleEntity>): ParsedItem {
         val rule = active(rules).firstOrNull { it.ruleType == "PRODUCT" && it.triggerKey == ImportParser.key(item.name) }
         if (item.variant != null && rule != null && item.variant != rule.learnedVariant) return item
+        if (rule != null) {
+            val learned = item.copy(name = rule.learnedName, variant = item.variant ?: rule.learnedVariant)
+            if (isOnePiece(item) && !isOnePiece(learned)) return item
+            val sourceKey = ImportParser.key(item.name)
+            val targetKey = ImportParser.key(rule.learnedName)
+            val explicitParts = listOf("spodnie", "bluza", "kurtka", "buty")
+            if (explicitParts.any { sourceKey.contains(it) && !targetKey.contains(it) }) return item
+            if (sourceKey.startsWith("kask ") && sourceKey.removePrefix("kask ").split(' ').any { !targetKey.split(' ').contains(it) }) return item
+        }
         return rule?.let { item.copy(name = it.learnedName, variant = item.variant ?: it.learnedVariant, unit = it.learnedUnit) } ?: item
     }
 

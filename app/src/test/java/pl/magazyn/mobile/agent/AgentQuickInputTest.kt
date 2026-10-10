@@ -19,7 +19,7 @@ class AgentQuickInputTest {
                 "NOTE" -> put("note", JSONObject().put("text", raw))
                 "TASK" -> put("task", JSONObject().put("title", "Transport").put("date", "2026-10-11").put("description", "Opis")
                     .put("steps", JSONArray().put(JSONObject().put("time", "09:30").put("placeId", "t").put("placeText", "KL").put("note", "")
-                        .put("people", JSONArray().put(JSONObject().put("employeeId", "p").put("displayText", "Jan").put("note", "")))))
+                        .put("people", JSONArray().put(JSONObject().put("employeeId", "p").put("displayText", "Jan").put("note", ""))))))
                 "CONTACT" -> put("contact", JSONObject().put("fullName", "Jan Kowalski").put("position", "Spawacz").put("phoneNumbers", JSONArray().put("+47 123 45 678")))
             }
         }
