@@ -76,7 +76,7 @@ fun PhoneNumbersInline(phoneNumbers: String, modifier: Modifier = Modifier) {
             Text(
                 text = number,
                 color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.bodyMedium,
                 textDecoration = TextDecoration.Underline,
                 modifier = Modifier.clickable {
                     dial(context, number)

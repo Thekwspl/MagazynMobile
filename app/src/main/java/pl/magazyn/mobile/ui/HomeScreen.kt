@@ -648,14 +648,15 @@ private fun AttentionDetailsSheet(
         var value by rememberSaveable(item.productId, item.warehouseId) { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { selectedNegative = null },
-            title = { Text("Popraw stan") },
+            title = { Text("Popraw stan", Modifier.padding(horizontal = 8.dp)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     ProductInfo(item.name, item.variant, item.groupName, item.subgroupName)
                     Text("Obecny stan: ${formatWholeQuantity(item.quantity)} ${item.unit}")
                     OutlinedTextField(
                         value,
                         { input -> value = input.filterIndexed { index, character -> character.isDigit() || (character == '-' && index == 0) } },
+                        modifier = Modifier.fillMaxWidth(),
                         label = { Text("Prawidłowy stan") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
@@ -663,7 +664,7 @@ private fun AttentionDetailsSheet(
                     Text("Korekta zapisze się w historii. Powód nie jest wymagany.", style = MaterialTheme.typography.bodySmall)
                 }
             },
-            confirmButton = { Button(onClick = { value.toLongOrNull()?.let { onCorrectNegative(item, it) }; selectedNegative = null }, enabled = value.toLongOrNull() != null) { Text("Zapisz poprawkę") } },
+            confirmButton = { Button(onClick = { value.toLongOrNull()?.let { onCorrectNegative(item, it) }; selectedNegative = null }, enabled = value.toLongOrNull() != null) { Text("Zapisz") } },
             dismissButton = { TextButton(onClick = { selectedNegative = null }) { Text("Anuluj") } },
         )
     }

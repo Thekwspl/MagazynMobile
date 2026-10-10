@@ -22,11 +22,29 @@ class NotesAndIssueUiTest {
 
     @Test
     fun emptyIssueDraftDoesNotBlockBackButEveryUserChangeDoes() {
-        assertFalse(issueDraftIsDirty(listOf(""), listOf(""), 1, "2026-10-10", "2026-10-10", false))
-        assertTrue(issueDraftIsDirty(listOf("Kask"), listOf(""), 1, "2026-10-10", "2026-10-10", false))
+        assertFalse(issueDraftIsDirty(listOf(""), listOf("1"), 1, "2026-10-10", "2026-10-10", false))
+        assertTrue(issueDraftIsDirty(listOf("Kask"), listOf("1"), 1, "2026-10-10", "2026-10-10", false))
         assertTrue(issueDraftIsDirty(listOf(""), listOf("2"), 1, "2026-10-10", "2026-10-10", false))
-        assertTrue(issueDraftIsDirty(listOf(""), listOf(""), 2, "2026-10-10", "2026-10-10", false))
-        assertTrue(issueDraftIsDirty(listOf(""), listOf(""), 1, "2026-10-11", "2026-10-10", false))
+        assertTrue(issueDraftIsDirty(listOf(""), listOf(""), 1, "2026-10-10", "2026-10-10", false))
+        assertTrue(issueDraftIsDirty(listOf(""), listOf("0"), 1, "2026-10-10", "2026-10-10", false))
+        assertTrue(issueDraftIsDirty(listOf("", ""), listOf("1", "1"), 2, "2026-10-10", "2026-10-10", false))
+        assertTrue(issueDraftIsDirty(listOf(""), listOf("1"), 1, "2026-10-11", "2026-10-10", false))
+        assertTrue(issueDraftIsDirty(listOf(""), listOf("1"), 1, "2026-10-10", "2026-10-10", true))
+    }
+
+    @Test
+    fun initialAddedAndFreshIssueLinesStartAtOneAndAllowEditing() {
+        val initial = NewIssueLine()
+        assertEquals("1", initial.quantity)
+        val edited = initial.copy(quantity = "3")
+        assertEquals("3", edited.quantity)
+        assertEquals("", edited.copy(quantity = "").quantity)
+        val added = NewIssueLine()
+        assertEquals("1", added.quantity)
+        // Po zapisaniu ekran zostaje zamknięty; nowe otwarcie tworzy świeżą pozycję.
+        val reopened = NewIssueLine()
+        assertEquals("1", reopened.quantity)
+        assertFalse(issueDraftIsDirty(listOf(reopened.productQuery), listOf(reopened.quantity), 1, "2026-10-10", "2026-10-10", false))
     }
 
     @Test

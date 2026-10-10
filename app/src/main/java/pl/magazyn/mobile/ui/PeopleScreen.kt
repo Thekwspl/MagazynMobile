@@ -218,9 +218,8 @@ private fun PersonProfile(
         if (history.isEmpty()) Text("Brak zapisanych wydań")
         if (history.isNotEmpty()) IssueHistoryTable(history, onEdit = { correctingIssue = it })
         Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(4.dp), Alignment.CenterVertically) {
-            TextButton(onClick = { confirmPersonRemoval = true }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
-                Icon(Icons.Default.DeleteOutline, null)
-                Text("Usuń osobę")
+            IconButton(onClick = { confirmPersonRemoval = true }) {
+                Icon(Icons.Default.DeleteOutline, contentDescription = "Usuń osobę", tint = MaterialTheme.colorScheme.error)
             }
             IconButton(onClick = { mergePickerVisible = true }) {
                 Icon(Icons.Default.MergeType, "Scal z inną osobą")
@@ -704,11 +703,11 @@ private fun IssueForm(
     }
 }
 
-private data class NewIssueLine(
+internal data class NewIssueLine(
     val key: String = UUID.randomUUID().toString(),
     val productId: String = "",
     val productQuery: String = "",
-    val quantity: String = "",
+    val quantity: String = "1",
     val suggestionsVisible: Boolean = false,
 )
 
@@ -786,7 +785,7 @@ internal fun issueDraftIsDirty(
     date: String,
     initialDate: String,
     confirmNegative: Boolean,
-): Boolean = lineCount != 1 || productQueries.any(String::isNotBlank) || quantities.any(String::isNotBlank) || date != initialDate || confirmNegative
+): Boolean = lineCount != 1 || productQueries.any(String::isNotBlank) || quantities.any { it != "1" } || date != initialDate || confirmNegative
 
 @Composable
 fun ScreenHeader(title: String, actionLabel: String, onAction: () -> Unit) {
