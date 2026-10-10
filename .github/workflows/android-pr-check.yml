@@ -73,8 +73,25 @@ jobs:
           grep -Fq "package: name='pl.magazyn.mobile.test'" <<< "$BADGING"
           grep -Fq "application-label:'MagazynMobile TEST'" <<< "$BADGING"
           grep -Fq 'applicationId = "pl.magazyn.mobile"' app/build.gradle.kts
-          grep -Fq 'versionCode = 67' app/build.gradle.kts
-          grep -Fq 'versionName = "1.0.0"' app/build.gradle.kts
+          # Porównaj wersję APK z konfiguracją zamiast utrzymywać drugi numer wersji w CI.
+          export BADGING
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          config = Path("app/build.gradle.kts").read_text(encoding="utf-8")
+          code = re.findall(r"^\s*versionCode\s*=\s*(\d+)\s*$", config, re.MULTILINE)
+          name = re.findall(r'^\s*versionName\s*=\s*"([^"]+)"\s*$', config, re.MULTILINE)
+          if len(code) != 1 or len(name) != 1 or int(code[0]) <= 0:
+              raise SystemExit("Nie można jednoznacznie odczytać wersji aplikacji")
+          package = next((line for line in os.environ["BADGING"].splitlines() if line.startswith("package:")), "")
+          actual_code = re.search(r"versionCode='([^']+)'", package)
+          actual_name = re.search(r"versionName='([^']+)'", package)
+          if not actual_code or not actual_name or actual_code.group(1) != code[0] or actual_name.group(1) != name[0]:
+              raise SystemExit("Wersja testowego APK różni się od app/build.gradle.kts")
+          print(f"Wersja testowego APK: {name[0]} ({code[0]}) — zgodna")
+          PY
           grep -Fq 'const val DATABASE_SCHEMA_VERSION = 25' app/src/main/java/pl/magazyn/mobile/data/DatabaseSchema.kt
           cp "$APK" "$RUNNER_TEMP/MagazynMobile-TEST.apk"
 
