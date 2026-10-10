@@ -6,11 +6,16 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
+import pl.magazyn.mobile.domain.QuickInputMode
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import pl.magazyn.mobile.IsolatedApplicationEnvironment
 import pl.magazyn.mobile.queryLong
+import pl.magazyn.mobile.eventually
 import pl.magazyn.mobile.runAndAwaitViewModelWork
 import pl.magazyn.mobile.seedCoreData
 import pl.magazyn.mobile.domain.ParsedInputKind
@@ -95,4 +100,94 @@ class NotesIntegrationTest {
         assertEquals(rawText, database.notebookDao().findNote("cancelled-note")?.rawText)
         assertEquals(0L, database.queryLong("SELECT COUNT(*) FROM orders"))
     }
+
+    @Test fun quickInputNoteIsSavedOnceWithoutOrderTaskOrMovementAndClearedOnlyOnSuccess() = runBlocking {
+        val viewModel = HomeViewModel(environment.application)
+        val raw = "  Kowalski jutro 2 rękawice i kask\n[ ] Zadzwonić\n "
+        var saved = 0
+        viewModel.runAndAwaitViewModelWork {
+            viewModel.updateQuickInput(raw)
+            viewModel.selectQuickInputMode(QuickInputMode.NOTE)
+            assertTrue(viewModel.openReview(viewModel.recognize(raw)))
+            val review = viewModel.noteReview.value!!
+            viewModel.saveReviewedNote(review) { saved++ }
+            assertEquals(raw, viewModel.quickInput.value.text)
+            viewModel.saveReviewedNote(review) { saved++ }
+        }
+        assertEquals(1, saved)
+        assertEquals(listOf(raw), database.notebookDao().observeNotes().first().map { it.rawText })
+        assertEquals("", viewModel.quickInput.value.text)
+        assertNull(viewModel.noteReview.value)
+        assertEquals(0L, database.queryLong("SELECT COUNT(*) FROM orders"))
+        assertEquals(0L, database.queryLong("SELECT COUNT(*) FROM notebook_tasks"))
+        assertEquals(0L, database.queryLong("SELECT COUNT(*) FROM stock_movements"))
+        viewModel.runAndAwaitViewModelWork {
+            viewModel.updateQuickInput("Druga notatka")
+            assertTrue(viewModel.openReview(viewModel.recognize("Druga notatka")))
+            viewModel.saveReviewedNote(viewModel.noteReview.value!!)
+        }
+        assertEquals(2, database.notebookDao().observeNotes().first().size)
+    }
+
+    @Test fun modeChangeRejectsOldReviewAndOldResponseWithoutClearingText() = runBlocking {
+        val viewModel = HomeViewModel(environment.application)
+        viewModel.runAndAwaitViewModelWork {
+            viewModel.updateQuickInput("Kask x1")
+            viewModel.selectQuickInputMode(QuickInputMode.NOTE)
+            val snapshot = viewModel.quickInput.value
+            val result = viewModel.recognize(snapshot.text)
+            assertTrue(viewModel.openReview(result))
+            val oldReview = viewModel.noteReview.value!!
+            viewModel.selectQuickInputMode(QuickInputMode.ORDER)
+            assertEquals(snapshot.text, viewModel.quickInput.value.text)
+            assertNull(viewModel.noteReview.value)
+            viewModel.saveReviewedNote(oldReview)
+            assertFalse(viewModel.openReview(result, snapshot))
+            viewModel.selectQuickInputMode(QuickInputMode.NOTE)
+            assertFalse(viewModel.openReview(result, snapshot))
+        }
+        assertTrue(database.notebookDao().observeNotes().first().isEmpty())
+    }
+
+    @Test fun viewModelKeepsForcedOrderProductsAndGuardsUnsupportedCodexModes() = runBlocking {
+        val viewModel = HomeViewModel(environment.application)
+        viewModel.runAndAwaitViewModelWork {
+            assertEquals(QuickInputMode.ALL, viewModel.quickInput.value.mode)
+            assertEquals(ParsedInputKind.CONTACT, viewModel.recognize("Adam Pawlak +47 123 45 678").kind)
+            assertEquals(ParsedInputKind.TASK, viewModel.recognize("Zjazd jutro\n9:30 UL").kind)
+            viewModel.updateQuickInput("[ ] Kask x2")
+            viewModel.selectQuickInputMode(QuickInputMode.ORDER)
+            val order = viewModel.recognize(viewModel.quickInput.value.text)
+            assertEquals(ParsedInputKind.ORDER, order.kind)
+            assertEquals("Kask Biały", order.items.single().name)
+            listOf(QuickInputMode.TASK, QuickInputMode.NOTE).forEach { mode ->
+                viewModel.selectQuickInputMode(mode)
+                viewModel.analyzeWithCodex(viewModel.quickInput.value.text)
+                assertFalse(viewModel.codexAnalysis.value.isLoading)
+                assertTrue(viewModel.codexAnalysis.value.error!!.contains("tylko zamówienia"))
+                assertEquals(mode.preferredKind, viewModel.recognize(viewModel.quickInput.value.text).kind)
+            }
+        }
+    }
+
+
+    @Test fun forcedTaskHasPlaceAliasesBeforeOpeningReview() = runBlocking {
+        database.taskStructureDao().insertPlace(TaskPlaceEntity("kl", "Kleven"))
+        database.taskStructureDao().insertAlias(TaskPlaceAliasEntity("alias-kl", "kl", "KL", "kl"))
+        val viewModel = HomeViewModel(environment.application)
+        eventually("Słownik miejsc powinien być dostępny bez otwierania podglądu") {
+            viewModel.taskPlaces.value.any { it.id == "kl" && it.aliases == "KL" }
+        }
+        viewModel.runAndAwaitViewModelWork {
+            val raw = "Transport jutro\n9:30 KL"
+            viewModel.updateQuickInput(raw)
+            viewModel.selectQuickInputMode(QuickInputMode.TASK)
+            val task = viewModel.recognize(raw)
+            assertEquals(ParsedInputKind.TASK, task.kind)
+            assertEquals("kl", task.taskDraft!!.steps.single().placeId)
+            assertEquals("Kleven", task.taskDraft!!.steps.single().placeText)
+            assertNull(viewModel.noteReview.value)
+        }
+    }
+
 }

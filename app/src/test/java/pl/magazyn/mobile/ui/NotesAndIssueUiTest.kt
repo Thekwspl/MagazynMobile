@@ -57,4 +57,41 @@ class NotesAndIssueUiTest {
             assertEquals(lines.map { it.id }, historyDetailsLines(lines).map { it.id })
         }
     }
+
+    @Test fun quickInputDefaultsToAllAndModeChangesKeepOriginalText() {
+        val initial = QuickInputUiState()
+        assertEquals(pl.magazyn.mobile.domain.QuickInputMode.ALL, initial.mode)
+        val typed = initial.edit("  Kask\n  jutro ")
+        pl.magazyn.mobile.domain.QuickInputMode.entries.forEach { mode ->
+            assertEquals(typed.text, typed.select(mode).text)
+            assertEquals(mode, typed.select(mode).mode)
+        }
+        assertEquals(typed, typed.select(typed.mode))
+    }
+
+    @Test fun oldAnalysisSnapshotStaysInvalidEvenAfterSwitchingModeBack() {
+        val request = QuickInputUiState(text = "Kask")
+        val changed = request.select(pl.magazyn.mobile.domain.QuickInputMode.NOTE)
+        assertFalse(request == changed)
+        assertFalse(request == changed.select(pl.magazyn.mobile.domain.QuickInputMode.ALL))
+        assertFalse(request == request.edit("Kask x2").edit("Kask"))
+    }
+
+    @Test fun plainNotePreservesRawTextAndUsesExistingNoteModel() {
+        val raw = "  Adam Pawlak +47 123 45 678\n[ ] Kask x2\n "
+        val note = plainNoteEntity("note", raw, 123)
+        assertEquals(raw, note.rawText)
+        assertEquals("NOTE", note.detectedType)
+        assertEquals("ACTIVE", note.status)
+        assertEquals(123L, note.createdAtEpochMillis)
+        assertTrue(runCatching { plainNoteEntity("blank", " ") }.isFailure)
+    }
+
+    @Test fun codexOnlySupportsAllAndOrder() {
+        assertTrue(pl.magazyn.mobile.domain.QuickInputMode.ALL.supportsCodex)
+        assertTrue(pl.magazyn.mobile.domain.QuickInputMode.ORDER.supportsCodex)
+        assertFalse(pl.magazyn.mobile.domain.QuickInputMode.TASK.supportsCodex)
+        assertFalse(pl.magazyn.mobile.domain.QuickInputMode.NOTE.supportsCodex)
+    }
+
 }

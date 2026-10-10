@@ -26,6 +26,19 @@ data class ParsedItem(
 
 enum class ParsedInputKind { ORDER, TASK, CONTACT, NOTE }
 
+enum class QuickInputMode(val label: String, val preferredKind: ParsedInputKind?) {
+    ALL("ALL", null), ORDER("Zamówienie", ParsedInputKind.ORDER),
+    TASK("Zadanie", ParsedInputKind.TASK), NOTE("Notatka", ParsedInputKind.NOTE);
+
+    val supportsCodex get() = this == ALL || this == ORDER
+    internal val geminiInstruction get() = when (this) {
+        ALL -> "Tryb ALL: automatycznie rozpoznaj ORDER, TASK, CONTACT albo NOTE, jak dotychczas."
+        ORDER -> "Użytkownik wybrał Zamówienie: oczekiwany kind to ORDER. Słowa polecenia nie zmieniają rodzaju na TASK. Rozpoznaj tylko wskazane przedmioty, ilości i odbiorców; brakujących danych nie wymyślaj."
+        TASK -> "Użytkownik wybrał Zadanie: oczekiwany kind to TASK, nawet bez słów zadanie/do zrobienia. Zwróć tytuł, opis i dostępne kroki w task; osoby, miejsca, daty i godziny tylko z tekstu. items ma być puste."
+        NOTE -> "Użytkownik wybrał Notatka: oczekiwany kind to NOTE. To zwykła notatka; nie twórz zamówienia, zadania, produktów ani odbiorców. Zwróć puste people/items/phoneNumbers/tasks, task=null, shipyardName=null. Oryginalny tekst zachowuje aplikacja."
+    }
+}
+
 data class ParsedNote(
     val person: ParsedPerson?,
     val items: List<ParsedItem>,
@@ -54,9 +67,17 @@ class NoteParser {
     private val quantityRegex = Regex("""(?:x\s*|[-–—]\s*)(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
     private val phoneRegex = Regex("""(?<!\w)(?:\+\d{1,3}[\s-]?)?(?:\d[\s-]?){7,12}(?!\w)""")
 
-    fun parse(text: String): ParsedNote {
+    fun parse(
+        text: String,
+        mode: QuickInputMode = QuickInputMode.ALL,
+        taskPlaces: List<TaskPlaceLookup> = emptyList(),
+        employees: List<TaskEmployeeLookup> = emptyList(),
+    ): ParsedNote {
+        if (mode == QuickInputMode.NOTE) return ParsedNote(null, emptyList(), kind = ParsedInputKind.NOTE)
+        if (mode == QuickInputMode.TASK) return ParsedNote(null, emptyList(), kind = ParsedInputKind.TASK,
+            taskDraft = TaskTextParser().parse(text, taskPlaces, employees))
         val normalized = text.trim().replace(Regex("\\s+"), " ")
-        if (normalized.isBlank()) return ParsedNote(null, emptyList())
+        if (normalized.isBlank()) return ParsedNote(null, emptyList(), kind = mode.preferredKind ?: ParsedInputKind.NOTE)
         val suggestedIssueDate = extractShortIssueDate(text)
         val phoneNumbers = phoneRegex.findAll(normalized)
             .map { it.value.trim().trimEnd('-', ' ') }
@@ -69,6 +90,7 @@ class NoteParser {
 
         val textWithoutSuggestedDate = SHORT_DATE_REGEX.replace(text, " ")
         val parsedSegments = textWithoutSuggestedDate.lineSequence()
+            .map { line -> if (mode == QuickInputMode.ORDER) line.trim().removePrefix("[ ]").trim() else line }
             .flatMap { line -> line.split(';').asSequence() }
             .flatMap { line -> line.split(Regex(",(?!\\s*\\d)")).asSequence() }
             .map(String::trim)
@@ -86,6 +108,7 @@ class NoteParser {
         val people = expandedSegments.mapNotNull { it.first }.distinctBy { normalizeKey(it.fullName) }
         val contactPerson = contentWithoutPhones.split(Regex("\\s+")).take(2).joinToString(" ").takeIf { it.split(' ').size >= 2 }
         val kind = when {
+            mode == QuickInputMode.ORDER -> ParsedInputKind.ORDER
             looksLikeTask -> ParsedInputKind.TASK
             items.isNotEmpty() -> ParsedInputKind.ORDER
             phoneNumbers.isNotEmpty() -> ParsedInputKind.CONTACT

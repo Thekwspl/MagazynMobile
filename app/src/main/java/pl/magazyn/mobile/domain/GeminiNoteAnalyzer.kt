@@ -29,7 +29,23 @@ class GeminiNoteAnalyzer {
         taskPlaces: List<TaskPlaceLookup> = emptyList(),
         employees: List<TaskEmployeeLookup> = emptyList(),
         redactPhoneNumbers: Boolean,
+        mode: QuickInputMode = QuickInputMode.ALL,
     ): ParsedNote = withContext(Dispatchers.IO) {
+        val prompt = buildPrompt(rawText, catalog, shipyards, taskPlaces, employees, redactPhoneNumbers, mode)
+        val parsed = parseResponse(post(apiKey, prompt), taskPlaces, employees)
+        validateModeResult(parsed, mode)
+        if (mode == QuickInputMode.NOTE) parsed else parsed.copy(suggestedIssueDate = extractShortIssueDate(rawText) ?: parsed.suggestedIssueDate)
+    }
+
+    internal fun buildPrompt(
+        rawText: String,
+        catalog: List<AiCatalogItem>,
+        shipyards: List<String>,
+        taskPlaces: List<TaskPlaceLookup> = emptyList(),
+        employees: List<TaskEmployeeLookup> = emptyList(),
+        redactPhoneNumbers: Boolean,
+        mode: QuickInputMode = QuickInputMode.ALL,
+    ): String {
         val textForApi = if (redactPhoneNumbers) redactPhones(rawText) else rawText
         val catalogText = catalog.take(600).joinToString("\n") {
             listOfNotNull(
@@ -42,6 +58,7 @@ class GeminiNoteAnalyzer {
         }
         val prompt = """
             Jesteś parserem polskich notatek magazynowych BHP. Nie wykonujesz żadnych operacji — tylko proponujesz strukturę do ręcznej weryfikacji.
+            WYBÓR UŻYTKOWNIKA (ma pierwszeństwo przy określaniu rodzaju): ${mode.geminiInstruction}
             Rozpoznaj typ: ORDER, TASK, CONTACT albo NOTE. Zachowaj każdą pozycję zamówienia osobno. Jeżeli wiadomość dotyczy konkretnej stoczni, zwróć jej nazwę w shipyardName; w przeciwnym razie null. Zapis DD.MM oznacza proponowaną datę wydania w bieżącym roku; zwróć ją jako suggestedIssueDate w formacie YYYY-MM-DD.
             Odbiorcą pozycji może być osoba albo stocznia. Jeżeli zamówienie ma przypisaną stocznię, a przy pozycji nie wskazano osobnego odbiorcy, pozostaw recipientName jako null — aplikacja użyje tej stoczni jako odbiorcy domyślnego.
             Jedna osoba może dostać dowolną liczbę różnych przedmiotów — powtórz recipientName przy każdej jej pozycji. Jeżeli jedno określenie oznacza kilka osobnych przedmiotów (np. „spodnie + bluza”, „spodnie i bluza” albo komplet składający się z obu), zwróć każdy przedmiot jako oddzielny element tablicy items.
@@ -72,8 +89,23 @@ class GeminiNoteAnalyzer {
             NOTATKA:
             $textForApi
         """.trimIndent()
-        val parsed = parseResponse(post(apiKey, prompt), taskPlaces, employees)
-        parsed.copy(suggestedIssueDate = extractShortIssueDate(rawText) ?: parsed.suggestedIssueDate)
+        return prompt
+    }
+
+    internal fun validateModeResult(note: ParsedNote, mode: QuickInputMode) {
+        if (mode == QuickInputMode.ALL) return
+        if (note.kind != mode.preferredKind) throw GeminiModeResponseException("Gemini zwróciło ${note.kind}, oczekiwano ${mode.preferredKind}.")
+        when (mode) {
+            QuickInputMode.ORDER -> if (note.items.isEmpty()) throw GeminiModeResponseException("Gemini nie rozpoznało pozycji zamówienia.")
+            QuickInputMode.TASK -> {
+                val draft = note.taskDraft
+                if (draft == null || (draft.title == "Zadanie" && draft.description.isBlank() && draft.steps.isEmpty()) || note.items.isNotEmpty())
+                    throw GeminiModeResponseException("Gemini zwróciło niekompletne dane zadania.")
+            }
+            QuickInputMode.NOTE -> if (note.items.isNotEmpty() || note.people.isNotEmpty() || note.phoneNumbers.isNotEmpty() || note.tasks.isNotEmpty() || note.taskDraft != null || note.shipyardName != null)
+                throw GeminiModeResponseException("Gemini dopisało dane strukturalne do zwykłej notatki.")
+            QuickInputMode.ALL -> Unit
+        }
     }
 
     suspend fun testConnection(apiKey: String): Unit = withContext(Dispatchers.IO) {
@@ -260,3 +292,4 @@ class GeminiNoteAnalyzer {
 }
 
 class GeminiApiException(val statusCode: Int, message: String) : IOException(message)
+class GeminiModeResponseException(message: String) : IOException(message)

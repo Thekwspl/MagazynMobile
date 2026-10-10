@@ -56,4 +56,49 @@ class GeminiNoteAnalyzerTaskTest {
 
         assertEquals(listOf("Bluza monterska", "Spodnie monterskie"), note.items.map { it.name })
     }
+
+    @Test fun eachModeAddsHintToSharedPromptWithoutRemovingRulesOrRedaction() {
+        val analyzer = GeminiNoteAnalyzer()
+        QuickInputMode.entries.forEach { mode ->
+            val prompt = analyzer.buildPrompt("Adam Pawlak +47 123 45 678", emptyList(), emptyList(), redactPhoneNumbers = true, mode = mode)
+            assertTrue(prompt.contains(mode.geminiInstruction))
+            assertTrue(prompt.contains("Kask Biały"))
+            assertTrue(prompt.contains("spodnie monterskie"))
+            assertTrue(prompt.contains("Nie wymyślaj brakujących danych"))
+            assertTrue(prompt.contains("confidence"))
+            assertFalse(prompt.contains("+47 123 45 678"))
+        }
+    }
+
+    @Test fun mismatchedGeminiKindsAreRejectedForEveryForcedMode() {
+        val analyzer = GeminiNoteAnalyzer()
+        listOf(QuickInputMode.ORDER, QuickInputMode.TASK, QuickInputMode.NOTE).forEach { mode ->
+            val wrong = ParsedNote(null, emptyList(), kind = ParsedInputKind.CONTACT)
+            assertTrue(runCatching { analyzer.validateModeResult(wrong, mode) }.exceptionOrNull() is GeminiModeResponseException)
+        }
+        analyzer.validateModeResult(ParsedNote(null, emptyList(), kind = ParsedInputKind.CONTACT), QuickInputMode.ALL)
+    }
+
+    @Test fun incompleteOrderOrTaskAndStructuredNoteAreRejected() {
+        val analyzer = GeminiNoteAnalyzer()
+        assertTrue(runCatching { analyzer.validateModeResult(analyzer.parseResponse("""{"kind":"ORDER","items":[]}"""), QuickInputMode.ORDER) }.isFailure)
+        assertTrue(runCatching { analyzer.validateModeResult(analyzer.parseResponse("""{"kind":"TASK"}"""), QuickInputMode.TASK) }.isFailure)
+        assertTrue(runCatching { analyzer.validateModeResult(analyzer.parseResponse("""{"kind":"NOTE","items":[{"name":"Kask","quantity":1}]}"""), QuickInputMode.NOTE) }.isFailure)
+    }
+
+    @Test fun validForcedKindsRemainProposalsForReview() {
+        val analyzer = GeminiNoteAnalyzer()
+        val jsons = mapOf(
+            QuickInputMode.ORDER to """{"kind":"ORDER","items":[{"name":"Kask czerwony","quantity":1}]}""",
+            QuickInputMode.TASK to """{"kind":"TASK","task":{"title":"Transport","notes":"Uzupełnić godzinę"}}""",
+            QuickInputMode.NOTE to """{"kind":"NOTE","items":[],"people":[],"tasks":[]}""",
+        )
+        jsons.forEach { (mode, json) ->
+            val note = analyzer.parseResponse(json)
+            analyzer.validateModeResult(note, mode)
+            assertEquals(mode.preferredKind, note.kind)
+            assertTrue(note.analyzedByAi)
+        }
+    }
+
 }
