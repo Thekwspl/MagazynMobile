@@ -2,6 +2,8 @@
 
 Oddzielna usługa analizy Szybkiego Pola (ALL, ORDER, TASK, NOTE; CONTACT w ALL). Klient Android używa jej wyłącznie do rozpoznawania i nie zapisuje danych magazynowych przez HTTP.
 
+Serwer domowy nie jest wymaganiem aplikacji. Opcjonalny `agent-service` może działać na komputerze, VPS, w chmurze albo na serwerze domowym, o ile środowisko spełnia wymagania uruchomienia i bezpiecznej komunikacji opisane poniżej. Android nie ma przypisanego hosta ani dostawcy: adres HTTPS i token ustawia użytkownik. Brak usługi lub konfiguracji Codexa nie blokuje magazynu, rozpoznawania Offline ani Gemini; Gemini korzysta bezpośrednio ze swojego API i wymaga własnego klucza oraz Internetu.
+
 ## Uruchomienie
 
 Wymagania: Node.js 24 LTS, `codex` CLI w `PATH`, konto ChatGPT zalogowane przez oficjalny Codex app-server. W katalogu `agent-service`:
@@ -64,7 +66,7 @@ Katalog pozostaje w `CatalogStore`. Oficjalnie wspierany MCP przez stdio udostę
 
 Dane bieżące nie są częścią katalogu. Klient Android obsługuje pięć odczytów przez `needs_data` → lokalny Room → `tool-results` tej samej sesji: `get_current_stock({productIds})`, `get_person_current_items({personId})`, `get_shipyard_stock({shipyardId})`, `get_active_orders({recipientKind,recipientId})`, `get_recent_issues({recipientKind,recipientId,limit})`. Odbiorcą jest `person` lub `shipyard`; limit historii to 1–20, a jednej odpowiedzi `needs_data` to najwyżej cztery odczyty. Wyniki zawierają tylko ID produktu, ilość, jednostkę, odpowiednią datę/status i ID powiązania; serwer sprawdza strukturę, zakres, typ, `requestId` i zamówiony tool. Ujemny stan jest prawidłowy. Brak bezpośredniego dostępu agenta do bazy na telefonie. Serwer MCP nie ma narzędzi zapisu, a wbudowane narzędzia Codexa działają w sandbox `readOnly` z `approvalPolicy=never`.
 
-Katalog stoczni zawiera stabilne `id`, nazwę, aliasy, tagi i ID prowadzących; nigdy telefony. Nowe zamówienia i ruchy stoczni zapisują `shipyardId`. Migracja Room 24→25 kojarzy stare wiersze tylko po dokładnej, jednoznacznej nazwie; niepewne powiązania pozostają puste. W ekranach zamówień i historii użytkownik może sprawdzić sugestię, wskazać stocznię i zapisać ID bez zmiany historycznej etykiety. Dynamiczny odczyt uwzględnia powiązane ID i tylko bezpieczne, jednoznaczne starsze nazwy. Niejednoznaczne starsze wpisy wymagają ręcznej korekty. Samodzielne pytania informacyjne wymagają w przyszłości osobnego intentu: obecny protokół v1 przygotowuje tylko proposal ORDER.
+Katalog stoczni zawiera stabilne `id`, nazwę, aliasy, tagi i ID prowadzących; nigdy telefony. Nowe zamówienia i ruchy stoczni zapisują `shipyardId`. Migracja Room 24→25 kojarzy stare wiersze tylko po dokładnej, jednoznacznej nazwie; niepewne powiązania pozostają puste. W ekranach zamówień i historii użytkownik może sprawdzić sugestię, wskazać stocznię i zapisać ID bez zmiany historycznej etykiety. Dynamiczny odczyt uwzględnia powiązane ID i tylko bezpieczne, jednoznaczne starsze nazwy. Niejednoznaczne starsze wpisy wymagają ręcznej korekty. Samodzielne pytania informacyjne wymagają w przyszłości osobnego intentu; protokół v2 obsługuje propozycje ORDER, TASK, NOTE i CONTACT opisane poniżej.
 
 ## Ręczny smoke test
 
