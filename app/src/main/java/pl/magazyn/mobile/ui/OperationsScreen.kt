@@ -209,15 +209,20 @@ private fun OperationProductLine(
     }
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Pozycja", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                if (canRemove) IconButton(onClick = onRemove) { Icon(Icons.Default.DeleteOutline, "Usuń pozycję") }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    line.query,
+                    { onChange(line.copy(query = it, productId = "", suggestionsVisible = true)) },
+                    Modifier.weight(1f).keepAboveKeyboard(), label = { Text("Przedmiot") }, singleLine = true,
+                )
+                OutlinedTextField(
+                    line.quantity,
+                    { onChange(line.copy(quantity = it.filter(Char::isDigit))) },
+                    Modifier.width(88.dp).keepAboveKeyboard(), label = { Text("Ilość") }, placeholder = { Text("1") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true,
+                )
+                if (canRemove) IconButton(onClick = onRemove, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.DeleteOutline, "Usuń pozycję") }
             }
-            OutlinedTextField(
-                line.query,
-                { onChange(line.copy(query = it, productId = "", suggestionsVisible = true)) },
-                Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Przedmiot") }, singleLine = true,
-            )
             if (line.suggestionsVisible) SuggestionList(matches, key = { it.id }) { product ->
                 OutlinedCard(onClick = {
                     onChange(line.copy(productId = product.id, query = product.name + product.variant?.let { " · $it" }.orEmpty(), suggestionsVisible = false))
@@ -229,12 +234,6 @@ private fun OperationProductLine(
                     }
                 }
             }
-            OutlinedTextField(
-                line.quantity,
-                { onChange(line.copy(quantity = it.filter(Char::isDigit))) },
-                Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Ilość") }, placeholder = { Text("1") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true,
-            )
         }
     }
 }

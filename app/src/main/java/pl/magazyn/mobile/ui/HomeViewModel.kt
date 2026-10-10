@@ -89,6 +89,7 @@ data class CodexAnalysisUiState(
 data class NoteReviewUiState(
     val rawText: String,
     val note: ParsedNote,
+    val sourceNoteId: String? = null,
 )
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -173,6 +174,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _noteReview.value = NoteReviewUiState(
             rawText = "",
             note = ParsedNote(person = null, items = emptyList(), kind = ParsedInputKind.ORDER),
+        )
+    }
+
+    fun openSavedNoteAsOrder(noteId: String, rawText: String) {
+        _noteReview.value = NoteReviewUiState(
+            rawText = rawText,
+            note = recognize(rawText).copy(kind = ParsedInputKind.ORDER),
+            sourceNoteId = noteId,
         )
     }
 
@@ -476,6 +485,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         onSaved: () -> Unit = {},
     ) {
         if (approvedPairs.isEmpty()) return
+        val sourceNoteId = _noteReview.value?.sourceNoteId
         viewModelScope.launch {
             database.withTransaction {
                 if (rememberCorrections) approvedPairs.forEach { (source, corrected) ->
@@ -586,6 +596,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             },
                         )
                     }
+                sourceNoteId?.let { database.notebookDao().setNoteStatus(it, "CONVERTED") }
             }
             // Powrót do Start następuje dopiero po zatwierdzeniu transakcji. Room Flow
             // ma wtedy już nowe dane i kafel „Do zrobienia” odświeża się reaktywnie.

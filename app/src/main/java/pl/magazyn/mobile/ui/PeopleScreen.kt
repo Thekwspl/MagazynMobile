@@ -1,5 +1,6 @@
 package pl.magazyn.mobile.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,8 +11,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MergeType
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -42,27 +45,59 @@ fun PeopleScreen(
     contentPadding: PaddingValues,
     startAdding: Boolean = false,
     initialPersonId: String? = null,
-    startIssuing: Boolean = false,
     startIssuingAfterCreate: Boolean = false,
+    onPerson: (String) -> Unit = {},
+    onIssuePerson: (String) -> Unit = {},
+    onBack: () -> Unit = {},
     viewModel: PeopleViewModel = viewModel(),
 ) {
     val people by viewModel.people.collectAsStateWithLifecycle()
     val jobPositions by viewModel.jobPositions.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
-    var selectedId by rememberSaveable { mutableStateOf<String?>(initialPersonId) }
     var showNew by rememberSaveable { mutableStateOf(startAdding) }
     val listState = rememberLazyListState()
     val newPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val visible = people.filter { it.matchesPersonSearch(query) }
-    val selected = selectedId?.let { id -> people.firstOrNull { it.id == id } }
+    val selected = initialPersonId?.let { id -> people.firstOrNull { it.id == id } }
+
+    if (initialPersonId != null) {
+        if (selected == null) {
+            Box(Modifier.fillMaxSize().padding(contentPadding), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            return
+        }
+        val possessions by viewModel.possessions(selected.id).collectAsStateWithLifecycle(initialValue = emptyList())
+        val history by viewModel.issueHistory(selected.id).collectAsStateWithLifecycle(initialValue = emptyList())
+        val products by viewModel.products.collectAsStateWithLifecycle()
+        PersonProfile(
+            contentPadding = contentPadding,
+            person = selected,
+            mergeCandidates = people.filterNot { it.id == selected.id },
+            products = products,
+            possessions = possessions,
+            history = history,
+            jobPositions = jobPositions,
+            onBack = onBack,
+            onStartIssue = { onIssuePerson(selected.id) },
+            onSave = { existing, firstName, lastName, phones, positions, aliases, tags -> viewModel.savePerson(existing, firstName, lastName, phones, positions, aliases, tags) },
+            onCorrectIssue = { issue, productId, quantity, date, delete ->
+                viewModel.correctIssue(selected.id, issue, productId, quantity, date, delete)
+            },
+            onReturnIssue = { issue, quantity, date -> viewModel.returnIssue(selected.id, issue, quantity, date) },
+            onRemovePerson = {
+                viewModel.removePerson(selected.id)
+                onBack()
+            },
+            onMerge = { sourceId, onComplete -> viewModel.mergePeople(selected.id, sourceId, onComplete) },
+        )
+        return
+    }
 
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
         ScreenHeader("Osoby", "Dodaj osobę", { showNew = true })
         OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), label = { Text("Szukaj po nazwisku, telefonie, ksywce lub tagu") }, singleLine = true)
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(visible, key = { it.id }) { person ->
-                OutlinedCard(onClick = { selectedId = person.id }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedCard(onClick = { onPerson(person.id) }, modifier = Modifier.fillMaxWidth()) {
                     PersonRow(person)
                 }
             }
@@ -74,39 +109,9 @@ fun PeopleScreen(
             PersonEditor(null, jobPositions, { showNew = false }) { existing, firstName, lastName, phones, positions, aliases, tags ->
                 viewModel.savePerson(existing, firstName, lastName, phones, positions, aliases, tags) { createdId ->
                     showNew = false
-                    if (startIssuingAfterCreate) selectedId = createdId
+                    if (startIssuingAfterCreate) onIssuePerson(createdId)
                 }
             }
-        }
-    }
-    selected?.let { person ->
-        val possessions by viewModel.possessions(person.id).collectAsStateWithLifecycle(initialValue = emptyList())
-        val history by viewModel.issueHistory(person.id).collectAsStateWithLifecycle(initialValue = emptyList())
-        val products by viewModel.products.collectAsStateWithLifecycle()
-        ModalBottomSheet(sheetState = profileSheetState, onDismissRequest = { selectedId = null }) {
-            PersonProfile(
-                person = person,
-                mergeCandidates = people.filterNot { it.id == person.id },
-                products = products,
-                possessions = possessions,
-                history = history,
-                jobPositions = jobPositions,
-                startIssuing = startIssuing || startIssuingAfterCreate,
-                onClose = { selectedId = null },
-                onSave = { existing, firstName, lastName, phones, positions, aliases, tags -> viewModel.savePerson(existing, firstName, lastName, phones, positions, aliases, tags) },
-                onIssue = { items, date -> viewModel.issueToPerson(person.id, items, date) },
-                onCorrectIssue = { issue, productId, quantity, date, delete ->
-                    viewModel.correctIssue(person.id, issue, productId, quantity, date, delete)
-                },
-                onReturnIssue = { issue, quantity, date -> viewModel.returnIssue(person.id, issue, quantity, date) },
-                onRemovePerson = {
-                    viewModel.removePerson(person.id)
-                    selectedId = null
-                },
-                onMerge = { sourceId, onComplete ->
-                    viewModel.mergePeople(person.id, sourceId, onComplete)
-                },
-            )
         }
     }
 }
@@ -158,23 +163,22 @@ private fun PersonEditor(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PersonProfile(
+    contentPadding: PaddingValues,
     person: EmployeeSummary,
     mergeCandidates: List<EmployeeSummary>,
     products: List<ProductWithStock>,
     possessions: List<EmployeePossession>,
     history: List<EmployeeIssue>,
     jobPositions: List<pl.magazyn.mobile.data.JobPositionEntity>,
-    startIssuing: Boolean,
-    onClose: () -> Unit,
+    onBack: () -> Unit,
+    onStartIssue: () -> Unit,
     onSave: (EmployeeSummary?, String, String, String, String, String, String) -> Unit,
-    onIssue: (List<IssueRequest>, String) -> Unit,
     onCorrectIssue: (EmployeeIssue, String, Long, String, Boolean) -> Unit,
     onReturnIssue: (EmployeeIssue, Long, String) -> Unit,
     onRemovePerson: () -> Unit,
     onMerge: (String, (Result<Unit>) -> Unit) -> Unit,
 ) {
     var editing by rememberSaveable(person.id) { mutableStateOf(false) }
-    var issuing by rememberSaveable(person.id) { mutableStateOf(startIssuing) }
     var correctingIssue by remember { mutableStateOf<EmployeeIssue?>(null) }
     var confirmPersonRemoval by remember { mutableStateOf(false) }
     var mergePickerVisible by rememberSaveable(person.id) { mutableStateOf(false) }
@@ -182,7 +186,11 @@ private fun PersonProfile(
     var mergeSource by remember { mutableStateOf<EmployeeSummary?>(null) }
     var mergeInProgress by remember { mutableStateOf(false) }
     var mergeError by remember { mutableStateOf<String?>(null) }
-    Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxSize().padding(contentPadding).imePadding().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Wróć do listy osób") }
+            Text("Profil osoby", style = MaterialTheme.typography.titleLarge)
+        }
         if (editing) {
             PersonEditor(person, jobPositions, { editing = false }, embeddedInScrollableProfile = true) { existing, firstName, lastName, phones, positions, aliases, tags ->
                 onSave(existing, firstName, lastName, phones, positions, aliases, tags)
@@ -197,17 +205,10 @@ private fun PersonProfile(
         if (person.positions.isNotBlank()) Text(person.positions, style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { editing = true }) { Text("Edytuj dane") }
-            Button(onClick = { issuing = !issuing }) { Text("Wydaj przedmiot") }
+            Button(onClick = onStartIssue) { Text("Wydaj przedmiot") }
         }
-        OutlinedButton(onClick = { mergePickerVisible = true }) { Text("Scal z inną osobą") }
         if (person.aliases.isNotBlank()) ProfileField("Ksywki i aliasy", person.aliases)
         if (person.tags.isNotBlank()) ProfileField("Tagi", person.tags)
-        if (issuing) {
-            IssueForm(products = products, history = history, onIssue = { items, date ->
-                onIssue(items, date)
-                issuing = false
-            })
-        }
         HorizontalDivider()
         Text("Aktualnie posiada", style = MaterialTheme.typography.titleMedium)
         if (possessions.isEmpty()) Text("Brak aktywnie powierzonego sprzętu")
@@ -216,12 +217,14 @@ private fun PersonProfile(
         Text("Historia wydań", style = MaterialTheme.typography.titleMedium)
         if (history.isEmpty()) Text("Brak zapisanych wydań")
         if (history.isNotEmpty()) IssueHistoryTable(history, onEdit = { correctingIssue = it })
-        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(4.dp), Alignment.CenterVertically) {
             TextButton(onClick = { confirmPersonRemoval = true }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
                 Icon(Icons.Default.DeleteOutline, null)
                 Text("Usuń osobę")
             }
-            TextButton(onClick = onClose) { Text("Zamknij") }
+            IconButton(onClick = { mergePickerVisible = true }) {
+                Icon(Icons.Default.MergeType, "Scal z inną osobą")
+            }
         }
         Spacer(Modifier.height(16.dp))
     }
@@ -542,11 +545,75 @@ private fun IssueCorrectionDialog(
     }
 }
 
+@Composable
+fun PersonIssueScreen(
+    contentPadding: PaddingValues,
+    personId: String,
+    onBack: () -> Unit,
+    viewModel: PeopleViewModel = viewModel(),
+) {
+    val people by viewModel.people.collectAsStateWithLifecycle()
+    val products by viewModel.products.collectAsStateWithLifecycle()
+    val history by viewModel.issueHistory(personId).collectAsStateWithLifecycle(initialValue = emptyList())
+    val person = people.firstOrNull { it.id == personId }
+    var isDirty by rememberSaveable(personId) { mutableStateOf(false) }
+    var confirmDiscard by rememberSaveable(personId) { mutableStateOf(false) }
+
+    fun requestBack() {
+        if (isDirty) confirmDiscard = true else onBack()
+    }
+
+    BackHandler(onBack = ::requestBack)
+    Column(Modifier.fillMaxSize().padding(contentPadding).imePadding()) {
+        Surface(tonalElevation = 2.dp) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = ::requestBack) { Icon(Icons.Default.ArrowBack, "Wróć do profilu osoby") }
+                Column {
+                    Text("Wydanie przedmiotów", style = MaterialTheme.typography.titleLarge)
+                    person?.let { Text(it.listDisplayName(), style = MaterialTheme.typography.labelMedium) }
+                }
+            }
+        }
+        if (person == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        } else {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                IssueForm(
+                    products = products,
+                    history = history,
+                    onDirtyChange = { isDirty = it },
+                    onIssue = { items, date ->
+                        isDirty = false
+                        viewModel.issueToPerson(person.id, items, date)
+                        onBack()
+                    },
+                )
+            }
+        }
+    }
+
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            title = { Text("Niezapisane wydanie") },
+            text = { Text("Masz niezapisane wydanie. Czy chcesz odrzucić wprowadzone dane?") },
+            confirmButton = { Button(onClick = { confirmDiscard = false; isDirty = false; onBack() }) { Text("Odrzuć zmiany") } },
+            dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("Wróć do edycji") } },
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun IssueForm(products: List<ProductWithStock>, history: List<EmployeeIssue>, onIssue: (List<IssueRequest>, String) -> Unit) {
+private fun IssueForm(
+    products: List<ProductWithStock>,
+    history: List<EmployeeIssue>,
+    onDirtyChange: (Boolean) -> Unit,
+    onIssue: (List<IssueRequest>, String) -> Unit,
+) {
     val lines = remember { mutableStateListOf(NewIssueLine()) }
-    var date by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
+    val initialDate = remember { LocalDate.now().toString() }
+    var date by rememberSaveable { mutableStateOf(initialDate) }
     var showDatePicker by remember { mutableStateOf(false) }
     var confirmNegative by rememberSaveable { mutableStateOf(false) }
     val selectedDate = runCatching { LocalDate.parse(date) }.getOrNull()
@@ -556,6 +623,15 @@ private fun IssueForm(products: List<ProductWithStock>, history: List<EmployeeIs
         products.firstOrNull { it.id == productId }?.let { it.stockQuantity - quantity < 0 } == true
     }
     val allValid = lines.isNotEmpty() && lines.all { it.productId.isNotBlank() && (it.quantity.toLongOrNull() ?: 0L) > 0L }
+    val dirty = issueDraftIsDirty(
+        productQueries = lines.map { it.productQuery },
+        quantities = lines.map { it.quantity },
+        lineCount = lines.size,
+        date = date,
+        initialDate = initialDate,
+        confirmNegative = confirmNegative,
+    )
+    LaunchedEffect(dirty) { onDirtyChange(dirty) }
 
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -653,18 +729,26 @@ private fun IssueLineEditor(
     }
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Pozycja", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                if (canRemove) IconButton(onClick = onRemove) { Icon(Icons.Default.DeleteOutline, "Usuń pozycję") }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    line.productQuery,
+                    { onChange(line.copy(productQuery = it, productId = "", suggestionsVisible = true)) },
+                    Modifier.weight(1f).keepAboveKeyboard(),
+                    label = { Text("Przedmiot") },
+                    placeholder = { Text("Nazwa lub wariant") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    line.quantity,
+                    { onChange(line.copy(quantity = it.filter(Char::isDigit))) },
+                    Modifier.width(88.dp).keepAboveKeyboard(),
+                    label = { Text("Ilość") },
+                    placeholder = { Text("1") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                if (canRemove) IconButton(onClick = onRemove, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.DeleteOutline, "Usuń pozycję") }
             }
-            OutlinedTextField(
-                line.productQuery,
-                { onChange(line.copy(productQuery = it, productId = "", suggestionsVisible = true)) },
-                Modifier.fillMaxWidth().keepAboveKeyboard(),
-                label = { Text("Przedmiot") },
-                placeholder = { Text("Wpisz nazwę lub wariant") },
-                singleLine = true,
-            )
             if (line.suggestionsVisible && suggestions.isNotEmpty()) {
                 SuggestionList(suggestions, key = { it.id }) { product ->
                     OutlinedCard(
@@ -691,18 +775,18 @@ private fun IssueLineEditor(
                     }
                 }
             }
-            OutlinedTextField(
-                line.quantity,
-                { onChange(line.copy(quantity = it.filter(Char::isDigit))) },
-                Modifier.fillMaxWidth().keepAboveKeyboard(),
-                label = { Text("Ilość") },
-                placeholder = { Text("1") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            )
         }
     }
 }
+
+internal fun issueDraftIsDirty(
+    productQueries: List<String>,
+    quantities: List<String>,
+    lineCount: Int,
+    date: String,
+    initialDate: String,
+    confirmNegative: Boolean,
+): Boolean = lineCount != 1 || productQueries.any(String::isNotBlank) || quantities.any(String::isNotBlank) || date != initialDate || confirmNegative
 
 @Composable
 fun ScreenHeader(title: String, actionLabel: String, onAction: () -> Unit) {

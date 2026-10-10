@@ -785,6 +785,12 @@ data class OrderDetailLine(
 
 @Dao
 interface NotebookDao {
+    @Query("SELECT * FROM order_notebooks WHERE detectedType = 'NOTE' AND status != 'ARCHIVED' ORDER BY createdAtEpochMillis DESC")
+    fun observeNotes(): Flow<List<OrderNotebookEntity>>
+
+    @Query("SELECT * FROM order_notebooks WHERE id = :id AND detectedType = 'NOTE' LIMIT 1")
+    suspend fun findNote(id: String): OrderNotebookEntity?
+
     @Query("""
         SELECT t.id, t.notebookId, t.text, t.isCompleted, t.dueDate, t.priority,
                COALESCE(NULLIF((SELECT GROUP_CONCAT(DISTINCT tp.name) FROM notebook_task_steps ts LEFT JOIN task_places tp ON tp.id = ts.placeId WHERE ts.taskId = t.id), ''), t.place) AS place,
@@ -814,6 +820,12 @@ interface NotebookDao {
 
     @Insert
     suspend fun insertNotebook(item: OrderNotebookEntity)
+
+    @Query("UPDATE order_notebooks SET rawText = :rawText WHERE id = :id AND detectedType = 'NOTE'")
+    suspend fun updateNoteText(id: String, rawText: String)
+
+    @Query("UPDATE order_notebooks SET status = :status WHERE id = :id AND detectedType = 'NOTE'")
+    suspend fun setNoteStatus(id: String, status: String)
 
     @Insert
     suspend fun insertTasks(items: List<NotebookTaskEntity>)

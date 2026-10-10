@@ -27,7 +27,7 @@ fun QuickAddSheet(
             Text("Co chcesz zrobić?", style = MaterialTheme.typography.titleLarge)
             IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Zamknij") }
         }
-        QuickAddAction(Icons.Default.NoteAdd, "Wklej notatkę", "Utwórz zamówienie z tekstu", onNote)
+        QuickAddAction(Icons.Default.NoteAdd, "Wklej notatkę", "Zapisz tekst na później", onNote)
         QuickAddAction(Icons.Default.TaskAlt, "Nowe zadanie", "Termin, priorytet i powiązania", onTask)
         QuickAddAction(Icons.Default.PersonAdd, "Dodaj osobę", "Imię, nazwisko, stanowisko i profil", onPeople)
         QuickAddAction(Icons.Default.PlaylistAdd, "Dodaj przedmiot", "Nowa pozycja w katalogu", onProducts)
