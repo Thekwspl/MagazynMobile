@@ -26,7 +26,7 @@ class SpecificIssueReturnTest {
         environment = IsolatedApplicationEnvironment.create()
         database = environment.database
         database.seedCoreData(stock = 10.0)
-        viewModel = PeopleViewModel(environment.application)
+        viewModel = environment.track(PeopleViewModel(environment.application))
     }
 
     @After

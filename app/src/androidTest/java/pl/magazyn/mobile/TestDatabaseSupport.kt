@@ -5,7 +5,9 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
+import android.os.Looper
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
 import androidx.sqlite.db.SimpleSQLiteQuery
@@ -16,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import pl.magazyn.mobile.data.AppDatabase
 import pl.magazyn.mobile.data.EmployeeEntity
@@ -28,10 +31,31 @@ internal class IsolatedApplicationEnvironment private constructor(
     val application: MagazynApplication,
 ) : AutoCloseable {
     val database: AppDatabase get() = application.database
+    private val viewModels = ViewModelStore()
+    private val viewModelJobs = mutableListOf<Job>()
+    private var closed = false
+
+    /** Bez właściciela lifecycle stateIn/obserwacje Room przeżywają koniec testu. */
+    fun <T : ViewModel> track(viewModel: T): T {
+        check(!closed) { "Środowisko testowe zostało zamknięte" }
+        viewModels.put("test-${viewModelJobs.size}", viewModel)
+        viewModelJobs += checkNotNull(viewModel.viewModelScope.coroutineContext[Job])
+        return viewModel
+    }
 
     override fun close() {
-        runCatching { application.closeDatabase() }
-        root.deleteRecursively()
+        if (closed) return
+        check(Looper.myLooper() != Looper.getMainLooper()) {
+            "Środowisko zamykamy z wątku testu, aby Main mógł zakończyć korutyny"
+        }
+        runBlocking {
+            withContext(Dispatchers.Main.immediate) { viewModels.clear() }
+            // cancel nie wystarcza: Room może jeszcze kończyć zapytanie/transakcję/finally.
+            viewModelJobs.joinAll()
+        }
+        application.closeDatabase()
+        check(root.deleteRecursively()) { "Nie udało się usunąć izolowanego środowiska: $root" }
+        closed = true
     }
 
     companion object {
@@ -116,11 +140,14 @@ internal fun AppDatabase.queryDouble(sql: String, vararg args: Any?): Double =
 internal suspend fun ViewModel.runAndAwaitViewModelWork(action: () -> Unit) {
     val scopeJob = viewModelScope.coroutineContext[Job]
         ?: error("ViewModel nie posiada aktywnego Job")
+    check(scopeJob.isActive) { "ViewModel został już zwolniony" }
     val launchedJobs = withContext(Dispatchers.Main.immediate) {
         val existingJobs = scopeJob.children.toSet()
         action()
         scopeJob.children.filterNot(existingJobs::contains).toList()
     }
+    // Czekamy na operację i jej dzieci, a nie na stałe stateIn uruchomione w konstruktorze.
+    // Te ostatnie kończy właściciel ViewModelu w IsolatedApplicationEnvironment.close().
     launchedJobs.joinAll()
 }
 
