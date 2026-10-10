@@ -25,10 +25,10 @@ const text = (id: string, question: string): ClarificationQuestion =>
   ({ id, question, type: "text", candidates: [], required: true });
 
 const response = (sessionId: string, status: AgentResponse["status"], clarifications: ClarificationQuestion[] = []): AgentResponse => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   sessionId,
   status,
-  intent: "ORDER",
+  intent: "ORDER", task: null, note: null, contact: null,
   recipient: { id: "p1", label: "Jan Kowalski", kind: "person" },
   deliveryDate: "2026-10-09",
   items: [{ productId: "g", label: "Rękawice Monterskie 10", quantity: 2, unit: "opak.",

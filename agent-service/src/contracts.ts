@@ -1,4 +1,12 @@
-export const PROTOCOL_VERSION = 1 as const;
+export const PROTOCOL_VERSION = 2 as const;
+export type InputMode = "ALL" | "ORDER" | "TASK" | "NOTE";
+export type InputIntent = "ORDER" | "TASK" | "NOTE" | "CONTACT";
+export interface TaskProposal {
+  title: string; date: string | null; description: string;
+  steps: Array<{ time: string | null; placeId: string | null; placeText: string; note: string;
+    people: Array<{ employeeId: string | null; displayText: string; note: string }> }>;
+}
+export interface ContactProposal { fullName: string; position: string | null; phoneNumbers: string[] }
 
 export type AgentStatus =
   | "needs_data"
@@ -55,7 +63,10 @@ export interface AgentResponse {
   schemaVersion: typeof PROTOCOL_VERSION;
   sessionId: string;
   status: AgentStatus;
-  intent: "ORDER";
+  intent: InputIntent;
+  task?: TaskProposal | null;
+  note?: { text: string } | null;
+  contact?: ContactProposal | null;
   recipient?: { id: string; label: string; kind: "person" | "shipyard" } | null;
   deliveryDate?: string | null;
   items: OrderItemProposal[];
@@ -93,6 +104,7 @@ export const agentResponseJsonSchema = {
     "recipient",
     "deliveryDate",
     "error",
+    "task", "note", "contact",
   ],
   properties: {
     schemaVersion: { enum: [PROTOCOL_VERSION] },
@@ -100,7 +112,27 @@ export const agentResponseJsonSchema = {
     status: {
       enum: ["needs_data", "needs_user_choice", "proposal", "error"],
     },
-    intent: { enum: ["ORDER"] },
+    intent: { enum: ["ORDER", "TASK", "NOTE", "CONTACT"] },
+    task: {
+      type: ["object", "null"], additionalProperties: false,
+      required: ["title", "date", "description", "steps"], properties: {
+        title: { type: "string" }, date: { type: ["string", "null"] }, description: { type: "string" },
+        steps: { type: "array", items: { type: "object", additionalProperties: false,
+          required: ["time", "placeId", "placeText", "note", "people"], properties: {
+            time: { type: ["string", "null"] }, placeId: { type: ["string", "null"] },
+            placeText: { type: "string" }, note: { type: "string" },
+            people: { type: "array", items: { type: "object", additionalProperties: false,
+              required: ["employeeId", "displayText", "note"], properties: {
+                employeeId: { type: ["string", "null"] }, displayText: { type: "string" }, note: { type: "string" },
+              } } },
+          } } },
+      },
+    },
+    note: { type: ["object", "null"], additionalProperties: false, required: ["text"],
+      properties: { text: { type: "string" } } },
+    contact: { type: ["object", "null"], additionalProperties: false, required: ["fullName", "position", "phoneNumbers"],
+      properties: { fullName: { type: "string" }, position: { type: ["string", "null"] },
+        phoneNumbers: { type: "array", items: { type: "string" } } } },
     recipient: {
       type: ["object", "null"],
       additionalProperties: false,
@@ -295,14 +327,47 @@ export function parseAgentResponse(text: string): AgentResponse {
   let value: unknown;
   try { value = JSON.parse(text); } catch { throw new Error("CODEX_PROTOCOL_ERROR: odpowiedź nie jest JSON."); }
   if (!validate(value, agentResponseJsonSchema))
-    throw new Error("CODEX_PROTOCOL_ERROR: odpowiedź nie spełnia schematu AgentResponse v1.");
+    throw new Error("CODEX_PROTOCOL_ERROR: odpowiedź nie spełnia schematu AgentResponse v2.");
   const parsed = value as AgentResponse;
+  validateIntent(parsed);
   if (parsed.needsData.length > 4 || new Set(parsed.needsData.map(r => r.id)).size !== parsed.needsData.length ||
     parsed.needsData.some(r => !validToolRequest(r)))
     throw new Error("CODEX_PROTOCOL_ERROR: nieprawidłowe żądanie odczytu.");
   if (!validClarifications(parsed))
     throw new Error("CODEX_PROTOCOL_ERROR: nieprawidłowy zestaw pytań doprecyzowujących.");
   return value as AgentResponse;
+}
+
+export function validateIntent(response: AgentResponse, mode: InputMode = "ALL"): void {
+  const fail = () => { throw new Error("CODEX_PROTOCOL_ERROR: nieprawidłowy wynik lub rodzaj propozycji."); };
+  if (!id(response.sessionId) || response.items.length > 100 || (response.recipient &&
+    (!id(response.recipient.id) || !nonBlank(response.recipient.label, 500)))) fail();
+  if (response.schemaVersion !== PROTOCOL_VERSION || !["ORDER", "TASK", "NOTE", "CONTACT"].includes(response.intent)) fail();
+  if (response.status !== "error" && mode !== "ALL" && response.intent !== mode) fail();
+  if (response.intent !== "TASK" && response.task != null || response.intent !== "NOTE" && response.note != null ||
+      response.intent !== "CONTACT" && response.contact != null) fail();
+  if (response.intent !== "ORDER" && (response.items.length || response.recipient != null || response.deliveryDate != null || response.needsData.length)) fail();
+  if (response.status === "needs_data" ? !response.needsData.length : response.needsData.length > 0) fail();
+  if (response.items.some(item => !id(item.productId) || !Number.isSafeInteger(item.quantity) || item.quantity <= 0 || !id(item.unit))) fail();
+  if (response.task && (!nonBlank(response.task.title, 500) || !validDate(response.task.date) || response.task.steps.length > 100 ||
+    response.task.steps.some(step => (step.time != null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(step.time)) ||
+      (step.placeId != null && !id(step.placeId)) || step.people.length > 100 || step.people.some(person =>
+        !nonBlank(person.displayText, 500) || (person.employeeId != null && !id(person.employeeId)))))) fail();
+  if (!validDate(response.deliveryDate ?? null)) fail();
+  if (response.status === "proposal") {
+    if (response.intent === "ORDER" && (!response.items.length || !response.recipient ||
+      response.items.some(item => typeof item.available !== "number" || !Number.isFinite(item.available)))) fail();
+    if (response.intent === "TASK" && !response.task) fail();
+    if (response.intent === "NOTE" && !nonBlank(response.note?.text, 100_000)) fail();
+    if (response.intent === "CONTACT" && (!response.contact || !nonBlank(response.contact.fullName, 500) ||
+      response.contact.phoneNumbers.length > 20 || response.contact.phoneNumbers.some(phone => !nonBlank(phone, 100)))) fail();
+  }
+  if (response.status === "error" && !nonBlank(response.error?.message, 2000)) fail();
+}
+
+function validDate(value: string | null): boolean {
+  if (value === null) return true;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 }
 
 const object = (value: unknown): value is Record<string, unknown> =>

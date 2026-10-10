@@ -5,7 +5,7 @@ import { CatalogStore, type CatalogDelta, type CatalogSnapshot } from "./catalog
 import { searchCatalog, SEARCH_TOOLS, type SearchTool } from "./catalogTools.js";
 import { CodexAppServerClient } from "./codexAppServerClient.js";
 import { CodexWarehouseAgent, type CodexRunner } from "./codexWarehouseAgent.js";
-import type { ClarificationAnswer, ReadOnlyToolResult } from "./contracts.js";
+import { PROTOCOL_VERSION, type InputMode, type ClarificationAnswer, type ReadOnlyToolResult } from "./contracts.js";
 import { WarehouseAgent } from "./warehouseAgent.js";
 
 const json = (response: ServerResponse, status: number, value: unknown): void => {
@@ -74,8 +74,16 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
         catalog.deltaSync(await body<CatalogDelta>(request)); return json(response, 204, null);
       }
       if (request.method === "POST" && url.pathname === "/v1/sessions/message") {
-        const payload = await body<{ message: string }>(request);
-        return json(response, 200, mode === "codex" ? await agent.start(payload.message) : local.start(payload.message));
+        const payload = await body<{ message: string; schemaVersion: number; mode: InputMode }>(request);
+        if (payload.schemaVersion !== PROTOCOL_VERSION)
+          return json(response, 409, { error: "PROTOCOL_VERSION_MISMATCH", message: "Wymagany klient AgentResponse v2." });
+        if (!payload || Object.keys(payload).some(key => !["message", "schemaVersion", "mode"].includes(key)) ||
+          typeof payload.message !== "string" || !payload.message.trim() || payload.message.length > 100_000 ||
+          !["ALL", "ORDER", "TASK", "NOTE"].includes(payload.mode))
+          return json(response, 400, { error: "INVALID_MESSAGE_MODE" });
+        if (mode === "local" && payload.mode !== "ORDER")
+          return json(response, 400, { error: "LOCAL_ORDER_ONLY", message: "Tryby ALL, TASK i NOTE wymagają AGENT_MODE=codex." });
+        return json(response, 200, mode === "codex" ? await agent.start(payload.message, payload.mode) : local.start(payload.message));
       }
       const resume = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/tool-results$/);
       if (request.method === "POST" && resume) {

@@ -182,7 +182,7 @@ class RoomAgentDataSourceTest {
     }
 
     private fun request(id: String, tool: String, args: JSONObject) = JSONObject().put("id", id).put("tool", tool).put("arguments", args)
-    private fun reply(status: String, reads: JSONArray) = AgentProtocol.parse(JSONObject().put("schemaVersion", 1)
+    private fun reply(status: String, reads: JSONArray) = AgentProtocol.parse(JSONObject().put("schemaVersion", 2).put("task", JSONObject.NULL).put("note", JSONObject.NULL).put("contact", JSONObject.NULL)
         .put("sessionId", "same-session").put("status", status).put("intent", "ORDER")
         .put("recipient", JSONObject().put("id", "employee-1").put("label", "Jan").put("kind", "person"))
         .put("deliveryDate", JSONObject.NULL).put("items", JSONArray().put(JSONObject().put("productId", "product-1")

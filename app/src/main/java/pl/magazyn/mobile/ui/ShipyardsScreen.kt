@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.flowOf
 import pl.magazyn.mobile.data.ProductWithStock
 import pl.magazyn.mobile.data.ShipyardStockItem
 import pl.magazyn.mobile.data.StockExportFormat
+import pl.magazyn.mobile.data.ExportSelection
+import pl.magazyn.mobile.data.StockReportSource
 
 private data class ShipyardLine(
     val key: String = UUID.randomUUID().toString(),
@@ -88,9 +90,6 @@ fun ShipyardsScreen(
     val createsNegative = totals.any { (id, quantity) -> products.firstOrNull { it.id == id }?.let { it.stockQuantity - quantity < 0 } == true }
     val valid = selected != null && lines.all { it.productId.isNotBlank() && (it.quantity.toLongOrNull() ?: 0L) > 0L }
     val visibleShipyards = shipyards.filter { search.isBlank() || it.name.contains(search, true) }
-    val exportItems = shipyardStock.map { item ->
-        ProductWithStock(item.productId, item.name, item.variant, item.unit, "", item.groupName, item.subgroupName, "", "", "", false, 0.0, 0, false, item.quantity, true)
-    }
 
     if (selected == null) {
         Column(Modifier.fillMaxSize().padding(contentPadding).padding(16.dp)) {
@@ -166,13 +165,15 @@ fun ShipyardsScreen(
 
     LaunchedEffect(exportState.ready) {
         exportState.ready?.let { ready ->
-            context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                type = ready.mimeType
-                putExtra(Intent.EXTRA_STREAM, ready.uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Stan stoczni · ${activeShipyard.name}")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }, "Udostępnij dane stoczni"))
-            exportViewModel.consumeReady()
+            try {
+                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                    type = ready.mimeType
+                    putExtra(Intent.EXTRA_STREAM, ready.uri)
+                    putExtra(Intent.EXTRA_SUBJECT, ready.subject)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }, "Udostępnij dane stoczni"))
+                exportViewModel.consumeReady()
+            } catch (error: Exception) { exportViewModel.shareFailed(error) }
         }
     }
 
@@ -259,7 +260,8 @@ fun ShipyardsScreen(
                 }
             }
         }
-        item { OutlinedButton(onClick = { exportDialog = true }, Modifier.fillMaxWidth()) { Text("Eksportuj dane") } }
+        item { OutlinedButton(onClick = { exportDialog = true }, Modifier.fillMaxWidth(), enabled = !exportState.working) { Text(if (exportState.working) "Przygotowuję…" else "Eksportuj dane") } }
+        exportState.error?.let { error -> item { Text(error, color = MaterialTheme.colorScheme.error) } }
     }
     if (showDatePicker) {
         val initial = runCatching { LocalDate.parse(date) }.getOrDefault(LocalDate.now())
@@ -279,7 +281,7 @@ fun ShipyardsScreen(
             onDismissRequest = { exportDialog = false },
             title = { Text("Eksport danych stoczni") },
             text = { Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Text("${activeShipyard.name} · ${exportItems.size} pozycji")
+                Text("${activeShipyard.name} · ${shipyardStock.size} pozycji")
                 StockExportFormat.entries.forEach { format ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selectedFormat == format, { exportFormat = format.name })
@@ -289,9 +291,9 @@ fun ShipyardsScreen(
                 exportState.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             } },
             confirmButton = { Button(onClick = {
-                exportViewModel.export("Stocznia ${activeShipyard.name}", exportItems, selectedFormat)
+                exportViewModel.export(ExportSelection(source = StockReportSource.SHIPYARD, shipyardId = activeShipyard.id), selectedFormat)
                 exportDialog = false
-            }, enabled = exportItems.isNotEmpty() && !exportState.working) { Text("Utwórz i udostępnij") } },
+            }, enabled = shipyardStock.isNotEmpty() && !exportState.working) { Text("Utwórz i udostępnij") } },
             dismissButton = { TextButton(onClick = { exportDialog = false }) { Text("Anuluj") } },
         )
     }

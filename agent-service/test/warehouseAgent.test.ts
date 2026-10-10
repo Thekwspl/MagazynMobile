@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CatalogStore, type CatalogSnapshot } from "../src/catalog.js";
-import { PROTOCOL_VERSION } from "../src/contracts.js";
+import { PROTOCOL_VERSION, parseAgentResponse } from "../src/contracts.js";
 import { WarehouseAgent } from "../src/warehouseAgent.js";
 
 const fixture = (duplicateKowalski = false): CatalogSnapshot => ({
@@ -48,6 +48,7 @@ test("builds a versioned needs_data request for a recognized order", () => {
   const { agent } = makeAgent();
   const response = agent.start("Kowalski jutro 2 rękawice XL i okulary");
 
+  assert.equal(parseAgentResponse(JSON.stringify(agent.start("Kowalski 2 rękawice"))).schemaVersion, PROTOCOL_VERSION);
   assert.equal(response.schemaVersion, PROTOCOL_VERSION);
   assert.equal(response.status, "needs_data");
   assert.equal(response.recipient?.id, "person-jan");

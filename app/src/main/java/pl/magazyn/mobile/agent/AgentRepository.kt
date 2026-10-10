@@ -11,13 +11,19 @@ import pl.magazyn.mobile.data.ShipyardEntity
 import pl.magazyn.mobile.data.ShipyardLeaderLink
 import pl.magazyn.mobile.data.TaskPlaceView
 import pl.magazyn.mobile.data.ShipyardResolver
+import pl.magazyn.mobile.domain.QuickInputMode
+import pl.magazyn.mobile.domain.ParsedInputKind
+import pl.magazyn.mobile.domain.RecognitionRules
+import pl.magazyn.mobile.domain.ImportParser
+import pl.magazyn.mobile.data.ParserLearningRuleEntity
 
 private fun csv(value: String) = value.split(',').map(String::trim).filter(String::isNotBlank)
 private fun array(values: List<String>) = JSONArray(values)
 
 object AgentCatalog {
     fun export(revision: Long, people: List<EmployeeSummary>, products: List<ProductEntity>,
-               shipyards: List<ShipyardEntity>, leaders: List<ShipyardLeaderLink>, places: List<TaskPlaceView>): JSONObject =
+               shipyards: List<ShipyardEntity>, leaders: List<ShipyardLeaderLink>, places: List<TaskPlaceView>,
+               rules: List<ParserLearningRuleEntity> = emptyList()): JSONObject =
         AgentProtocol.catalog(revision,
             JSONArray().apply { people.forEach { put(JSONObject().put("id", it.id).put("firstName", it.firstName)
                 .put("lastName", it.lastName).put("aliases", array(csv(it.aliases))).put("positions", array(csv(it.positions)))) } },
@@ -29,7 +35,21 @@ object AgentCatalog {
                 .put("leaders", array(leaders.filter { it.shipyardId == yard.id }.map { it.employeeId }))) } },
             JSONArray().apply { places.filterNot { it.isArchived }.forEach { put(JSONObject().put("id", it.id)
                 .put("name", it.name).put("aliases", array(csv(it.aliases)))) } },
-        )
+        ).put("recognitionRules", RecognitionRules.json(rules).apply {
+            val learned = getJSONArray("learned")
+            for (index in 0 until learned.length()) {
+                val rule = learned.getJSONObject(index)
+                val ids = when (rule.getString("type")) {
+                    "PRODUCT" -> products.filter { !it.isArchived && !it.isHidden &&
+                        ImportParser.key(it.name) == ImportParser.key(rule.getString("learnedName")) &&
+                        (rule.isNull("learnedVariant") || ImportParser.key(it.variant.orEmpty()) == ImportParser.key(rule.getString("learnedVariant"))) }
+                        .map { it.id }
+                    "PERSON" -> people.filter { ImportParser.key(it.fullName) == ImportParser.key(rule.getString("learnedName")) }.map { it.id }
+                    else -> emptyList()
+                }
+                rule.put("targetIds", JSONArray(ids))
+            }
+        })
 }
 
 interface AgentDataSource {
@@ -38,6 +58,7 @@ interface AgentDataSource {
     suspend fun product(id: String): ProductEntity?
     suspend fun person(id: String): EmployeeSummary?
     suspend fun shipyard(id: String): ShipyardEntity?
+    suspend fun taskPlace(id: String): TaskPlaceView? = throw AgentFailure("Odczyt miejsca zadania jest niedostępny.")
     suspend fun personItems(id: String): List<AgentPossession> = throw AgentFailure("Odczyt rzeczy osoby jest niedostępny.")
     suspend fun shipyardStock(id: String): List<AgentYardBalance> = throw AgentFailure("Odczyt stoczni jest niedostępny.")
     suspend fun activeOrders(key: AgentRecipientKey): List<AgentOrderRecord> = throw AgentFailure("Odczyt zamówień jest niedostępny.")
@@ -52,7 +73,7 @@ class RoomAgentDataSource(private val database: AppDatabase) : AgentDataSource {
             val aliases = database.taskStructureDao().getAliasesNow()
             places.map { place -> TaskPlaceView(place.id, place.name, place.isArchived,
                 aliases.filter { it.placeId == place.id }.joinToString(",") { it.alias }) }
-        })
+        }, database.learningRuleDao().observeAll().first())
 
     override suspend fun currentStock(ids: List<String>): List<Pair<String, Double>> {
         if (ids.isEmpty() || ids.any(String::isBlank)) throw AgentFailure("Agent nie wskazał poprawnych ID produktów.")
@@ -69,6 +90,8 @@ class RoomAgentDataSource(private val database: AppDatabase) : AgentDataSource {
         EmployeeSummary(it.id, it.fullName, it.firstName, it.lastName, "", "", "", "")
     }
     override suspend fun shipyard(id: String) = database.shipyardDao().findActive(id)
+    override suspend fun taskPlace(id: String) = database.taskStructureDao().getPlacesNow().firstOrNull { it.id == id && !it.isArchived }
+        ?.let { TaskPlaceView(it.id, it.name, it.isArchived, "") }
 
     override suspend fun personItems(id: String): List<AgentPossession> {
         if (person(id) == null) throw AgentFailure("Nieznana aktywna osoba: $id.")
@@ -121,21 +144,41 @@ class RoomAgentDataSource(private val database: AppDatabase) : AgentDataSource {
 }
 
 class AgentRepository(private val client: AgentClient, private val source: AgentDataSource, private val nextRevision: () -> Long) {
-    suspend fun analyze(message: String): AgentReply {
+    private var mode = QuickInputMode.ALL
+    private var rawText = ""
+    private var activeReply: AgentReply? = null
+    suspend fun analyze(message: String, mode: QuickInputMode = QuickInputMode.ALL): AgentReply {
+        this.mode = mode
+        rawText = message
+        activeReply = null
         val auth = client.authStatus()
         if (auth.optJSONObject("account")?.optString("type") != "chatgpt" && auth.optString("authMode") != "chatgpt")
             throw AgentFailure("Agent-service nie ma aktywnego logowania ChatGPT.")
         client.fullSync(source.catalog(nextRevision()))
-        return advance(client.message(message))
+        return advance(client.message(message, mode))
+    }
+
+    private fun validate(reply: AgentReply) {
+        if (reply.status != AgentStatus.ERROR && mode.preferredKind != null && reply.intent != mode.preferredKind)
+            throw AgentFailure("Agent zwrócił wynik niezgodny z wybranym trybem.")
+        if (reply.noteText != null && reply.noteText != rawText) throw AgentFailure("Agent zmienił oryginalny tekst notatki.")
+    }
+
+    private fun requireCurrent(reply: AgentReply) {
+        if (activeReply != reply) throw AgentFailure("Odpowiedź nie należy do aktualnej rundy sesji.")
     }
 
     suspend fun choose(reply: AgentReply, candidateId: String): AgentReply {
+        requireCurrent(reply)
         if (reply.status != AgentStatus.NEEDS_USER_CHOICE || reply.candidates.none { it.id == candidateId })
             throw AgentFailure("Nieprawidłowy wybór kandydata.")
-        return advance(client.choice(reply.sessionId, candidateId))
+        val next = client.choice(reply.sessionId, candidateId)
+        if (next.sessionId != reply.sessionId) throw AgentFailure("Agent zmienił sesję po wyborze.")
+        return advance(next)
     }
 
     suspend fun answer(reply: AgentReply, answers: List<AgentClarificationAnswer>): AgentReply {
+        requireCurrent(reply)
         if (reply.status != AgentStatus.NEEDS_USER_CHOICE || reply.clarifications.isEmpty() ||
             !areRequiredClarificationsAnswered(reply.clarifications, answers))
             throw AgentFailure("Uzupełnij wszystkie wymagane odpowiedzi.")
@@ -147,7 +190,8 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
     private suspend fun advance(first: AgentReply): AgentReply {
         var reply = first
         repeat(4) {
-            if (reply.status != AgentStatus.NEEDS_DATA) return reply
+            validate(reply)
+            if (reply.status != AgentStatus.NEEDS_DATA) { activeReply = reply; return reply }
             val requests = reply.needsData.map { request ->
                 val data: JSONObject
                 val tool: String
@@ -196,6 +240,8 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
             if (next.sessionId != reply.sessionId) throw AgentFailure("Agent zmienił sesję podczas odczytu stanu.")
             reply = next
         }
+        validate(reply)
+        if (reply.status != AgentStatus.NEEDS_DATA) { activeReply = reply; return reply }
         throw AgentFailure("Agent przekroczył limit żądań odczytu.")
     }
 
@@ -203,6 +249,19 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
 
     suspend fun review(reply: AgentReply): pl.magazyn.mobile.domain.ParsedNote {
         if (reply.status != AgentStatus.PROPOSAL) throw AgentFailure("Brak propozycji do podglądu.")
+        validate(reply)
+        if (reply.intent != ParsedInputKind.ORDER) {
+            val task = reply.task?.let { draft -> draft.copy(steps = draft.steps.map { step ->
+                val place = step.placeId?.let { source.taskPlace(it) ?: throw AgentFailure("Miejsce zadania nie istnieje już lokalnie.") }
+                step.copy(placeText = place?.name ?: step.placeText, people = step.people.map { person ->
+                    val employee = person.employeeId?.let { source.person(it) ?: throw AgentFailure("Osoba zadania nie istnieje już lokalnie.") }
+                    person.copy(displayText = employee?.fullName ?: person.displayText)
+                })
+            }) }
+            val person = reply.contact?.let { pl.magazyn.mobile.domain.ParsedPerson(it.fullName, it.position, 1f) }
+            return pl.magazyn.mobile.domain.ParsedNote(person, emptyList(), kind = reply.intent,
+                phoneNumbers = reply.contact?.phoneNumbers.orEmpty(), taskDraft = task, analyzedByAi = true, agentProposal = true)
+        }
         val recipient = reply.recipient ?: throw AgentFailure("Propozycja nie ma odbiorcy.")
         val person = if (recipient.kind == "person") source.person(recipient.id)
             ?: throw AgentFailure("Odbiorca nie istnieje już lokalnie.") else null
@@ -211,7 +270,7 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
         if (person == null && yard == null) throw AgentFailure("Nieznany rodzaj odbiorcy.")
         val items = reply.items.map { item ->
             val product = source.product(item.productId) ?: throw AgentFailure("Produkt nie istnieje już lokalnie: ${item.productId}.")
-            if (item.available == null || !item.available.isFinite() || !item.quantity.isFinite() || item.quantity <= 0 || item.quantity % 1 != 0.0 || item.quantity > Long.MAX_VALUE || item.unit != product.unit)
+            if (product.isHidden || item.available == null || !item.available.isFinite() || !item.quantity.isFinite() || item.quantity <= 0 || item.quantity % 1 != 0.0 || item.quantity > Long.MAX_VALUE || item.unit != product.unit)
                 throw AgentFailure("Propozycja zawiera nieobsługiwaną ilość lub jednostkę produktu ${item.productId}.")
             pl.magazyn.mobile.domain.ParsedItem(product.name, product.variant, item.quantity.toLong(), product.unit, 1f,
                 recipientName = person?.fullName ?: yard?.name,

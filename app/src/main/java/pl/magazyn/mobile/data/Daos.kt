@@ -303,7 +303,7 @@ interface ShipyardDao {
     suspend fun upsertStock(item: ShipyardStockBalanceEntity)
 
     @Query("""
-        SELECT p.id AS productId, p.name, p.variant, p.unit, b.quantity, p.groupName, p.subgroupName
+        SELECT p.id AS productId, p.name, p.variant, p.unit, b.quantity, p.groupName, p.subgroupName, p.category
         FROM shipyard_stock_balances b
         JOIN products p ON p.id = b.productId
         WHERE b.shipyardId = :shipyardId AND b.quantity != 0
@@ -330,6 +330,7 @@ data class ShipyardStockItem(
     val quantity: Double,
     val groupName: String,
     val subgroupName: String,
+    val category: String = "",
 )
 
 data class ShipyardLeaderLink(
@@ -373,6 +374,18 @@ data class NegativeStockItem(
 
 @Dao
 interface MovementDao {
+    @Query("""
+        SELECT m.id AS movementId, l.id AS lineId, m.effectiveDate, p.name AS productName,
+               p.variant, l.quantityDelta AS quantity, l.unit, w.name AS warehouseName, m.note
+        FROM stock_movements m
+        JOIN stock_movement_lines l ON l.movementId = m.id
+        JOIN products p ON p.id = l.productId
+        JOIN warehouses w ON w.id = m.warehouseId
+        WHERE m.type = 'DELIVERY' AND m.effectiveDate >= :dateFrom AND m.effectiveDate <= :dateTo
+        ORDER BY m.effectiveDate ASC, m.createdAtEpochMillis ASC, m.id ASC, l.id ASC
+    """)
+    fun observeDeliveryReport(dateFrom: String, dateTo: String): Flow<List<DeliveryReportLine>>
+
     @Query("UPDATE stock_movements SET shipyardId = :shipyardId WHERE id = :movementId AND employeeId IS NULL AND type IN ('SHIPYARD_ISSUE','SHIPYARD_RETURN','HISTORICAL_SHIPYARD_IMPORT','HISTORICAL_ISSUE_IMPORT')")
     suspend fun assignShipyard(movementId: String, shipyardId: String): Int
 

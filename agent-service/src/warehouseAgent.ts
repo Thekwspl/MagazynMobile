@@ -257,7 +257,7 @@ export class WarehouseAgent {
           : shipyards[0].name,
         kind: people[0] ? "person" : "shipyard",
       },
-      deliveryDate,
+      deliveryDate: deliveryDate ?? null,
       items,
       needsData: [
         {
@@ -279,6 +279,7 @@ export class WarehouseAgent {
       label: productLabel(product),
       quantity,
       unit: product.unit,
+      available: null,
     };
   }
 
@@ -295,6 +296,7 @@ export class WarehouseAgent {
       sessionId,
       status: "error",
       intent: "ORDER",
+      task: null, note: null, contact: null, recipient: null, deliveryDate: null, error: null,
       items: [],
       warnings: [],
       questions: [],

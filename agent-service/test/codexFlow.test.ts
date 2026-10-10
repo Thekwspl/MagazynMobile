@@ -15,7 +15,7 @@ const fixture: CatalogSnapshot = { revision: 1,
 const clientToken = "fixture-token-" + "x".repeat(64);
 const authorized = { authorization: `Bearer ${clientToken}` };
 const response = (sessionId: string, status: AgentResponse["status"]): AgentResponse => ({
-  schemaVersion: 1, sessionId, status, intent: "ORDER", recipient: { id: "p1", label: "Jan Kowalski", kind: "person" },
+  schemaVersion: 2, sessionId, status, intent: "ORDER", task: null, note: null, contact: null, recipient: { id: "p1", label: "Jan Kowalski", kind: "person" },
   deliveryDate: null, error: null,
   items: [{ productId: "g", label: "Rękawice XL", quantity: 2, unit: "para", available: status === "proposal" ? 3 : null }],
   warnings: [], questions: status === "needs_user_choice" ? ["Którego Kowalskiego?"] : [],
@@ -119,7 +119,7 @@ test("HTTP message endpoint uses Codex adapter", async () => {
   const base = `http://127.0.0.1:${address.port}`;
   try {
     await fetch(`${base}/v1/catalog/full-sync`, { method: "PUT", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify(fixture) });
-    const result = await fetch(`${base}/v1/sessions/message`, { method: "POST", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify({ message: "Kowalski rękawice" }) });
+    const result = await fetch(`${base}/v1/sessions/message`, { method: "POST", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify({ schemaVersion: 2, mode: "ORDER", message: "Kowalski rękawice" }) });
     assert.equal((await result.json() as AgentResponse).status, "needs_data");
     assert.equal(fake.calls.length, 1);
     const denied = await fetch(`${base}/_internal/catalog/search`, { method: "POST", body: "{}" });
@@ -141,7 +141,7 @@ test("HTTP answers endpoint preserves session and rejects unknown candidate", as
     const send = async (path: string, payload: unknown) => fetch(`${base}${path}`, {
       method: "POST", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify(payload),
     }).then(reply => reply.json() as Promise<AgentResponse>);
-    const first = await send("/v1/sessions/message", { message: "Kowalski rękawice" });
+    const first = await send("/v1/sessions/message", { schemaVersion: 2, mode: "ORDER", message: "Kowalski rękawice" });
     const invalid = await send(`/v1/sessions/${first.sessionId}/answers`,
       { answers: [{ questionId: "recipient-1", candidateId: "unknown" }] });
     assert.equal(invalid.error?.code, "INVALID_ANSWERS");

@@ -146,4 +146,58 @@ class NoteParserTest {
 
         assertNull(result.suggestedIssueDate)
     }
+
+    @Test fun allKeepsAutomaticOrderTaskAndContactDetection() {
+        assertEquals(ParsedInputKind.ORDER, parser.parse("Kask x 1", QuickInputMode.ALL).kind)
+        assertEquals(ParsedInputKind.TASK, parser.parse("[ ] Zadzwonić do Kleven", QuickInputMode.ALL).kind)
+        assertEquals(ParsedInputKind.CONTACT, parser.parse("Adam Pawlak +47 123 45 678", QuickInputMode.ALL).kind)
+    }
+
+    @Test fun forcedOrderKeepsProductsEvenWithTaskMarker() {
+        val result = parser.parse("[ ] Kask x 2", QuickInputMode.ORDER)
+        assertEquals(ParsedInputKind.ORDER, result.kind)
+        assertEquals("Kask Biały", result.items.single().name)
+        assertEquals(2, result.items.single().quantity)
+        assertEquals(emptyList<String>(), result.tasks)
+        assertNull(result.taskDraft)
+    }
+
+    @Test fun forcedTaskUsesExistingStructuredParserWithoutTaskKeyword() {
+        val text = "Transport jutro\n9:30 Kl\nPiech Łukasz\nGłowacki Roman\n10:00 UL\nJanik Sylwester"
+        val places = listOf(TaskPlaceLookup("kl", "Kleven", listOf("Kl")), TaskPlaceLookup("ul", "Ulstein", listOf("UL")))
+        val employees = listOf(TaskEmployeeLookup("p", "Łukasz", "Piech"), TaskEmployeeLookup("g", "Roman", "Głowacki"), TaskEmployeeLookup("j", "Sylwester", "Janik"))
+        val expected = TaskTextParser().parse(text, places, employees)
+        val result = parser.parse(text, QuickInputMode.TASK, places, employees)
+        assertEquals(ParsedInputKind.TASK, result.kind)
+        assertEquals(expected, result.taskDraft)
+        assertEquals(listOf("09:30", "10:00"), result.taskDraft!!.steps.map { it.time })
+        assertEquals(2, result.taskDraft!!.steps.first().people.size)
+        assertEquals(emptyList<ParsedItem>(), result.items)
+        assertNull(result.person)
+    }
+
+    @Test fun forcedNoteDoesNotExtractOrdersContactsOrTasks() {
+        val result = parser.parse("[ ] Adam Pawlak +47 123 45 678 - kask x2", QuickInputMode.NOTE)
+        assertEquals(ParsedInputKind.NOTE, result.kind)
+        assertEquals(emptyList<ParsedItem>(), result.items)
+        assertEquals(emptyList<ParsedPerson>(), result.people)
+        assertEquals(emptyList<String>(), result.phoneNumbers)
+        assertEquals(emptyList<String>(), result.tasks)
+        assertNull(result.taskDraft)
+        assertNull(result.shipyardName)
+    }
+
+    @Test fun forcedOrderRetainsHelmetColorsAndClothingConventions() {
+        assertEquals("Kask Biały", parser.parse("Kask x1", QuickInputMode.ORDER).items.single().name)
+        assertEquals("Kask czerwony", parser.parse("Kask czerwony x1", QuickInputMode.ORDER).items.single().name)
+        assertEquals(listOf("Bluza monterska", "Spodnie monterskie"), parser.parse("Jan Kowalski - m50", QuickInputMode.ORDER).items.map { it.name })
+        assertEquals("Buty monterskie", parser.parse("Jan Kowalski - m45", QuickInputMode.ORDER).items.single().name)
+    }
+
+    @Test fun blankForcedOrderDoesNotInventItems() {
+        val result = parser.parse(" ", QuickInputMode.ORDER)
+        assertEquals(ParsedInputKind.ORDER, result.kind)
+        assertEquals(emptyList<ParsedItem>(), result.items)
+    }
+
 }

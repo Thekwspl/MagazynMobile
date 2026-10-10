@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import pl.magazyn.mobile.domain.ParsedNote
 import pl.magazyn.mobile.domain.ParsedInputKind
+import pl.magazyn.mobile.domain.QuickInputMode
 import pl.magazyn.mobile.agent.AgentClarificationAnswer
 import pl.magazyn.mobile.agent.AgentClarificationType
 import pl.magazyn.mobile.agent.areRequiredClarificationsAnswered
@@ -54,7 +55,8 @@ fun HomeScreen(
     val aiAnalysis by viewModel.aiAnalysis.collectAsStateWithLifecycle()
     val codexAnalysis by viewModel.codexAnalysis.collectAsStateWithLifecycle()
     val duplicateDecisions by viewModel.duplicateDecisions.collectAsStateWithLifecycle()
-    val query by viewModel.quickInput.collectAsStateWithLifecycle()
+    val quickInput by viewModel.quickInput.collectAsStateWithLifecycle()
+    val query = quickInput.text
     val openTasks = remember(tasks) { tasks.filterNot { it.isCompleted } }
     var attentionDetails by remember { mutableStateOf<AttentionDetails?>(null) }
     var showNotifications by remember { mutableStateOf(false) }
@@ -72,16 +74,16 @@ fun HomeScreen(
 
     LaunchedEffect(aiAnalysis.result) {
         aiAnalysis.result?.let {
-            viewModel.openReview(it)
-            viewModel.consumeAiResult()
-            onReview()
+            val opened = aiAnalysis.request?.let { request -> viewModel.openReview(it, request, aiAnalysis.error) } == true
+            viewModel.consumeAiResult(aiAnalysis.request)
+            if (opened) onReview()
         }
     }
     LaunchedEffect(codexAnalysis.result) {
         codexAnalysis.result?.let {
-            viewModel.openReview(it)
-            viewModel.consumeCodexResult()
-            onReview()
+            val opened = codexAnalysis.request?.let { request -> viewModel.openReview(it, request) } == true
+            viewModel.consumeCodexResult(codexAnalysis.request)
+            if (opened) onReview()
         }
     }
 
@@ -97,6 +99,8 @@ fun HomeScreen(
             ) {
                     SmartInput(
                         value = query,
+                        mode = quickInput.mode,
+                        onModeChange = viewModel::selectQuickInputMode,
                         onChange = viewModel::updateQuickInput,
                         aiLoading = aiAnalysis.isLoading,
                         aiError = aiAnalysis.error,
@@ -105,8 +109,7 @@ fun HomeScreen(
                         codexChoice = codexAnalysis.reply,
                         codexAnswers = codexAnalysis.answers,
                         onRecognizeLocal = {
-                            viewModel.openReview(viewModel.recognize(query))
-                            onReview()
+                            if (viewModel.openReview(viewModel.recognize(query))) onReview()
                         },
                         onRecognizeAi = { viewModel.analyzeWithAi(query) },
                         onRecognizeCodex = { viewModel.analyzeWithCodex(query) },
@@ -223,6 +226,7 @@ fun ParsedNoteReviewScreen(
     viewModel: HomeViewModel,
 ) {
     val review by viewModel.noteReview.collectAsStateWithLifecycle()
+    val saving by viewModel.reviewSave.collectAsStateWithLifecycle()
     val people by viewModel.people.collectAsStateWithLifecycle()
     val jobPositions by viewModel.jobPositions.collectAsStateWithLifecycle()
     // Rozpoznanie może wskazać archiwalnie używany, ukryty produkt; decyzję zostawia użytkownikowi.
@@ -237,8 +241,7 @@ fun ParsedNoteReviewScreen(
     val note = current.note
     val matchedPerson = note.person?.let { parsed -> recognizedPerson(parsed.fullName, people) }
     BackHandler {
-        viewModel.closeReview()
-        onBack()
+        if (!saving.isSaving) { viewModel.closeReview(); onBack() }
     }
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
         Surface(tonalElevation = 2.dp) {
@@ -246,7 +249,7 @@ fun ParsedNoteReviewScreen(
                 Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { viewModel.closeReview(); onBack() }) {
+                IconButton(enabled = !saving.isSaving, onClick = { viewModel.closeReview(); onBack() }) {
                     Icon(Icons.Default.ArrowBack, "Wróć")
                 }
                 Column {
@@ -266,17 +269,29 @@ fun ParsedNoteReviewScreen(
                 }
             }
         }
+        if (note.kind != ParsedInputKind.NOTE) saving.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
+        current.notice?.let { Text(it, modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium) }
         if (note.kind == ParsedInputKind.ORDER || note.kind == ParsedInputKind.TASK) {
             OriginalMessagePanel(current.rawText)
         }
         Box(Modifier.weight(1f)) {
-            if (note.kind == ParsedInputKind.TASK && note.taskDraft != null) {
+            if (note.kind == ParsedInputKind.NOTE) {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(current.rawText, style = MaterialTheme.typography.bodyLarge)
+                    saving.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    Button(enabled = current.rawText.isNotBlank() && !saving.isSaving,
+                        onClick = { viewModel.saveReviewedNote(current, onBack) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (saving.isSaving) "Zapisuję…" else "Zapisz notatkę")
+                    }
+                }
+            } else if (note.kind == ParsedInputKind.TASK && note.taskDraft != null) {
                 TaskDraftReviewContent(
                     initial = note.taskDraft,
                     people = people,
                     places = taskPlaces,
+                    saving = saving.isSaving,
                     onSave = { draft ->
-                        viewModel.saveTaskDraft(current.rawText, draft) {
+                        viewModel.saveTaskDraft(current.rawText, draft, reviewId = current.id) {
                             viewModel.closeReview(completed = true)
                             onBack()
                         }
@@ -294,9 +309,10 @@ fun ParsedNoteReviewScreen(
                 onAddProductTags = viewModel::addProductTags,
                 onCreatePerson = viewModel::createPersonForRecognizedOrder,
                 onSaveTasks = {
-                    viewModel.saveTasks(current.rawText, note.tasks)
-                    viewModel.closeReview(completed = true)
-                    onBack()
+                    viewModel.saveTasks(current.rawText, note.tasks, reviewId = current.id) {
+                        viewModel.closeReview(completed = true)
+                        onBack()
+                    }
                 },
                 onSaveOrder = { itemPairs, rememberCorrections, shipyardName, plannedIssueDate ->
                     viewModel.saveDraftOrder(
@@ -304,6 +320,7 @@ fun ParsedNoteReviewScreen(
                         note.copy(shipyardName = shipyardName, suggestedIssueDate = plannedIssueDate),
                         itemPairs,
                         rememberCorrections,
+                        reviewId = current.id,
                     ) {
                         viewModel.closeReview(completed = true)
                         onBack()
@@ -335,9 +352,12 @@ private fun WarehouseHeader(onNotifications: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SmartInput(
     value: String,
+    mode: QuickInputMode,
+    onModeChange: (QuickInputMode) -> Unit,
     onChange: (String) -> Unit,
     aiLoading: Boolean,
     aiError: String?,
@@ -360,12 +380,19 @@ private fun SmartInput(
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3,
                 maxLines = Int.MAX_VALUE,
+                enabled = !aiLoading && !codexLoading,
                 label = { Text("Szybkie pole") },
                 placeholder = { Text("Wklej zamówienie, zadanie albo wpisz osobę, miejsce lub przedmiot…") },
             )
+            FlowRow(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = 2) {
+                QuickInputMode.entries.forEach { option ->
+                    FilterChip(selected = mode == option, onClick = { onModeChange(option) },
+                        enabled = true, label = { Text(option.label) })
+                }
+            }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onRecognizeLocal, enabled = value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.weight(1f)) {
-                    Text(if (pl.magazyn.mobile.domain.TaskTextParser().looksLikeTask(value)) "Utwórz zadanie z tekstu" else "Offline")
+                    Text("Offline")
                 }
                 Button(onClick = onRecognizeAi, enabled = value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.weight(1f)) {
                     if (aiLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -374,10 +401,11 @@ private fun SmartInput(
                     Text(if (aiLoading) "Analizuję" else "Gemini")
                 }
             }
-            OutlinedButton(onClick = onRecognizeCodex, enabled = value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.fillMaxWidth().padding(top = 5.dp)) {
+            OutlinedButton(onClick = onRecognizeCodex, enabled = mode.supportsCodex && value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.fillMaxWidth().padding(top = 5.dp)) {
                 if (codexLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 Text(if (codexLoading) " Analizuję w Codex…" else "Codex")
             }
+            Text("Codex przygotuje wynik w wybranym trybie do Twojego zatwierdzenia.", style = MaterialTheme.typography.bodySmall)
             aiError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
             codexError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
             if (codexChoice?.status == pl.magazyn.mobile.agent.AgentStatus.NEEDS_USER_CHOICE) {
@@ -648,14 +676,15 @@ private fun AttentionDetailsSheet(
         var value by rememberSaveable(item.productId, item.warehouseId) { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { selectedNegative = null },
-            title = { Text("Popraw stan") },
+            title = { Text("Popraw stan", Modifier.padding(horizontal = 8.dp)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     ProductInfo(item.name, item.variant, item.groupName, item.subgroupName)
                     Text("Obecny stan: ${formatWholeQuantity(item.quantity)} ${item.unit}")
                     OutlinedTextField(
                         value,
                         { input -> value = input.filterIndexed { index, character -> character.isDigit() || (character == '-' && index == 0) } },
+                        modifier = Modifier.fillMaxWidth(),
                         label = { Text("Prawidłowy stan") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
@@ -663,7 +692,7 @@ private fun AttentionDetailsSheet(
                     Text("Korekta zapisze się w historii. Powód nie jest wymagany.", style = MaterialTheme.typography.bodySmall)
                 }
             },
-            confirmButton = { Button(onClick = { value.toLongOrNull()?.let { onCorrectNegative(item, it) }; selectedNegative = null }, enabled = value.toLongOrNull() != null) { Text("Zapisz poprawkę") } },
+            confirmButton = { Button(onClick = { value.toLongOrNull()?.let { onCorrectNegative(item, it) }; selectedNegative = null }, enabled = value.toLongOrNull() != null) { Text("Zapisz") } },
             dismissButton = { TextButton(onClick = { selectedNegative = null }) { Text("Anuluj") } },
         )
     }
@@ -1090,6 +1119,7 @@ private fun TaskDraftReviewContent(
     people: List<pl.magazyn.mobile.data.EmployeeSummary>,
     places: List<pl.magazyn.mobile.data.TaskPlaceView>,
     onSave: (pl.magazyn.mobile.domain.ParsedTaskDraft) -> Unit,
+    saving: Boolean = false,
 ) {
     var title by remember(initial) { mutableStateOf(initial.title) }
     var date by remember(initial) { mutableStateOf(initial.date.orEmpty()) }
@@ -1143,7 +1173,7 @@ private fun TaskDraftReviewContent(
             } }
         }
         OutlinedButton(onClick = { steps += pl.magazyn.mobile.domain.ParsedTaskStep(confidence = pl.magazyn.mobile.domain.ParseConfidence.REVIEW) }, Modifier.fillMaxWidth()) { Icon(Icons.Default.Add, null); Text("Dodaj etap") }
-        Button(onClick = { onSave(initial.copy(title = title.trim(), date = date.trim().ifBlank { null }, description = description.trim(), steps = steps.toList())) }, enabled = title.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Utwórz zadanie") }
+        Button(onClick = { onSave(initial.copy(title = title.trim(), date = date.trim().ifBlank { null }, description = description.trim(), steps = steps.toList())) }, enabled = title.isNotBlank() && !saving, modifier = Modifier.fillMaxWidth()) { Text(if (saving) "Zapisuję…" else "Utwórz zadanie") }
         Spacer(Modifier.height(20.dp))
     }
 }

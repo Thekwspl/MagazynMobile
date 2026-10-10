@@ -39,7 +39,7 @@ test("public v1 endpoints require Bearer and internal MCP keeps a different secr
   try {
     const endpoints = [
       ["/v1/catalog/full-sync", "PUT", fixture], ["/v1/catalog/delta-sync", "PATCH", {}],
-      ["/v1/sessions/message", "POST", { message: "Kowalski rękawice" }],
+      ["/v1/sessions/message", "POST", { schemaVersion: 2, mode: "ORDER", message: "Kowalski rękawice" }],
       ["/v1/sessions/s1/tool-results", "POST", { results: [] }],
       ["/v1/sessions/s1/answers", "POST", { answers: [] }],
       ["/v1/sessions/s1/choice", "POST", { candidateId: "p1" }],
@@ -60,7 +60,7 @@ test("public v1 endpoints require Bearer and internal MCP keeps a different secr
     assert.equal((await request("/v1/unsupported", "POST", auth)).status, 403);
     assert.equal((await request("/v1/catalog/full-sync", "PUT", auth, fixture)).status, 204);
     const initial = await (await request("/v1/sessions/message", "POST", auth,
-      { message: "Kowalski 2 rękawice" })).json() as AgentResponse;
+      { schemaVersion: 2, mode: "ORDER", message: "Kowalski 2 rękawice" })).json() as AgentResponse;
     assert.equal(initial.status, "needs_data");
     const resumed = await (await request(`/v1/sessions/${initial.sessionId}/tool-results`, "POST", auth,
       { results: [{ requestId: initial.needsData[0].id, tool: "get_current_stock",
@@ -100,7 +100,7 @@ test("bounded session requests recover after a deterministic window", async () =
   service.server.listen(0, "127.0.0.1"); await once(service.server, "listening");
   const address = service.server.address(); assert.ok(address && typeof address !== "string");
   const send = () => fetch(`http://127.0.0.1:${address.port}/v1/sessions/message`, {
-    method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ message: "test" }),
+    method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 2, mode: "ORDER", message: "test" }),
   });
   try {
     assert.equal((await send()).status, 200);

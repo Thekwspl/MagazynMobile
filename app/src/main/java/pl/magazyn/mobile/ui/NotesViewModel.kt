@@ -9,6 +9,17 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import pl.magazyn.mobile.MagazynApplication
 import pl.magazyn.mobile.data.OrderNotebookEntity
+import pl.magazyn.mobile.data.NotebookDao
+
+internal fun plainNoteEntity(id: String, rawText: String, now: Long = System.currentTimeMillis()): OrderNotebookEntity {
+    require(rawText.isNotBlank()) { "Notatka nie może być pusta." }
+    return OrderNotebookEntity(id, rawText, "ACTIVE", "NOTE", now)
+}
+
+internal suspend fun NotebookDao.insertPlainNote(rawText: String, id: String = UUID.randomUUID().toString()): String {
+    insertNotebook(plainNoteEntity(id, rawText))
+    return id
+}
 
 class NotesViewModel(application: Application) : AndroidViewModel(application) {
     private val notebookDao = (application as MagazynApplication).database.notebookDao()
@@ -21,15 +32,7 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val id = noteId ?: UUID.randomUUID().toString()
             if (noteId == null) {
-                notebookDao.insertNotebook(
-                    OrderNotebookEntity(
-                        id = id,
-                        rawText = rawText,
-                        status = "ACTIVE",
-                        detectedType = "NOTE",
-                        createdAtEpochMillis = System.currentTimeMillis(),
-                    ),
-                )
+                notebookDao.insertPlainNote(rawText, id)
             } else {
                 notebookDao.updateNoteText(id, rawText)
             }

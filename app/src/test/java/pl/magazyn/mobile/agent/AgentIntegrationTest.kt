@@ -20,7 +20,7 @@ class AgentIntegrationTest {
     private val person = EmployeeSummary("p", "Jan Kowalski", "Jan", "Kowalski", "123456789", "Jasio", "sekret", "Spawacz", true)
 
     private fun response(status: String, products: List<String> = listOf("g")): String = JSONObject()
-        .put("schemaVersion", 1).put("sessionId", "s1").put("status", status).put("intent", "ORDER")
+        .put("schemaVersion", 2).put("task", JSONObject.NULL).put("note", JSONObject.NULL).put("contact", JSONObject.NULL).put("sessionId", "s1").put("status", status).put("intent", "ORDER")
         .put("recipient", JSONObject().put("id", "p").put("label", "Jan Kowalski").put("kind", "person"))
         .put("deliveryDate", JSONObject.NULL)
         .put("items", JSONArray().apply { products.forEach { put(JSONObject().put("productId", it).put("label", "Rękawice XL")
@@ -40,7 +40,7 @@ class AgentIntegrationTest {
             assertEquals(status.uppercase(), AgentProtocol.parse(response(status)).status.name)
         }
         assertEquals("Błąd agenta", AgentProtocol.parse(response("error")).error)
-        for (bad in listOf("{", JSONObject(response("proposal")).put("schemaVersion", 2).toString(),
+        for (bad in listOf("{", JSONObject(response("proposal")).put("schemaVersion", 1).toString(),
             JSONObject(response("proposal")).remove("items").toString())) {
             try { AgentProtocol.parse(bad); fail("Accepted invalid response") } catch (_: AgentFailure) { }
         }
