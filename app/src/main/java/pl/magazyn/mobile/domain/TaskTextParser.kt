@@ -7,7 +7,7 @@ import java.time.format.DateTimeFormatter
 enum class ParseConfidence { CERTAIN, LIKELY, REVIEW }
 
 data class TaskPlaceLookup(val id: String, val name: String, val aliases: List<String>)
-data class TaskEmployeeLookup(val id: String, val firstName: String, val lastName: String)
+data class TaskEmployeeLookup(val id: String, val firstName: String, val lastName: String, val aliases: List<String> = emptyList())
 
 data class ParsedTaskPerson(
     val employeeId: String?,
@@ -155,8 +155,9 @@ class TaskTextParser {
         val matched = employees.mapNotNull { employee ->
             val normal = ImportParser.key("${employee.firstName} ${employee.lastName}")
             val reversed = ImportParser.key("${employee.lastName} ${employee.firstName}")
-            listOf(normal, reversed).filter(String::isNotBlank).firstOrNull { key.startsWith(it) }?.let { employee to it }
-        }.maxByOrNull { it.second.length }
+            (listOf(normal, reversed) + employee.aliases.map(ImportParser::key)).filter(String::isNotBlank)
+                .firstOrNull { key == it || key.startsWith("$it ") }?.let { employee to it }
+        }.let { matches -> matches.maxOfOrNull { it.second.length }?.let { length -> matches.filter { it.second.length == length }.singleOrNull() } }
 
         val displayText: String
         val employeeId: String?
@@ -164,7 +165,7 @@ class TaskTextParser {
         if (matched != null) {
             displayText = "${matched.first.lastName} ${matched.first.firstName}".trim()
             employeeId = matched.first.id
-            consumedWords = 2
+            consumedWords = matched.second.split(' ').size
         } else {
             val words = clean.split(Regex("\\s+")).filter(String::isNotBlank)
             val nameToken = Regex("^[\\p{Lu}ŻŹĆĄŚĘŁÓŃ][\\p{L}'-]+[.,]?$")

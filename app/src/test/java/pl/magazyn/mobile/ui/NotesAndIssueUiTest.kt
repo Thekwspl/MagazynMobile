@@ -87,11 +87,11 @@ class NotesAndIssueUiTest {
         assertTrue(runCatching { plainNoteEntity("blank", " ") }.isFailure)
     }
 
-    @Test fun codexOnlySupportsAllAndOrder() {
+    @Test fun codexSupportsEveryQuickInputMode() {
         assertTrue(pl.magazyn.mobile.domain.QuickInputMode.ALL.supportsCodex)
         assertTrue(pl.magazyn.mobile.domain.QuickInputMode.ORDER.supportsCodex)
-        assertFalse(pl.magazyn.mobile.domain.QuickInputMode.TASK.supportsCodex)
-        assertFalse(pl.magazyn.mobile.domain.QuickInputMode.NOTE.supportsCodex)
+        assertTrue(pl.magazyn.mobile.domain.QuickInputMode.TASK.supportsCodex)
+        assertTrue(pl.magazyn.mobile.domain.QuickInputMode.NOTE.supportsCodex)
     }
 
 }

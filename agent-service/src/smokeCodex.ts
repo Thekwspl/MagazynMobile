@@ -34,7 +34,7 @@ try {
   } else {
     const sync = await fetch(root + "/v1/catalog/full-sync", { method: "PUT", headers: { "content-type": "application/json", ...authorized }, body: JSON.stringify(fixture) });
     if (!sync.ok) throw new Error(`Synchronizacja fixture: HTTP ${sync.status}`);
-    const first = await post("/v1/sessions/message", { message: "Kowalski jutro 2 rękawice XL i okulary" });
+    const first = await post("/v1/sessions/message", { schemaVersion: 2, mode: "ORDER", message: "Kowalski jutro 2 rękawice XL i okulary" });
     if (first.status !== "needs_data" || first.items.length !== 2 || first.needsData.length < 1)
       throw new Error(`Codex nie zwrócił oczekiwanego needs_data: ${JSON.stringify(first)}`);
 

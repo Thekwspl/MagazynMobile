@@ -20,7 +20,7 @@ const results: ReadOnlyToolResult[] = [
   { requestId: "issues", tool: "get_recent_issues", data: { recipientKind: "person", recipientId: "p", issues: [] } },
 ];
 const reply = (sessionId: string, needsData: ReadOnlyToolRequest[], status: AgentResponse["status"] = "needs_data"): AgentResponse => ({
-  schemaVersion: 1, sessionId, status, intent: "ORDER", recipient: { id: "p", label: "Jan", kind: "person" }, deliveryDate: null,
+  schemaVersion: 2, sessionId, status, intent: "ORDER", task: null, note: null, contact: null, recipient: { id: "p", label: "Jan", kind: "person" }, deliveryDate: null,
   items: [{ productId: "g", label: "Rękawice", unit: "szt.", quantity: 1, available: status === "proposal" ? -2 : null }],
   warnings: [], questions: [], candidates: [], clarifications: [], needsData, error: null,
 });

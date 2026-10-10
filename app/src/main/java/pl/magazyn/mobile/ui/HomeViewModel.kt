@@ -10,10 +10,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import pl.magazyn.mobile.domain.RecognitionRules
 import pl.magazyn.mobile.domain.QuickInputMode
 import pl.magazyn.mobile.domain.GeminiModeResponseException
 import pl.magazyn.mobile.MagazynApplication
@@ -195,7 +197,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectQuickInputMode(mode: QuickInputMode) {
-        if (_aiAnalysis.value.isLoading || _codexAnalysis.value.isLoading || _reviewSave.value.isSaving) return
+        if (_reviewSave.value.isSaving) return
         invalidateAnalysis(_quickInput.value.select(mode))
     }
 
@@ -249,65 +251,44 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun recognize(text: String, mode: QuickInputMode = _quickInput.value.mode): ParsedNote {
-        val parsed = parser.parse(text, mode,
+        if (mode == QuickInputMode.ALL) {
+            val forced = RecognitionRules.patternKind(text, learningRules.value)?.let { kind -> QuickInputMode.entries.firstOrNull { it.preferredKind == kind } }
+            if (forced != null) return recognize(text, forced)
+        }
+        val parsed = RecognitionRules.note(parser.parse(text, mode,
             taskPlaces.value.map { TaskPlaceLookup(it.id, it.name, it.aliases.split(',').map(String::trim).filter(String::isNotBlank)) },
-            people.value.map { TaskEmployeeLookup(it.id, it.firstName, it.lastName) })
+            people.value.map { TaskEmployeeLookup(it.id, it.firstName, it.lastName, it.aliases.split(',').map(String::trim).filter(String::isNotBlank)) }, learningRules.value), text, learningRules.value, mode)
         if (mode == QuickInputMode.NOTE || mode == QuickInputMode.TASK) return parsed
         if (mode == QuickInputMode.ALL && taskParser.looksLikeTask(text)) {
             val draft = taskParser.parse(
                 text = text,
                 places = taskPlaces.value.map { place -> TaskPlaceLookup(place.id, place.name, place.aliases.split(',').map(String::trim).filter(String::isNotBlank)) },
-                employees = people.value.map { TaskEmployeeLookup(it.id, it.firstName, it.lastName) },
+                employees = people.value.map { TaskEmployeeLookup(it.id, it.firstName, it.lastName, it.aliases.split(',').map(String::trim).filter(String::isNotBlank)) },
             )
             return parsed.copy(kind = ParsedInputKind.TASK, tasks = emptyList(), taskDraft = draft)
         }
-        val activeRules = learningRules.value.filter { it.isEnabled }
-        val learnedItems = parsed.items.map { item ->
-            item.copy(recipientName = item.recipientName?.let(::normalizeFullPersonName))
-        }.map { item ->
-            activeRules.firstOrNull { it.ruleType == "PRODUCT" && it.triggerKey == ImportParser.key(item.name) }?.let { rule ->
-                // Wariant jawnie odczytany z bieżącej wiadomości ma pierwszeństwo
-                // przed wariantem zapamiętanym wcześniej dla samej nazwy produktu.
-                item.copy(name = rule.learnedName, variant = item.variant ?: rule.learnedVariant, unit = rule.learnedUnit)
-            } ?: item
-        }.map { item ->
-            val personRule = item.recipientName?.let { name -> activeRules.firstOrNull { it.ruleType == "PERSON" && it.triggerKey == ImportParser.key(name) } }
-            if (personRule == null) item else item.copy(recipientName = personRule.learnedName)
-        }
-        val expandedItems = learnedItems.flatMap { item ->
+        val expandedItems = parsed.items.flatMap { item ->
             val itemKey = ImportParser.key(item.name)
             val bundleMatches = allProducts.value.filter { product ->
-                product.aliases.split(',').map { ImportParser.key(it) }.any { it.isNotBlank() && it == itemKey }
+                !product.isArchived && !product.isHidden && product.aliases.split(',').map { ImportParser.key(it) }.any { it.isNotBlank() && it == itemKey }
             }
-            if (bundleMatches.size < 2) listOf(item) else bundleMatches.map { product ->
+            if (RecognitionRules.isOnePiece(item) || bundleMatches.size < 2) listOf(item) else bundleMatches.map { product ->
                 item.copy(name = product.name, variant = item.variant ?: product.variant, unit = product.unit)
             }
-        }.map { item ->
-            // Ogólny „kask” oznacza standardowy Kask Biały; doprecyzowane typy pozostają bez zmian.
-            if (ImportParser.key(item.name) == "kask") item.copy(name = "Kask Biały") else item
         }
-        val learnedPeople = parsed.people.map { person ->
-            val personRule = activeRules.firstOrNull { it.ruleType == "PERSON" && it.triggerKey == ImportParser.key(person.fullName) }
-            val positionRule = person.position?.let { position -> activeRules.firstOrNull { it.ruleType == "POSITION" && it.triggerKey == ImportParser.key(position) } }
-            person.copy(fullName = normalizeFullPersonName(personRule?.learnedName ?: person.fullName), position = positionRule?.learnedName ?: person.position)
-        }
-        val patternKind = activeRules.firstOrNull { it.ruleType == "PATTERN" && text.contains(it.sourceLabel, ignoreCase = true) }
-            ?.learnedName?.uppercase()?.let { runCatching { ParsedInputKind.valueOf(it) }.getOrNull() }
         val textKey = ImportParser.key(text)
-        val words = text.split(Regex("\\s+")).map { ImportParser.key(it) }.filter { it.length >= 4 }
-        val detectedByName = shipyards.value.filter { yard ->
-            val yardKey = ImportParser.key(yard.name)
-            textKey.contains(yardKey) || words.any { word -> yardKey.startsWith(word) || word.startsWith(yardKey) }
-        }.maxByOrNull { it.name.length }
-        val detectedByLeader = people.value.firstOrNull { person ->
-            val labels = listOf(person.fullName) + person.aliases.split(',')
-            labels.map { ImportParser.key(it) }.filter { it.length >= 4 }.any { label -> textKey.contains(label) }
-        }?.let { person ->
-            val shipyardId = shipyardLeaderLinks.value.firstOrNull { it.employeeId == person.id }?.shipyardId
-            shipyards.value.firstOrNull { it.id == shipyardId }
+        val namedYards = shipyards.value.filterNot { it.isArchived }.filter { yard ->
+            (listOf(yard.name) + yard.aliases.split(',') + yard.tags.split(',')).map(ImportParser::key)
+                .filter(String::isNotBlank).any { label -> textKey.contains(label) }
         }
-        val detectedShipyard = detectedByName?.name ?: detectedByLeader?.name
-        return parsed.copy(person = learnedPeople.firstOrNull() ?: parsed.person, people = learnedPeople, items = expandedItems, kind = mode.preferredKind ?: patternKind ?: parsed.kind, shipyardName = detectedShipyard)
+        val leaderIds = people.value.filter { person ->
+            (listOf(person.fullName) + person.aliases.split(',')).map(ImportParser::key)
+                .filter { it.length >= 4 }.any { textKey.contains(it) }
+        }.map { it.id }.toSet()
+        val leaderYardIds = shipyardLeaderLinks.value.filter { it.employeeId in leaderIds }.map { it.shipyardId }.toSet()
+        val leaderYards = shipyards.value.filter { !it.isArchived && it.id in leaderYardIds }
+        val detectedShipyard = if (namedYards.isNotEmpty()) namedYards.singleOrNull()?.name else leaderYards.singleOrNull()?.name
+        return parsed.copy(items = expandedItems, shipyardName = detectedShipyard)
     }
 
     private fun beginAnalysis(): QuickInputUiState {
@@ -339,16 +320,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         val leaders = people.value.filter { it.id in leaderIds }.joinToString(", ") { person ->
                             listOf(person.fullName, person.aliases).filter(String::isNotBlank).joinToString(" / ")
                         }
-                        if (leaders.isBlank()) yard.name else "${yard.name} | prowadzący: $leaders"
+                        "${yard.name} | aliasy: ${yard.aliases} | tagi: ${yard.tags} | prowadzący: $leaders"
                     },
                     taskPlaces = taskPlaces.value.map { place ->
                         TaskPlaceLookup(place.id, place.name, place.aliases.split(',').map(String::trim).filter(String::isNotBlank))
                     },
                     employees = people.value.map { employee ->
-                        TaskEmployeeLookup(employee.id, employee.firstName, employee.lastName)
+                        TaskEmployeeLookup(employee.id, employee.firstName, employee.lastName, employee.aliases.split(',').map(String::trim).filter(String::isNotBlank))
                     },
                     redactPhoneNumbers = aiKeyStore.redactPhoneNumbers,
                     mode = request.mode,
+                    learningRules = database.learningRuleDao().observeAll().first(),
                 )
             }.onSuccess {
                 if (request != _quickInput.value) return@onSuccess
@@ -388,7 +370,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 val repository = AgentRepository(agentConnection.client(), RoomAgentDataSource(database), AgentRevision(getApplication<Application>())::next)
                 activeAgentRepository = repository
-                showCodexReply(repository, repository.analyze(text), request)
+                showCodexReply(repository, repository.analyze(text, request.mode), request)
             }.onFailure {
                 if (request != _quickInput.value) return@onFailure
                 _codexAnalysis.value = CodexAnalysisUiState(error = it.message ?: "Analiza Codex nie powiodła się.")
@@ -482,27 +464,40 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun saveReview(reviewId: String?, onSaved: () -> Unit, write: suspend () -> Unit) {
+        if (_reviewSave.value.isSaving || !canSaveReview(reviewId)) return
+        _reviewSave.value = ReviewSaveUiState(isSaving = true)
+        viewModelScope.launch {
+            runCatching { write() }.onSuccess {
+                _reviewSave.value = ReviewSaveUiState()
+                if (reviewId != null) closeReview(completed = true)
+                onSaved()
+            }.onFailure { _reviewSave.value = ReviewSaveUiState(error = it.message ?: "Nie udało się zapisać wyniku.") }
+        }
+    }
+
     fun saveTasks(rawText: String, tasks: List<String>, reviewId: String? = null, onSaved: () -> Unit = {}) {
         if (!canSaveReview(reviewId)) return
         val cleanTasks = tasks.map(String::trim).filter(String::isNotBlank)
         if (cleanTasks.isEmpty()) return
-        viewModelScope.launch {
-            val notebookId = java.util.UUID.randomUUID().toString()
-            database.notebookDao().insertNotebook(
-                OrderNotebookEntity(
-                    id = notebookId,
-                    rawText = rawText,
-                    status = "ACTIVE",
-                    detectedType = "TASK",
-                    createdAtEpochMillis = System.currentTimeMillis(),
-                ),
-            )
-            database.notebookDao().insertTasks(
-                cleanTasks.mapIndexed { index, task ->
-                    NotebookTaskEntity(java.util.UUID.randomUUID().toString(), notebookId, task, false, index)
-                },
-            )
-            onSaved()
+        saveReview(reviewId, onSaved) {
+            database.withTransaction {
+                val notebookId = java.util.UUID.randomUUID().toString()
+                database.notebookDao().insertNotebook(
+                    OrderNotebookEntity(
+                        id = notebookId,
+                        rawText = rawText,
+                        status = "ACTIVE",
+                        detectedType = "TASK",
+                        createdAtEpochMillis = System.currentTimeMillis(),
+                    ),
+                )
+                database.notebookDao().insertTasks(
+                    cleanTasks.mapIndexed { index, task ->
+                        NotebookTaskEntity(java.util.UUID.randomUUID().toString(), notebookId, task, false, index)
+                    },
+                )
+            }
         }
     }
 
@@ -510,7 +505,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (!canSaveReview(reviewId)) return
         val title = draft.title.trim()
         if (title.isBlank()) return
-        viewModelScope.launch {
+        saveReview(reviewId, onSaved) {
             database.withTransaction {
                 val notebookId = UUID.randomUUID().toString()
                 val taskId = UUID.randomUUID().toString()
@@ -570,7 +565,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
-            onSaved()
         }
     }
 
@@ -584,7 +578,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         if (approvedPairs.isEmpty() || !canSaveReview(reviewId)) return
         val sourceNoteId = _noteReview.value?.sourceNoteId
-        viewModelScope.launch {
+        saveReview(reviewId, onSaved) {
             database.withTransaction {
                 if (rememberCorrections) approvedPairs.forEach { (source, corrected) ->
                     val triggerKey = ImportParser.key(source.name)
@@ -698,7 +692,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
             // Powrót do Start następuje dopiero po zatwierdzeniu transakcji. Room Flow
             // ma wtedy już nowe dane i kafel „Do zrobienia” odświeża się reaktywnie.
-            onSaved()
         }
     }
 

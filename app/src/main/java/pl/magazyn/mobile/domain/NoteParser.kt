@@ -30,7 +30,7 @@ enum class QuickInputMode(val label: String, val preferredKind: ParsedInputKind?
     ALL("ALL", null), ORDER("Zamówienie", ParsedInputKind.ORDER),
     TASK("Zadanie", ParsedInputKind.TASK), NOTE("Notatka", ParsedInputKind.NOTE);
 
-    val supportsCodex get() = this == ALL || this == ORDER
+    val supportsCodex get() = true
     internal val geminiInstruction get() = when (this) {
         ALL -> "Tryb ALL: automatycznie rozpoznaj ORDER, TASK, CONTACT albo NOTE, jak dotychczas."
         ORDER -> "Użytkownik wybrał Zamówienie: oczekiwany kind to ORDER. Słowa polecenia nie zmieniają rodzaju na TASK. Rozpoznaj tylko wskazane przedmioty, ilości i odbiorców; brakujących danych nie wymyślaj."
@@ -72,6 +72,7 @@ class NoteParser {
         mode: QuickInputMode = QuickInputMode.ALL,
         taskPlaces: List<TaskPlaceLookup> = emptyList(),
         employees: List<TaskEmployeeLookup> = emptyList(),
+        learningRules: List<pl.magazyn.mobile.data.ParserLearningRuleEntity> = emptyList(),
     ): ParsedNote {
         if (mode == QuickInputMode.NOTE) return ParsedNote(null, emptyList(), kind = ParsedInputKind.NOTE)
         if (mode == QuickInputMode.TASK) return ParsedNote(null, emptyList(), kind = ParsedInputKind.TASK,
@@ -99,12 +100,10 @@ class NoteParser {
             .toList()
         val expandedSegments = parsedSegments.flatMap { (person, item) ->
             expandCompoundItem(item)
-                .flatMap { expanded -> sortRecognizedPackageItems(expandWarehouseClothingConvention(expanded)) }
+                .flatMap { expanded -> RecognitionRules.products(expanded, learningRules) }
                 .map { person to it }
         }
-        val items = expandedSegments.map { it.second }.map { item ->
-            if (ImportParser.key(item.name) == "kask") item.copy(name = "Kask Biały") else item
-        }
+        val items = expandedSegments.map { it.second }
         val people = expandedSegments.mapNotNull { it.first }.distinctBy { normalizeKey(it.fullName) }
         val contactPerson = contentWithoutPhones.split(Regex("\\s+")).take(2).joinToString(" ").takeIf { it.split(' ').size >= 2 }
         val kind = when {
@@ -140,7 +139,7 @@ class NoteParser {
         val recipientText = if (separatorIndex > 0) cleanSegment.substring(0, separatorIndex).trim() else ""
         val itemText = if (separatorIndex > 0) cleanSegment.substring(separatorIndex + 1).trim() else cleanSegment
         val compactWorkwearSize = compactWorkwearSizeRegex.find(itemText)
-        if (separatorIndex <= 0 && !quantityRegex.containsMatchIn(itemText) && !sizeRegex.containsMatchIn(itemText) && compactWorkwearSize == null) return null
+        if (separatorIndex <= 0 && !quantityRegex.containsMatchIn(itemText) && !sizeRegex.containsMatchIn(itemText) && compactWorkwearSize == null && !Regex("(?i)^kask(?:\\s+.+)?$").matches(itemText.trim())) return null
         val variant = sizeRegex.find(itemText)?.groupValues?.get(1) ?: compactWorkwearSize?.groupValues?.get(2)
         val quantity = quantityRegex.find(itemText)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()?.roundToLong() ?: 1L
         val cleanedName = itemText
@@ -183,6 +182,7 @@ class NoteParser {
     }
 
     private fun inferCompactCodeProduct(rawName: String, code: String, size: Int): String {
+        if (RecognitionRules.isOnePiece(ParsedItem(rawName, null, 1, "szt.", 1f))) return rawName
         val monterskie = code.equals("m", true)
         val normalized = ImportParser.key(rawName)
         return if (size >= 48) {
@@ -218,6 +218,7 @@ private val SHORT_DATE_REGEX = Regex("""(?<!\d)(\d{2})\.(\d{2})(?!\.?\d)""")
 
 /** Firmowa konwencja: ogólna odzież oznacza komplet składający się ze spodni i bluzy. */
 fun expandWarehouseClothingConvention(item: ParsedItem): List<ParsedItem> {
+    if (RecognitionRules.isOnePiece(item)) return listOf(item)
     val compactCodeRegex = Regex("""(?<!\w)([ms])\s*(\d{2})(?!\w)""", RegexOption.IGNORE_CASE)
     val compactCode = compactCodeRegex.find(item.name + " " + item.variant.orEmpty())
     if (compactCode != null) {

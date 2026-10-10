@@ -1,6 +1,6 @@
 # MagazynMobile agent-service POC
 
-Oddzielna usługa agenta zamówień. Klient Android używa jej wyłącznie do rozpoznawania i nie zapisuje danych magazynowych przez HTTP.
+Oddzielna usługa analizy Szybkiego Pola (ALL, ORDER, TASK, NOTE; CONTACT w ALL). Klient Android używa jej wyłącznie do rozpoznawania i nie zapisuje danych magazynowych przez HTTP.
 
 ## Uruchomienie
 
@@ -22,7 +22,7 @@ Każde publiczne `/v1/catalog/*`, `/v1/sessions/*` i `/v1/auth/*` wymaga `Author
 
 Sprawdź `GET /v1/auth/status`. Konto musi mieć `account.type = "chatgpt"`; logowanie przez klucz API jest odrzucane przez ścieżkę agenta. `POST /v1/auth/chatgpt/start` rozpoczyna oficjalne logowanie w przeglądarce; `POST /v1/auth/chatgpt/device-code` zwraca `verificationUrl` i `userCode`, które trzeba zatwierdzić poza usługą. Żadnych kluczy `OPENAI_API_KEY` ani danych logowania nie zapisujemy.
 
-`PUT /v1/catalog/full-sync` przyjmuje stabilny katalog (`revision`, `people`, `products`, `shipyards`, `taskPlaces`). `POST /v1/sessions/message` przyjmuje `{ "message": "..." }`. Jeśli odpowiedź ma `status: "needs_data"`, klient odczytuje potrzebne dane z telefonu i wysyła `POST /v1/sessions/{sessionId}/tool-results` z `{ "results": [{ "requestId": "...", "tool": "get_current_stock", "data": { "stocks": [{ "productId": "...", "available": 10 }] } }] }`. Wynik `proposal` wymaga późniejszego zatwierdzenia w aplikacji.
+`PUT /v1/catalog/full-sync` przyjmuje stabilny katalog (`revision`, `people`, `products`, `shipyards`, `taskPlaces`, `recognitionRules`). `POST /v1/sessions/message` przyjmuje `{ "schemaVersion": 2, "mode": "ALL", "message": "..." }`. Jeśli odpowiedź ma `status: "needs_data"`, klient odczytuje potrzebne dane z telefonu i wysyła `POST /v1/sessions/{sessionId}/tool-results` z `{ "results": [{ "requestId": "...", "tool": "get_current_stock", "data": { "stocks": [{ "productId": "...", "available": 10 }] } }] }`. Wynik `proposal` wymaga późniejszego zatwierdzenia w aplikacji.
 
 Jeśli agent zwróci `needs_user_choice`, Android pokazuje wszystkie strukturalne `clarifications` bieżącej rundy. Każde pytanie ma własne `id`, `type`, `required` i — dla `choice` — własnych kandydatów. Po uzupełnieniu wszystkich wymaganych odpowiedzi Android wysyła je razem przez `POST /v1/sessions/{sessionId}/answers` z `{ "answers": [...] }`. Usługa waliduje cały zestaw, wznawia ten sam wątek Codex dokładnie raz i może zwrócić następną rundę pytań. Stary `/choice` pozostaje tylko dla zgodności z pojedynczym pytaniem `choice`.
 
@@ -75,3 +75,13 @@ npm run smoke:codex
 Skrypt nie jest częścią CI. Uruchamia app-server, sprawdza konto ChatGPT, synchronizuje mały fixture, wysyła `Kowalski jutro 2 rękawice XL i okulary`, wymaga wykonanego wywołania MCP w rzeczywistym turnie, a następnie sprawdza `needs_data → tool-results → proposal`. Jeśli nie jesteś zalogowany, użyj `codex login --device-auth` albo wywołaj endpoint device-code przy uruchomionej usłudze i wpisz kod pod wskazanym adresem. Smoke test wymaga wyłącznie logowania ChatGPT, bez `OPENAI_API_KEY`.
 
 Testy `npm test` używają atrap app-server i nie wymagają loginu, sekretów ani modelu. Więcej o kontrakcie: `../docs/agent-codex-architecture.md`.
+
+## Aktualizacja do C2 / protokołu v2
+
+Wdróż kod `agent-service` z tej samej gałęzi co Android: `npm ci`, `npm test`, `npm run build`, restart istniejącej usługi z `AGENT_MODE=codex`. Zachowaj HTTPS, token i konfigurację logowania ChatGPT. Te zmiany nie wdrażają usługi automatycznie. Endpointy nadal mają prefiks `/v1`, ale wersja kontraktu JSON to 2. Stary klient bez `schemaVersion: 2` otrzyma HTTP 409 przed rozpoczęciem analizy. Nowy Android odrzuca odpowiedź starego serwera z wersją 1. Nie ma automatycznego fallbacku do ORDER.
+
+Każda analiza Androida synchronizuje pełny katalog i aktywne reguły z Room. `recognitionRules.instructions` pochodzi ze wspólnej reprezentacji Kotlin, `learned` zawiera tylko włączone reguły i kandydatów `targetIds` wynikających z aktualnych rekordów; nie tworzy ID. Wyłączenie/usunięcie reguły znika przy następnej synchronizacji. Zmiana rewizji unieważnia starszą sesję zamiast używać nieaktualnych reguł. Tryb `local` jest resolverem testowym wyłącznie ORDER, nie zastępuje Codexa.
+
+TASK używa `task`, NOTE `note.text`, CONTACT `contact`; pozostałe payloady są null. Odpowiedzi TASK/NOTE/CONTACT nie wymagają stanu, odbiorcy ani pozycji zamówienia. ORDER zachowuje dotychczasowy odczyt stanu z telefonu. Każdy wynik jest propozycją do istniejącego ekranu weryfikacji, bez automatycznego zapisu. CONTACT zachowuje istniejącą weryfikację osoby i ręczne dodanie numeru do profilu; nie tworzy sam pracowników.
+
+Testy automatyczne używają atrap Codexa. Przed użyciem na telefonie sprawdź z prawdziwym kontem: wszystkie tryby, kolor/markę kasku, komplety i jednoczęściowe ubrania, aktywną/edytowaną/wyłączoną regułę, wspólnego prowadzącego dwóch stoczni i rundę kilku pytań. `npm run smoke:codex` sprawdza istniejący przepływ ORDER, wymaga osobno skonfigurowanej usługi i logowania; nie potwierdza pozostałych scenariuszy.

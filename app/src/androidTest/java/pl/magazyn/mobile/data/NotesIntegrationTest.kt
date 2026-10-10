@@ -149,7 +149,7 @@ class NotesIntegrationTest {
         assertTrue(database.notebookDao().observeNotes().first().isEmpty())
     }
 
-    @Test fun viewModelKeepsForcedOrderProductsAndGuardsUnsupportedCodexModes() = runBlocking {
+    @Test fun viewModelKeepsForcedOrderProductsAndSupportsCodexModes() = runBlocking {
         val viewModel = HomeViewModel(environment.application)
         viewModel.runAndAwaitViewModelWork {
             assertEquals(QuickInputMode.ALL, viewModel.quickInput.value.mode)
@@ -162,9 +162,7 @@ class NotesIntegrationTest {
             assertEquals("Kask Biały", order.items.single().name)
             listOf(QuickInputMode.TASK, QuickInputMode.NOTE).forEach { mode ->
                 viewModel.selectQuickInputMode(mode)
-                viewModel.analyzeWithCodex(viewModel.quickInput.value.text)
-                assertFalse(viewModel.codexAnalysis.value.isLoading)
-                assertTrue(viewModel.codexAnalysis.value.error!!.contains("tylko zamówienia"))
+                assertTrue(mode.supportsCodex)
                 assertEquals(mode.preferredKind, viewModel.recognize(viewModel.quickInput.value.text).kind)
             }
         }
@@ -188,6 +186,28 @@ class NotesIntegrationTest {
             assertEquals("Kleven", task.taskDraft!!.steps.single().placeText)
             assertNull(viewModel.noteReview.value)
         }
+    }
+
+    @Test fun reviewedTaskIsSavedOnceAndStaleReviewIsRejected() = runBlocking {
+        val viewModel = HomeViewModel(environment.application)
+        var saves = 0
+        viewModel.runAndAwaitViewModelWork {
+            viewModel.updateQuickInput("Transport jutro")
+            viewModel.selectQuickInputMode(QuickInputMode.TASK)
+            assertTrue(viewModel.openReview(viewModel.recognize("Transport jutro")))
+            val old = viewModel.noteReview.value!!
+            viewModel.selectQuickInputMode(QuickInputMode.NOTE)
+            viewModel.saveTaskDraft(old.rawText, old.note.taskDraft!!, reviewId = old.id) { saves++ }
+            viewModel.selectQuickInputMode(QuickInputMode.TASK)
+            assertTrue(viewModel.openReview(viewModel.recognize("Transport jutro")))
+            val current = viewModel.noteReview.value!!
+            viewModel.saveTaskDraft(current.rawText, current.note.taskDraft!!, reviewId = current.id) { saves++ }
+            viewModel.saveTaskDraft(current.rawText, current.note.taskDraft!!, reviewId = current.id) { saves++ }
+        }
+        assertEquals(1, saves)
+        assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM notebook_tasks"))
+        assertEquals(0L, database.queryLong("SELECT COUNT(*) FROM orders"))
+        assertEquals(0L, database.queryLong("SELECT COUNT(*) FROM stock_movements"))
     }
 
 }

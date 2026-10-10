@@ -295,6 +295,7 @@ export class WarehouseAgent {
       sessionId,
       status: "error",
       intent: "ORDER",
+      task: null, note: null, contact: null, recipient: null, deliveryDate: null, error: null,
       items: [],
       warnings: [],
       questions: [],

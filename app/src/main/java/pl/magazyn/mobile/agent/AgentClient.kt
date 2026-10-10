@@ -13,6 +13,7 @@ interface AgentClient {
     suspend fun authStatus(): JSONObject
     suspend fun fullSync(catalog: JSONObject)
     suspend fun message(text: String): AgentReply
+    suspend fun message(text: String, mode: pl.magazyn.mobile.domain.QuickInputMode): AgentReply = message(text)
     suspend fun toolResults(sessionId: String, results: JSONObject): AgentReply
     suspend fun answers(sessionId: String, answers: List<AgentClarificationAnswer>): AgentReply
     suspend fun choice(sessionId: String, candidateId: String): AgentReply
@@ -42,6 +43,7 @@ class HttpAgentClient(endpoint: String, token: String, allowDebugLoopback: Boole
                 if (status == 401) throw AgentFailure("Token klienta został odrzucony (HTTP 401). Sprawdź konfigurację Codex.")
                 if (status == 403) throw AgentFailure("Operacja jest zabroniona przez agent-service (HTTP 403).")
                 if (status == 429) throw AgentFailure("Zbyt wiele żądań do agent-service (HTTP 429). Spróbuj później.")
+                if (status == 409) throw AgentFailure("Niezgodna wersja klienta i agent-service (HTTP 409). Wdróż protokół v2 na serwerze.")
                 if (status !in 200..299) throw AgentFailure("Agent-service zwrócił błąd HTTP $status.")
                 if (status == 204) "" else connection.inputStream.bufferedReader().use { it.readText() }
             } finally { connection.disconnect() }
@@ -57,7 +59,9 @@ class HttpAgentClient(endpoint: String, token: String, allowDebugLoopback: Boole
     override suspend fun authStatus(): JSONObject = try { JSONObject(request("GET", "/v1/auth/status")) }
     catch (e: org.json.JSONException) { throw AgentFailure("Niepoprawny status autoryzacji agent-service.", e) }
     override suspend fun fullSync(catalog: JSONObject) { request("PUT", "/v1/catalog/full-sync", catalog) }
-    override suspend fun message(text: String) = AgentProtocol.parse(request("POST", "/v1/sessions/message", JSONObject().put("message", text)))
+    override suspend fun message(text: String) = message(text, pl.magazyn.mobile.domain.QuickInputMode.ALL)
+    override suspend fun message(text: String, mode: pl.magazyn.mobile.domain.QuickInputMode) = AgentProtocol.parse(request("POST", "/v1/sessions/message",
+        JSONObject().put("message", text).put("schemaVersion", AgentProtocol.VERSION).put("mode", mode.name)))
     override suspend fun toolResults(sessionId: String, results: JSONObject) =
         AgentProtocol.parse(request("POST", "/v1/sessions/${encode(sessionId)}/tool-results", results))
     override suspend fun answers(sessionId: String, answers: List<AgentClarificationAnswer>) =

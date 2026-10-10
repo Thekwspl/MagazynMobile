@@ -269,6 +269,7 @@ fun ParsedNoteReviewScreen(
                 }
             }
         }
+        if (note.kind != ParsedInputKind.NOTE) saving.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
         current.notice?.let { Text(it, modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium) }
         if (note.kind == ParsedInputKind.ORDER || note.kind == ParsedInputKind.TASK) {
             OriginalMessagePanel(current.rawText)
@@ -288,6 +289,7 @@ fun ParsedNoteReviewScreen(
                     initial = note.taskDraft,
                     people = people,
                     places = taskPlaces,
+                    saving = saving.isSaving,
                     onSave = { draft ->
                         viewModel.saveTaskDraft(current.rawText, draft, reviewId = current.id) {
                             viewModel.closeReview(completed = true)
@@ -385,7 +387,7 @@ private fun SmartInput(
             FlowRow(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = 2) {
                 QuickInputMode.entries.forEach { option ->
                     FilterChip(selected = mode == option, onClick = { onModeChange(option) },
-                        enabled = !aiLoading && !codexLoading, label = { Text(option.label) })
+                        enabled = true, label = { Text(option.label) })
                 }
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -403,7 +405,7 @@ private fun SmartInput(
                 if (codexLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 Text(if (codexLoading) " Analizuję w Codex…" else "Codex")
             }
-            Text(if (mode.supportsCodex) "Codex obecnie rozpoznaje tylko zamówienia." else "Codex nie obsługuje tego trybu. Użyj Offline lub Gemini.", style = MaterialTheme.typography.bodySmall)
+            Text("Codex przygotuje wynik w wybranym trybie do Twojego zatwierdzenia.", style = MaterialTheme.typography.bodySmall)
             aiError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
             codexError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
             if (codexChoice?.status == pl.magazyn.mobile.agent.AgentStatus.NEEDS_USER_CHOICE) {
@@ -1117,6 +1119,7 @@ private fun TaskDraftReviewContent(
     people: List<pl.magazyn.mobile.data.EmployeeSummary>,
     places: List<pl.magazyn.mobile.data.TaskPlaceView>,
     onSave: (pl.magazyn.mobile.domain.ParsedTaskDraft) -> Unit,
+    saving: Boolean = false,
 ) {
     var title by remember(initial) { mutableStateOf(initial.title) }
     var date by remember(initial) { mutableStateOf(initial.date.orEmpty()) }
@@ -1170,7 +1173,7 @@ private fun TaskDraftReviewContent(
             } }
         }
         OutlinedButton(onClick = { steps += pl.magazyn.mobile.domain.ParsedTaskStep(confidence = pl.magazyn.mobile.domain.ParseConfidence.REVIEW) }, Modifier.fillMaxWidth()) { Icon(Icons.Default.Add, null); Text("Dodaj etap") }
-        Button(onClick = { onSave(initial.copy(title = title.trim(), date = date.trim().ifBlank { null }, description = description.trim(), steps = steps.toList())) }, enabled = title.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Utwórz zadanie") }
+        Button(onClick = { onSave(initial.copy(title = title.trim(), date = date.trim().ifBlank { null }, description = description.trim(), steps = steps.toList())) }, enabled = title.isNotBlank() && !saving, modifier = Modifier.fillMaxWidth()) { Text(if (saving) "Zapisuję…" else "Utwórz zadanie") }
         Spacer(Modifier.height(20.dp))
     }
 }

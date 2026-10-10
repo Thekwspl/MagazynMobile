@@ -56,7 +56,7 @@ jobs:
             build-tools;35.0.0
 
       - name: Szybkie testy PR
-        run: gradle test assembleDebugAndroidTest lintDebug --no-daemon --max-workers=1
+        run: gradle test assembleDebug assembleDebugAndroidTest lintDebug --no-daemon --max-workers=1
 
       - name: Zbuduj testowe APK MagazynMobile
         if: github.event.pull_request.number == 9
