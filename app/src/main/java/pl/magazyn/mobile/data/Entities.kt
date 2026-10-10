@@ -152,6 +152,8 @@ data class ShipyardEntity(
     @PrimaryKey val id: String,
     val name: String,
     val isArchived: Boolean = false,
+    @ColumnInfo(defaultValue = "''") val aliases: String = "",
+    @ColumnInfo(defaultValue = "''") val tags: String = "",
 )
 
 @Entity(
@@ -199,7 +201,7 @@ data class ShipyardStockBalanceEntity(
             onDelete = ForeignKey.SET_NULL,
         ),
     ],
-    indices = [Index("warehouseId"), Index("employeeId"), Index("effectiveDate")],
+    indices = [Index("warehouseId"), Index("employeeId"), Index("effectiveDate"), Index("shipyardId")],
 )
 data class StockMovementEntity(
     @PrimaryKey val id: String,
@@ -210,6 +212,7 @@ data class StockMovementEntity(
     val effectiveDate: String,
     val createdAtEpochMillis: Long,
     val note: String = "",
+    val shipyardId: String? = null,
 )
 
 @Entity(
@@ -534,7 +537,7 @@ data class ProductDuplicateDecisionEntity(
             onDelete = ForeignKey.SET_NULL,
         ),
     ],
-    indices = [Index("notebookId"), Index("employeeId")],
+    indices = [Index("notebookId"), Index("employeeId"), Index("shipyardId")],
 )
 data class OrderEntity(
     @PrimaryKey val id: String,
@@ -545,6 +548,7 @@ data class OrderEntity(
     val status: String,
     val plannedIssueDate: String,
     val createdAtEpochMillis: Long,
+    val shipyardId: String? = null,
 )
 
 @Entity(

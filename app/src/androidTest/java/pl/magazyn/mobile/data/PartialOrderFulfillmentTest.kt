@@ -192,6 +192,7 @@ class PartialOrderFulfillmentTest {
             viewModel.updateOrder("shipyard-order", null, "Stocznia Alfa", "Stocznia Alfa", "2026-09-15")
         }
         assertEquals("Stocznia Alfa", database.orderDao().findById("shipyard-order")?.siteLabel)
+        assertEquals("shipyard-1", database.orderDao().findById("shipyard-order")?.shipyardId)
 
         viewModel.runAndAwaitViewModelWork {
             viewModel.realize(
@@ -201,6 +202,8 @@ class PartialOrderFulfillmentTest {
         }
 
         assertEquals("ISSUED", database.orderDao().findById("shipyard-order")?.status)
+        assertEquals("shipyard-1", database.orderDao().findById("shipyard-order")?.shipyardId)
+        assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movements WHERE type='SHIPYARD_ISSUE' AND shipyardId='shipyard-1'"))
         assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movements WHERE type='SHIPYARD_ISSUE' AND recipientLabel='Stocznia Alfa'"))
         assertStock("product-1", 7.0)
         assertEquals(3.0, database.shipyardDao().findStock("shipyard-1", "product-1")?.quantity ?: Double.NaN, 0.0)

@@ -35,7 +35,7 @@ fun MagazynApp(modifier: Modifier = Modifier) {
     val currentRoute = backStack?.destination?.route.orEmpty()
     val density = LocalDensity.current
     val isImeVisible = WindowInsets.ime.getBottom(density) > 0
-    val isFocusedScreen = currentRoute == "note-review" || currentRoute == "tasks-new" || currentRoute == "product-duplicates" || currentRoute == "data-exchange" || currentRoute == "hr-synchro-import" || currentRoute.startsWith("shipyards/") || currentRoute.startsWith("products/")
+    val isFocusedScreen = currentRoute == "note-review" || currentRoute == "notes/new" || currentRoute.startsWith("notes/") || currentRoute == "tasks-new" || currentRoute == "product-duplicates" || currentRoute == "data-exchange" || currentRoute == "hr-synchro-import" || currentRoute.startsWith("shipyards/") || currentRoute.startsWith("products/") || currentRoute.startsWith("people/view/") || currentRoute.startsWith("people/issue/")
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showQuickAdd by remember { mutableStateOf(false) }
@@ -43,6 +43,7 @@ fun MagazynApp(modifier: Modifier = Modifier) {
         Destination("tasks", "Zadania", Icons.Default.TaskAlt),
         Destination("places", "Miejsca", Icons.Default.Place),
         Destination("orders", "Zamówienia", Icons.Default.Checklist),
+        Destination("notes", "Notatki", Icons.Default.Notes),
         Destination("operations", "Operacje", Icons.Default.SwapVert),
         Destination("inventory", "Inwentaryzacja", Icons.Default.FactCheck),
         Destination("shipyards", "Stocznie", Icons.Default.Business),
@@ -121,7 +122,7 @@ fun MagazynApp(modifier: Modifier = Modifier) {
         ModalBottomSheet(onDismissRequest = { showQuickAdd = false }) {
             QuickAddSheet(
                 onClose = { showQuickAdd = false },
-                onNote = { showQuickAdd = false; navController.navigate("home") },
+                onNote = { showQuickAdd = false; navController.navigate("notes/new") },
                 onPeople = { showQuickAdd = false; navController.navigate("people/new") },
                 onProducts = { showQuickAdd = false; navController.navigate("products/new") },
                 onTask = { showQuickAdd = false; navController.navigate("tasks-new") },
@@ -147,11 +148,15 @@ fun MagazynApp(modifier: Modifier = Modifier) {
 
 @Composable
 private fun AppNavigation(navController: NavHostController, padding: PaddingValues, homeViewModel: HomeViewModel) {
+    fun openPersonIssue(personId: String) {
+        navController.navigate("people/view/$personId")
+        navController.navigate("people/issue/$personId")
+    }
     val combinedScreen: @Composable () -> Unit = {
         SearchScreen(
             contentPadding = padding,
             onPerson = { navController.navigate("people/view/$it") },
-            onIssuePerson = { navController.navigate("people/issue/$it") },
+            onIssuePerson = ::openPersonIssue,
             onProduct = { navController.navigate("products/view/$it") },
             onShipyard = { id -> navController.navigate(if (id == null) "shipyards" else "shipyards/$id") },
         )
@@ -182,6 +187,44 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
         composable("search") { combinedScreen() }
         composable("issue") { combinedScreen() }
         composable("orders") { OrdersScreen(contentPadding = padding) }
+        composable("notes") {
+            NotesScreen(
+                contentPadding = padding,
+                onNewNote = { navController.navigate("notes/new") },
+                onOpenNote = { navController.navigate("notes/$it") },
+            )
+        }
+        composable("notes/new") {
+            NoteEditorScreen(
+                contentPadding = padding,
+                onBack = { navController.popBackStack() },
+                onSaved = { noteId ->
+                    navController.navigate("notes/$noteId") {
+                        popUpTo("notes/new") { inclusive = true }
+                    }
+                },
+            )
+        }
+        composable("notes/{noteId}") { entry ->
+            val noteId = entry.arguments?.getString("noteId").orEmpty()
+            NoteDetailsScreen(
+                contentPadding = padding,
+                noteId = noteId,
+                onBack = { navController.popBackStack() },
+                onEdit = { navController.navigate("notes/$noteId/edit") },
+                onConvert = { note ->
+                    homeViewModel.openSavedNoteAsOrder(note.id, note.rawText)
+                    navController.navigate("note-review")
+                },
+            )
+        }
+        composable("notes/{noteId}/edit") { entry ->
+            NoteEditorScreen(
+                contentPadding = padding,
+                noteId = entry.arguments?.getString("noteId"),
+                onBack = { navController.popBackStack() },
+            )
+        }
         composable("tasks") { TasksScreen(contentPadding = padding, onNewTask = { navController.navigate("tasks-new") }) }
         composable("tasks-new") { TasksScreen(contentPadding = padding, startAdding = true, onCloseEditor = { navController.popBackStack() }) }
         composable("places") { PlacesScreen(contentPadding = padding) }
@@ -203,11 +246,41 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
                 onEditProduct = { navController.navigate("products/view/$it") },
             )
         }
-        composable("people") { PeopleScreen(contentPadding = padding) }
-        composable("people/new") { PeopleScreen(contentPadding = padding, startAdding = true) }
-        composable("people/new-issue") { PeopleScreen(contentPadding = padding, startAdding = true, startIssuingAfterCreate = true) }
-        composable("people/view/{personId}") { entry -> PeopleScreen(contentPadding = padding, initialPersonId = entry.arguments?.getString("personId")) }
-        composable("people/issue/{personId}") { entry -> PeopleScreen(contentPadding = padding, initialPersonId = entry.arguments?.getString("personId"), startIssuing = true) }
+        composable("people") {
+            PeopleScreen(contentPadding = padding, onPerson = { navController.navigate("people/view/$it") })
+        }
+        composable("people/new") {
+            PeopleScreen(contentPadding = padding, startAdding = true, onPerson = { navController.navigate("people/view/$it") })
+        }
+        composable("people/new-issue") {
+            PeopleScreen(
+                contentPadding = padding,
+                startAdding = true,
+                startIssuingAfterCreate = true,
+                onPerson = { navController.navigate("people/view/$it") },
+                onIssuePerson = { personId ->
+                    navController.navigate("people/view/$personId") {
+                        popUpTo("people/new-issue") { inclusive = true }
+                    }
+                    navController.navigate("people/issue/$personId")
+                },
+            )
+        }
+        composable("people/view/{personId}") { entry ->
+            PeopleScreen(
+                contentPadding = padding,
+                initialPersonId = entry.arguments?.getString("personId"),
+                onBack = { navController.popBackStack() },
+                onIssuePerson = { navController.navigate("people/issue/$it") },
+            )
+        }
+        composable("people/issue/{personId}") { entry ->
+            PersonIssueScreen(
+                contentPadding = padding,
+                personId = entry.arguments?.getString("personId").orEmpty(),
+                onBack = { navController.popBackStack() },
+            )
+        }
         composable("history") { HistoryScreen(contentPadding = padding) }
         composable("data-exchange") { DataExchangeScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
         composable("shipyards") {
@@ -226,6 +299,7 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
                 contentPadding = padding,
                 onBack = { navController.popBackStack() },
                 onAiSettings = { navController.navigate("ai-settings") },
+                onCodexSettings = { navController.navigate("codex-settings") },
                 onUpdates = { navController.navigate("updates") },
                 onLearningRules = { navController.navigate("learning-rules") },
                 onDataExchange = { navController.navigate("data-exchange") },
@@ -234,6 +308,7 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
         }
         composable("hr-synchro-import") { HrSynchroImportScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
         composable("ai-settings") { AiSettingsScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
+        composable("codex-settings") { AgentSettingsScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
         composable("learning-rules") { LearningRulesScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
         composable("updates") { UpdateScreen(contentPadding = padding, onBack = { navController.popBackStack() }) }
     }

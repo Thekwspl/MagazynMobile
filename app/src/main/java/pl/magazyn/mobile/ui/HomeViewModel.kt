@@ -53,6 +53,16 @@ import pl.magazyn.mobile.data.NotebookTaskStepEntity
 import pl.magazyn.mobile.data.NotebookTaskStepPersonEntity
 import pl.magazyn.mobile.data.TaskPlaceEntity
 import pl.magazyn.mobile.data.ProductVisibilityStore
+import pl.magazyn.mobile.agent.AgentFailure
+import pl.magazyn.mobile.agent.AgentClarificationAnswer
+import pl.magazyn.mobile.agent.AgentClarificationType
+import pl.magazyn.mobile.agent.AgentReply
+import pl.magazyn.mobile.agent.AgentRepository
+import pl.magazyn.mobile.agent.AgentRevision
+import pl.magazyn.mobile.agent.AgentStatus
+import pl.magazyn.mobile.agent.RoomAgentDataSource
+import pl.magazyn.mobile.agent.AgentConnectionStore
+import pl.magazyn.mobile.agent.areRequiredClarificationsAnswered
 
 data class HomeUiState(
     val employeeCount: Int = 0,
@@ -68,9 +78,18 @@ data class AiAnalysisUiState(
     val error: String? = null,
 )
 
+data class CodexAnalysisUiState(
+    val isLoading: Boolean = false,
+    val error: String? = null,
+    val reply: AgentReply? = null,
+    val result: ParsedNote? = null,
+    val answers: Map<String, AgentClarificationAnswer> = emptyMap(),
+)
+
 data class NoteReviewUiState(
     val rawText: String,
     val note: ParsedNote,
+    val sourceNoteId: String? = null,
 )
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -82,6 +101,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val aiAnalyzer = GeminiNoteAnalyzer()
     private val _aiAnalysis = MutableStateFlow(AiAnalysisUiState())
     val aiAnalysis: StateFlow<AiAnalysisUiState> = _aiAnalysis.asStateFlow()
+    private val _codexAnalysis = MutableStateFlow(CodexAnalysisUiState())
+    val codexAnalysis: StateFlow<CodexAnalysisUiState> = _codexAnalysis.asStateFlow()
+    private val agentConnection = AgentConnectionStore(application, pl.magazyn.mobile.BuildConfig.DEBUG)
+    private var activeAgentRepository: AgentRepository? = null
     private val _quickInput = MutableStateFlow("")
     val quickInput: StateFlow<String> = _quickInput.asStateFlow()
     private val _noteReview = MutableStateFlow<NoteReviewUiState?>(null)
@@ -139,6 +162,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateQuickInput(value: String) {
+        if (_quickInput.value != value && _codexAnalysis.value.reply != null) _codexAnalysis.value = CodexAnalysisUiState()
         _quickInput.value = value
     }
 
@@ -150,6 +174,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _noteReview.value = NoteReviewUiState(
             rawText = "",
             note = ParsedNote(person = null, items = emptyList(), kind = ParsedInputKind.ORDER),
+        )
+    }
+
+    fun openSavedNoteAsOrder(noteId: String, rawText: String) {
+        _noteReview.value = NoteReviewUiState(
+            rawText = rawText,
+            note = recognize(rawText).copy(kind = ParsedInputKind.ORDER),
+            sourceNoteId = noteId,
         )
     }
 
@@ -267,6 +299,79 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _aiAnalysis.value = AiAnalysisUiState()
     }
 
+    fun analyzeWithCodex(text: String) {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            _codexAnalysis.value = CodexAnalysisUiState(isLoading = true)
+            runCatching {
+                val repository = AgentRepository(agentConnection.client(), RoomAgentDataSource(database), AgentRevision(getApplication<Application>())::next)
+                activeAgentRepository = repository
+                showCodexReply(repository, repository.analyze(text))
+            }.onFailure {
+                _codexAnalysis.value = CodexAnalysisUiState(error = it.message ?: "Analiza Codex nie powiodła się.")
+            }
+        }
+    }
+
+    fun chooseCodexCandidate(candidateId: String) {
+        val reply = _codexAnalysis.value.reply ?: return
+        viewModelScope.launch {
+            _codexAnalysis.value = CodexAnalysisUiState(isLoading = true, reply = reply)
+            runCatching {
+                val repository = activeAgentRepository ?: throw AgentFailure("Sesja Codex wygasła. Uruchom analizę ponownie.")
+                showCodexReply(repository, repository.choose(reply, candidateId))
+            }.onFailure {
+                _codexAnalysis.value = CodexAnalysisUiState(error = it.message ?: "Nie udało się wznowić sesji.", reply = reply)
+            }
+        }
+    }
+
+    fun setCodexChoiceAnswer(questionId: String, candidateId: String) {
+        val state = _codexAnalysis.value
+        val question = state.reply?.clarifications?.firstOrNull { it.id == questionId } ?: return
+        if (question.type != AgentClarificationType.CHOICE || question.candidates.none { it.id == candidateId }) return
+        _codexAnalysis.value = state.copy(answers = state.answers +
+            (questionId to AgentClarificationAnswer(questionId, candidateId = candidateId)))
+    }
+
+    fun setCodexTextAnswer(questionId: String, text: String) {
+        val state = _codexAnalysis.value
+        val question = state.reply?.clarifications?.firstOrNull { it.id == questionId } ?: return
+        if (question.type == AgentClarificationType.CHOICE) return
+        val answers = if (text.isBlank()) state.answers - questionId else state.answers +
+            (questionId to AgentClarificationAnswer(questionId, text = text))
+        _codexAnalysis.value = state.copy(answers = answers)
+    }
+
+    fun submitCodexAnswers() {
+        val state = _codexAnalysis.value
+        if (state.isLoading) return
+        val reply = state.reply ?: return
+        val answers = reply.clarifications.mapNotNull { state.answers[it.id] }
+        if (!areRequiredClarificationsAnswered(reply.clarifications, answers)) return
+        _codexAnalysis.value = state.copy(isLoading = true, error = null)
+        viewModelScope.launch {
+            runCatching {
+                val repository = activeAgentRepository ?: throw AgentFailure("Sesja Codex wygasła. Uruchom analizę ponownie.")
+                showCodexReply(repository, repository.answer(reply, answers))
+            }.onFailure {
+                _codexAnalysis.value = state.copy(isLoading = false,
+                    error = it.message ?: "Nie udało się wysłać odpowiedzi.")
+            }
+        }
+    }
+
+    private suspend fun showCodexReply(repository: AgentRepository, reply: AgentReply) {
+        _codexAnalysis.value = when (reply.status) {
+            AgentStatus.PROPOSAL -> CodexAnalysisUiState(result = repository.review(reply))
+            AgentStatus.NEEDS_USER_CHOICE -> CodexAnalysisUiState(reply = reply)
+            AgentStatus.ERROR -> CodexAnalysisUiState(error = reply.error ?: "Agent zwrócił błąd.")
+            AgentStatus.NEEDS_DATA -> CodexAnalysisUiState(error = "Agent wymaga dodatkowych danych.")
+        }
+    }
+
+    fun consumeCodexResult() { _codexAnalysis.value = CodexAnalysisUiState() }
+
     fun addPhoneNumber(employeeId: String, number: String) {
         viewModelScope.launch {
             val employee = database.employeeDao().findById(employeeId) ?: return@launch
@@ -380,6 +485,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         onSaved: () -> Unit = {},
     ) {
         if (approvedPairs.isEmpty()) return
+        val sourceNoteId = _noteReview.value?.sourceNoteId
         viewModelScope.launch {
             database.withTransaction {
                 if (rememberCorrections) approvedPairs.forEach { (source, corrected) ->
@@ -433,10 +539,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 approvedItems.groupBy { it.recipientName ?: note.shipyardName ?: "Bez odbiorcy" }
                     .forEach { (recipient, items) ->
                         val recipientKey = ImportParser.key(recipient)
-                        val employee = employees.firstOrNull {
+                        val fixedRecipientId = items.mapNotNull { it.recipientId?.takeIf { _ -> it.recipientName == recipient } }.distinct().singleOrNull()
+                        val explicitYard = items.any { it.recipientKind == "shipyard" && it.recipientId == fixedRecipientId }
+                        val employee = if (explicitYard) null else (employees.firstOrNull { it.id == fixedRecipientId && items.any { item -> item.recipientKind == "person" } } ?: employees.firstOrNull {
                             ImportParser.key(it.fullName) == recipientKey || it.aliases.split(',').any { alias -> ImportParser.key(alias) == recipientKey }
-                        }
-                        val recipientShipyard = activeShipyards.firstOrNull { ImportParser.key(it.name) == recipientKey }
+                        })
+                        val recipientShipyard = activeShipyards.firstOrNull { it.id == fixedRecipientId && items.any { item -> item.recipientKind == "shipyard" } }
+                            ?: activeShipyards.firstOrNull { ImportParser.key(it.name) == recipientKey }
                         val orderId = UUID.randomUUID().toString()
                         database.orderDao().upsertOrders(
                             listOf(
@@ -449,6 +558,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                                     status = "DRAFT",
                                     plannedIssueDate = note.suggestedIssueDate ?: java.time.LocalDate.now().toString(),
                                     createdAtEpochMillis = now,
+                                    shipyardId = if (employee == null) recipientShipyard?.id else null,
                                 ),
                             ),
                         )
@@ -472,7 +582,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                                     scoredCandidates.filter { it.second == bestScore }.map { it.first }
                                 }
                                 // Remis pozostaje do ręcznego mapowania; nie wybieramy przypadkowego rozmiaru.
-                                val product = candidates.singleOrNull()
+                                val product = item.productId?.let { id -> catalog.firstOrNull { it.id == id && !it.isArchived } }
+                                    ?: candidates.singleOrNull()
                                 OrderLineEntity(
                                     id = UUID.randomUUID().toString(),
                                     orderId = orderId,
@@ -485,6 +596,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             },
                         )
                     }
+                sourceNoteId?.let { database.notebookDao().setNoteStatus(it, "CONVERTED") }
             }
             // Powrót do Start następuje dopiero po zatwierdzeniu transakcji. Room Flow
             // ma wtedy już nowe dane i kafel „Do zrobienia” odświeża się reaktywnie.
@@ -644,7 +756,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         val existing = database.shipyardDao().getAllNow().firstOrNull { ImportParser.key(it.name) == shipyardKey }
                         val shipyard = existing?.copy(isArchived = false) ?: ShipyardEntity(UUID.randomUUID().toString(), shipyardName)
                         if (existing == null) database.shipyardDao().insert(shipyard) else database.shipyardDao().restoreById(shipyard.id)
-                        insertResolvedMovement("HISTORICAL_SHIPYARD_IMPORT", null, shipyard.name, item, product)
+                        insertResolvedMovement("HISTORICAL_SHIPYARD_IMPORT", null, shipyard.name, item, product, shipyard.id)
                         val current = database.shipyardDao().findStock(shipyard.id, product.id)?.quantity ?: 0.0
                         database.shipyardDao().upsertStock(ShipyardStockBalanceEntity(shipyard.id, product.id, current + item.quantity))
                     }
@@ -662,6 +774,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         recipientLabel: String,
         item: PendingImportDetail,
         product: ProductEntity,
+        shipyardId: String? = null,
     ) {
         val movementId = UUID.randomUUID().toString()
         database.movementDao().insertMovement(
@@ -674,6 +787,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 effectiveDate = item.effectiveDate,
                 createdAtEpochMillis = System.currentTimeMillis(),
                 note = "Uzupełniono mapowanie importu: ${item.sourceFileName} (bez zmiany magazynu głównego)",
+                shipyardId = shipyardId,
             ),
         )
         database.movementDao().insertLine(

@@ -304,6 +304,7 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
                 effectiveDate = date,
                 createdAtEpochMillis = System.currentTimeMillis(),
                 note = "Stan stoczni z importu: $fileName (bez zmiany magazynu głównego)",
+                shipyardId = shipyard.id,
             ),
         )
         database.movementDao().insertLine(

@@ -1,6 +1,8 @@
 package pl.magazyn.mobile.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,6 +18,7 @@ import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.ImportExport
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +44,7 @@ fun SettingsScreen(
     contentPadding: PaddingValues,
     onBack: () -> Unit,
     onAiSettings: () -> Unit,
+    onCodexSettings: () -> Unit,
     onUpdates: () -> Unit,
     onLearningRules: () -> Unit,
     onDataExchange: () -> Unit,
@@ -53,9 +57,10 @@ fun SettingsScreen(
     val diagnostics = remember(context) { StartupDiagnostics.from(context) }
     var lastStartupProblem by remember { mutableStateOf(diagnostics.lastProblem()) }
     val showHidden by visibilityStore.showHidden.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxSize().padding(contentPadding)) {
+    Column(Modifier.fillMaxSize().padding(contentPadding).verticalScroll(rememberScrollState())) {
         BackScreenHeader("Ustawienia", "Aplikacja, AI i reguły lokalne", onBack)
         SettingsItem(Icons.Default.AutoAwesome, "Ustawienia AI", "Klucz Gemini i prywatność notatek", onAiSettings)
+        SettingsItem(Icons.Default.Key, "Połączenie Codex", "Adres HTTPS i token klienta agent-service", onCodexSettings)
         SettingsItem(Icons.Default.SystemUpdate, "Aktualizacje", "Sprawdzanie i instalowanie nowej wersji", onUpdates)
         SettingsItem(Icons.Default.Psychology, "Uczenie offline", "Reguły używane bez internetu", onLearningRules)
         SettingsItem(Icons.Default.ImportExport, "Import i Eksport danych", "Import, eksport i kopie zapasowe", onDataExchange)
@@ -81,8 +86,11 @@ fun SettingsScreen(
 
 @Composable
 private fun SettingsItem(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 15.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Icon(icon, null)
             Column(Modifier.padding(start = 14.dp).weight(1f)) {
                 Text(title, fontWeight = FontWeight.SemiBold)
@@ -90,6 +98,6 @@ private fun SettingsItem(icon: androidx.compose.ui.graphics.vector.ImageVector, 
             }
             Icon(Icons.Default.ChevronRight, null)
         }
-        HorizontalDivider(Modifier.padding(top = 15.dp))
+        HorizontalDivider()
     }
 }

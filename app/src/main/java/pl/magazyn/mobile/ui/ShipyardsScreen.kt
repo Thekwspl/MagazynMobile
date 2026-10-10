@@ -145,7 +145,7 @@ fun ShipyardsScreen(
                 editId = editShipyardId,
                 onEdit = { editShipyardId = it },
                 onAdd = { viewModel.addShipyard(newName); newName = "" },
-                onRename = { id, name -> viewModel.renameShipyard(id, name); editShipyardId = null },
+                onRename = { id, name, aliases, tags -> viewModel.updateShipyard(id, name, aliases, tags); editShipyardId = null },
                 onDelete = { pendingDeleteId = it },
                 onDismiss = { manageDialog = false; editShipyardId = null },
             )
@@ -380,7 +380,7 @@ private fun ShipyardManagementDialog(
     editId: String?,
     onEdit: (String?) -> Unit,
     onAdd: () -> Unit,
-    onRename: (String, String) -> Unit,
+    onRename: (String, String, String, String) -> Unit,
     onDelete: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -416,11 +416,17 @@ private fun ShipyardManagementDialog(
     editId?.let { id ->
         val shipyard = shipyards.firstOrNull { it.id == id } ?: return@let
         var editedName by rememberSaveable(id) { mutableStateOf(shipyard.name) }
+        var editedAliases by rememberSaveable(id) { mutableStateOf(shipyard.aliases) }
+        var editedTags by rememberSaveable(id) { mutableStateOf(shipyard.tags) }
         AlertDialog(
             onDismissRequest = { onEdit(null) },
             title = { Text("Edytuj stocznię") },
-            text = { OutlinedTextField(editedName, { editedName = it }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Nazwa") }, singleLine = true) },
-            confirmButton = { Button(onClick = { onRename(id, editedName) }, enabled = editedName.isNotBlank()) { Text("Zapisz") } },
+            text = { Column {
+                OutlinedTextField(editedName, { editedName = it }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Nazwa") }, singleLine = true)
+                OutlinedTextField(editedAliases, { editedAliases = it }, Modifier.fillMaxWidth(), label = { Text("Aliasy (po przecinku)") })
+                OutlinedTextField(editedTags, { editedTags = it }, Modifier.fillMaxWidth(), label = { Text("Tagi (po przecinku)") })
+            } },
+            confirmButton = { Button(onClick = { onRename(id, editedName, editedAliases, editedTags) }, enabled = editedName.isNotBlank()) { Text("Zapisz") } },
             dismissButton = { TextButton(onClick = { onEdit(null) }) { Text("Anuluj") } },
         )
     }
@@ -479,17 +485,26 @@ private fun ShipyardProductLine(
     }
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Przedmiot", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                if (canRemove) IconButton(onClick = onRemove) { Icon(Icons.Default.DeleteOutline, "Usuń pozycję") }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    line.query,
+                    { onChange(line.copy(query = it, productId = "", showSuggestions = true)) },
+                    Modifier.weight(1f).keepAboveKeyboard(),
+                    label = { Text("Przedmiot") },
+                    placeholder = { Text("Nazwa lub wariant") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    line.quantity,
+                    { onChange(line.copy(quantity = it.filter(Char::isDigit))) },
+                    Modifier.width(88.dp).keepAboveKeyboard(),
+                    label = { Text("Ilość") },
+                    placeholder = { Text("1") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                if (canRemove) IconButton(onClick = onRemove, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.DeleteOutline, "Usuń pozycję") }
             }
-            OutlinedTextField(
-                line.query,
-                { onChange(line.copy(query = it, productId = "", showSuggestions = true)) },
-                Modifier.fillMaxWidth().keepAboveKeyboard(),
-                label = { Text("Nazwa lub wariant") },
-                singleLine = true,
-            )
             if (line.showSuggestions) SuggestionList(suggestions, key = { it.id }) { product ->
                 OutlinedCard(onClick = {
                     onChange(line.copy(productId = product.id, query = product.name + product.variant?.let { " · $it" }.orEmpty(), showSuggestions = false))
@@ -497,15 +512,6 @@ private fun ShipyardProductLine(
                     ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.fillMaxWidth().padding(9.dp), stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit)
                 }
             }
-            OutlinedTextField(
-                line.quantity,
-                { onChange(line.copy(quantity = it.filter(Char::isDigit))) },
-                Modifier.fillMaxWidth().keepAboveKeyboard(),
-                label = { Text("Ilość") },
-                placeholder = { Text("1") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            )
         }
     }
 }

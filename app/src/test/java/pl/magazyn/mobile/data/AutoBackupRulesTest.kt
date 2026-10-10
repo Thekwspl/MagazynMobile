@@ -22,6 +22,7 @@ class AutoBackupRulesTest {
             assertTrue(rules.contains("<include domain=\"sharedpref\" path=\"ai_preferences.xml\""))
             assertFalse(rules.contains("<exclude"))
             assertFalse(rules.contains("ai_secret_preferences.xml"))
+            assertFalse(rules.contains("agent_connection_preferences.xml"))
             assertFalse(rules.contains("ai_secure_preferences.xml"))
             assertFalse(rules.contains("restore-journal.xml"))
             assertFalse(rules.contains("startup-diagnostics.xml"))

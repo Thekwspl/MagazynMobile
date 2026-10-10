@@ -28,6 +28,8 @@ private enum class HistoryDateField { FROM, TO }
 @Composable
 fun HistoryScreen(contentPadding: PaddingValues, viewModel: HistoryViewModel = viewModel()) {
     val entries by viewModel.entries.collectAsStateWithLifecycle()
+    val shipyards by viewModel.shipyards.collectAsStateWithLifecycle()
+    val leaders by viewModel.shipyardLeaders.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     var filterName by rememberSaveable { mutableStateOf(HistoryFilter.ALL.name) }
     var selected by remember { mutableStateOf<HistoryEntry?>(null) }
@@ -108,7 +110,15 @@ fun HistoryScreen(contentPadding: PaddingValues, viewModel: HistoryViewModel = v
     selected?.let { entry ->
         val lines by viewModel.lines(entry.id).collectAsStateWithLifecycle(initialValue = emptyList())
         ModalBottomSheet(onDismissRequest = { selected = null }) {
-            HistoryDetails(entry, lines, onClose = { selected = null })
+            Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
+                if (entry.employeeId == null && entry.type in setOf("SHIPYARD_ISSUE", "SHIPYARD_RETURN", "HISTORICAL_SHIPYARD_IMPORT", "HISTORICAL_ISSUE_IMPORT") && entry.recipientLabel.isNotBlank()) {
+                    val fresh = entries.firstOrNull { it.id == entry.id } ?: entry
+                    ShipyardAssignment(fresh.shipyardId, entry.recipientLabel, shipyards, leaders) {
+                        viewModel.assignShipyard(entry.id, it)
+                    }
+                }
+                HistoryDetails(entry, lines, onClose = { selected = null }, modifier = Modifier.weight(1f))
+            }
         }
     }
     datePickerFor?.let { target ->
@@ -197,38 +207,50 @@ private fun HistoryCard(entry: HistoryEntry, onClick: () -> Unit) {
 }
 
 @Composable
-private fun HistoryDetails(entry: HistoryEntry, lines: List<HistoryLine>, onClose: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+private fun HistoryDetails(entry: HistoryEntry, lines: List<HistoryLine>, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    LazyColumn(
+        modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        item {
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                Column {
+                    Text(movementLabel(entry.type), style = MaterialTheme.typography.titleLarge)
+                    Text(formatDisplayDate(entry.effectiveDate), style = MaterialTheme.typography.labelMedium)
+                }
+                IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Zamknij") }
+            }
+        }
+        if (entry.recipient.isNotBlank()) item { DetailField("Odbiorca", entry.recipient) }
+        if (entry.note.isNotBlank()) item { DetailField("Informacja", entry.note) }
+        item { HorizontalDivider() }
+        item {
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                Text("Przedmiot", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                Text("Zmiana", fontWeight = FontWeight.SemiBold)
+            }
+        }
+        items(historyDetailsLines(lines), key = { it.id }) { line ->
             Column {
-                Text(movementLabel(entry.type), style = MaterialTheme.typography.titleLarge)
-                Text(formatDisplayDate(entry.effectiveDate), style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ProductInfo(line.productName, line.variant, line.groupName, line.subgroupName, Modifier.weight(1f))
+                    val positive = line.quantityDelta >= 0
+                    Text(
+                        (if (positive) "+" else "") + formatWholeQuantity(line.quantityDelta) + " " + line.unit,
+                        color = if (positive) Color(0xFF177245) else MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             }
-            IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Zamknij") }
         }
-        if (entry.recipient.isNotBlank()) DetailField("Odbiorca", entry.recipient)
-        if (entry.note.isNotBlank()) DetailField("Informacja", entry.note)
-        HorizontalDivider()
-        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-            Text("Przedmiot", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-            Text("Zmiana", fontWeight = FontWeight.SemiBold)
-        }
-        lines.forEach { line ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                ProductInfo(line.productName, line.variant, line.groupName, line.subgroupName, Modifier.weight(1f))
-                val positive = line.quantityDelta >= 0
-                Text(
-                    (if (positive) "+" else "") + formatWholeQuantity(line.quantityDelta) + " " + line.unit,
-                    color = if (positive) Color(0xFF177245) else MaterialTheme.colorScheme.error,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-        }
-        if (lines.isEmpty()) Text("Brak pozycji w tej operacji.")
-        Spacer(Modifier.height(18.dp))
+        if (lines.isEmpty()) item { Text("Brak pozycji w tej operacji.") }
+        item { Spacer(Modifier.height(18.dp)) }
     }
 }
+
+internal fun historyDetailsLines(lines: List<HistoryLine>): List<HistoryLine> = lines
 
 @Composable
 private fun DetailField(label: String, value: String) {
