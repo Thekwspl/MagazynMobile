@@ -72,7 +72,7 @@ class NotesIntegrationTest {
             recipientKind = "person",
         )
         val parsed = ParsedNote(person = null, items = listOf(item), kind = ParsedInputKind.ORDER)
-        val viewModel = HomeViewModel(environment.application)
+        val viewModel = environment.track(HomeViewModel(environment.application))
 
         viewModel.openSavedNoteAsOrder("source-note", rawText)
         viewModel.runAndAwaitViewModelWork {
@@ -91,7 +91,7 @@ class NotesIntegrationTest {
     fun cancelledConversionLeavesNoteActiveAndCreatesNoOrder() = runBlocking {
         val rawText = "Notatka do późniejszego zamówienia"
         database.notebookDao().insertNotebook(OrderNotebookEntity("cancelled-note", rawText, "ACTIVE", "NOTE", 1))
-        val viewModel = HomeViewModel(environment.application)
+        val viewModel = environment.track(HomeViewModel(environment.application))
 
         viewModel.openSavedNoteAsOrder("cancelled-note", rawText)
         viewModel.closeReview()
@@ -102,7 +102,7 @@ class NotesIntegrationTest {
     }
 
     @Test fun quickInputNoteIsSavedOnceWithoutOrderTaskOrMovementAndClearedOnlyOnSuccess() = runBlocking {
-        val viewModel = HomeViewModel(environment.application)
+        val viewModel = environment.track(HomeViewModel(environment.application))
         val raw = "  Kowalski jutro 2 rękawice i kask\n[ ] Zadzwonić\n "
         var saved = 0
         viewModel.runAndAwaitViewModelWork {
@@ -130,7 +130,7 @@ class NotesIntegrationTest {
     }
 
     @Test fun modeChangeRejectsOldReviewAndOldResponseWithoutClearingText() = runBlocking {
-        val viewModel = HomeViewModel(environment.application)
+        val viewModel = environment.track(HomeViewModel(environment.application))
         viewModel.runAndAwaitViewModelWork {
             viewModel.updateQuickInput("Kask x1")
             viewModel.selectQuickInputMode(QuickInputMode.NOTE)
@@ -150,7 +150,7 @@ class NotesIntegrationTest {
     }
 
     @Test fun viewModelKeepsForcedOrderProductsAndSupportsCodexModes() = runBlocking {
-        val viewModel = HomeViewModel(environment.application)
+        val viewModel = environment.track(HomeViewModel(environment.application))
         viewModel.runAndAwaitViewModelWork {
             assertEquals(QuickInputMode.ALL, viewModel.quickInput.value.mode)
             assertEquals(ParsedInputKind.CONTACT, viewModel.recognize("Adam Pawlak +47 123 45 678").kind)
@@ -172,7 +172,7 @@ class NotesIntegrationTest {
     @Test fun forcedTaskHasPlaceAliasesBeforeOpeningReview() = runBlocking {
         database.taskStructureDao().insertPlace(TaskPlaceEntity("kl", "Kleven"))
         database.taskStructureDao().insertAlias(TaskPlaceAliasEntity("alias-kl", "kl", "KL", "kl"))
-        val viewModel = HomeViewModel(environment.application)
+        val viewModel = environment.track(HomeViewModel(environment.application))
         eventually("Słownik miejsc powinien być dostępny bez otwierania podglądu") {
             viewModel.taskPlaces.value.any { it.id == "kl" && it.aliases == "KL" }
         }
@@ -189,7 +189,7 @@ class NotesIntegrationTest {
     }
 
     @Test fun reviewedTaskIsSavedOnceAndStaleReviewIsRejected() = runBlocking {
-        val viewModel = HomeViewModel(environment.application)
+        val viewModel = environment.track(HomeViewModel(environment.application))
         var saves = 0
         viewModel.runAndAwaitViewModelWork {
             viewModel.updateQuickInput("Transport jutro")

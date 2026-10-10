@@ -42,7 +42,7 @@ class PartialOrderFulfillmentTest {
     @Test
     fun partialIssueMovesOnlySelectedLinesAndLeavesTheRestDraft() = runBlocking {
         seedThreeLineOrder()
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
 
         issue(viewModel, setOf("line-a", "line-c"))
 
@@ -64,7 +64,7 @@ class PartialOrderFulfillmentTest {
     @Test
     fun remainingLineCanBeIssuedLaterWithoutReissuingPreviousLines() = runBlocking {
         seedThreeLineOrder()
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
         issue(viewModel, setOf("line-a", "line-c"))
         database.orderDao().setPrepared("line-b", true)
 
@@ -85,7 +85,7 @@ class PartialOrderFulfillmentTest {
     @Test
     fun noSelectionDoesNotWriteAnything() = runBlocking {
         seedThreeLineOrder()
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
 
         issue(viewModel, emptySet())
 
@@ -100,7 +100,7 @@ class PartialOrderFulfillmentTest {
     @Test
     fun repeatedPartialIssueCannotCreateDuplicateMovement() = runBlocking {
         seedThreeLineOrder()
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
 
         viewModel.runAndAwaitViewModelWork {
             repeat(8) {
@@ -124,7 +124,7 @@ class PartialOrderFulfillmentTest {
             StockMovementEntity("previous-b", "ISSUE", "warehouse-main", "employee-1", effectiveDate = "2026-09-15", createdAtEpochMillis = 1),
         )
         database.movementDao().insertLine(StockMovementLineEntity("previous-b-line", "previous-b", "product-2", -1.0, "szt."))
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
 
         viewModel.runAndAwaitViewModelWork {
             viewModel.realize("partial-order", "employee-1", null, "2026-09-15", setOf("line-a"))
@@ -151,7 +151,7 @@ class PartialOrderFulfillmentTest {
                 OrderLineEntity("shipyard-line", "shipyard-part", "product-2", "Produkt B 54", 3.0, "szt.", "VERIFIED", true),
             ),
         )
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
 
         viewModel.runAndAwaitViewModelWork {
             viewModel.realize("person-part", "employee-1", null, "2026-09-15", setOf("person-line"), ignoreWarnings = true)
@@ -166,7 +166,7 @@ class PartialOrderFulfillmentTest {
     @Test
     fun cancellingAfterPartialIssueKeepsIssuedPartAndCancelsDraftRemainder() = runBlocking {
         seedThreeLineOrder()
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
         issue(viewModel, setOf("line-a", "line-c"))
 
         viewModel.runAndAwaitViewModelWork { viewModel.cancelOrder("partial-order") }
@@ -186,7 +186,7 @@ class PartialOrderFulfillmentTest {
         database.orderDao().upsertLines(
             listOf(OrderLineEntity("shipyard-order-line", "shipyard-order", "product-1", "Produkt 52", 3.0, "szt.", "VERIFIED", true)),
         )
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
 
         viewModel.runAndAwaitViewModelWork {
             viewModel.updateOrder("shipyard-order", null, "Stocznia Alfa", "Stocznia Alfa", "2026-09-15")
@@ -207,6 +207,32 @@ class PartialOrderFulfillmentTest {
         assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movements WHERE type='SHIPYARD_ISSUE' AND recipientLabel='Stocznia Alfa'"))
         assertStock("product-1", 7.0)
         assertEquals(3.0, database.shipyardDao().findStock("shipyard-1", "product-1")?.quantity ?: Double.NaN, 0.0)
+    }
+
+    @Test
+    fun partialShipyardIssueKeepsUnselectedLineAndCannotBeDuplicated() = runBlocking {
+        seedThreeLineOrder()
+        database.shipyardDao().insert(ShipyardEntity("shipyard-1", "Stocznia Alfa"))
+        val viewModel = environment.track(OrdersViewModel(environment.application))
+        viewModel.runAndAwaitViewModelWork {
+            repeat(8) {
+                viewModel.realize("partial-order", null, "Stocznia Alfa", "2026-09-15",
+                    setOf("line-a", "line-c"), ignoreWarnings = true)
+            }
+        }
+        assertEquals("DRAFT", database.orderDao().findById("partial-order")?.status)
+        assertEquals("shipyard-1", database.orderDao().findById("partial-order")?.shipyardId)
+        assertEquals(listOf("line-b"), database.orderDao().getLinesNow("partial-order").map { it.id })
+        assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM orders WHERE status='ISSUED' AND shipyardId='shipyard-1'"))
+        assertEquals(1L, database.queryLong("SELECT COUNT(*) FROM stock_movements WHERE type='SHIPYARD_ISSUE' AND shipyardId='shipyard-1'"))
+        assertEquals(2L, database.queryLong("SELECT COUNT(*) FROM stock_movement_lines"))
+        assertEquals(0L, movementLineCount("product-2"))
+        assertStock("product-1", 8.0)
+        assertStock("product-2", 10.0)
+        assertStock("product-3", 6.0)
+        assertEquals(2.0, database.shipyardDao().findStock("shipyard-1", "product-1")?.quantity ?: Double.NaN, 0.0)
+        assertEquals(4.0, database.shipyardDao().findStock("shipyard-1", "product-3")?.quantity ?: Double.NaN, 0.0)
+        assertNull(database.shipyardDao().findStock("shipyard-1", "product-2"))
     }
 
     private suspend fun seedThreeLineOrder() {

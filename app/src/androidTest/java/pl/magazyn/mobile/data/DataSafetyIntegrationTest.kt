@@ -45,7 +45,7 @@ class DataSafetyIntegrationTest {
         database.orderDao().upsertLines(
             listOf(OrderLineEntity("order-line-1", "order-1", "product-1", "Produkt 52", 3.0, "szt.", "VERIFIED", isPrepared = true)),
         )
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
 
         viewModel.runAndAwaitViewModelWork {
             repeat(8) { viewModel.realize("order-1", "employee-1", null, "2026-09-15", setOf("order-line-1"), ignoreWarnings = true) }
@@ -75,7 +75,7 @@ class DataSafetyIntegrationTest {
         database.orderDao().upsertLines(
             listOf(OrderLineEntity("warning-line", "warning-order", "product-1", "Produkt 52", 2.0, "szt.", "VERIFIED", isPrepared = true)),
         )
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
 
         viewModel.runAndAwaitViewModelWork {
             viewModel.realize("warning-order", "employee-1", null, "2026-09-15", setOf("warning-line"))
@@ -109,7 +109,7 @@ class DataSafetyIntegrationTest {
 
     @Test
     fun missingProductMakesMultiItemIssueAllOrNothing() = runBlocking {
-        val viewModel = PeopleViewModel(environment.application)
+        val viewModel = environment.track(PeopleViewModel(environment.application))
 
         viewModel.runAndAwaitViewModelWork {
             viewModel.issueToPerson(
@@ -136,7 +136,7 @@ class DataSafetyIntegrationTest {
                 OrderLineEntity("missing-line", "unresolved-order", null, "Brak produktu", 1.0, "szt.", "NEEDS_MAPPING", isPrepared = true),
             ),
         )
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
 
         viewModel.runAndAwaitViewModelWork {
             viewModel.realize("unresolved-order", "employee-1", null, "2026-09-15", setOf("valid-line", "missing-line"), ignoreWarnings = true)
@@ -156,7 +156,7 @@ class DataSafetyIntegrationTest {
         database.orderDao().upsertLines(
             listOf(OrderLineEntity("cancelled-line", "cancelled-order", "product-1", "Produkt 52", 2.0, "szt.", "VERIFIED", isPrepared = true)),
         )
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
 
         viewModel.runAndAwaitViewModelWork {
             viewModel.realize("cancelled-order", "employee-1", null, "2026-09-15", setOf("cancelled-line"), ignoreWarnings = true)
@@ -178,7 +178,7 @@ class DataSafetyIntegrationTest {
                 OrderEntity("order-part-2", "notebook-order", null, "Nowak Adam", null, "DRAFT", "2026-09-15", 5),
             ),
         )
-        val viewModel = OrdersViewModel(environment.application)
+        val viewModel = environment.track(OrdersViewModel(environment.application))
 
         viewModel.runAndAwaitViewModelWork {
             viewModel.cancelOrder("order-part-1")

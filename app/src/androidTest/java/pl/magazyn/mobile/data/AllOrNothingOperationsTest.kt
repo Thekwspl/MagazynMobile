@@ -4,6 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -48,7 +49,7 @@ class AllOrNothingOperationsTest {
 
     @Test
     fun missingProductRejectsAllMultiItemWarehousePathsBeforeFirstWrite() = runBlocking {
-        val people = PeopleViewModel(environment.application)
+        val people = environment.track(PeopleViewModel(environment.application))
         people.runAndAwaitViewModelWork {
             people.issueToPerson(
                 "employee-1",
@@ -59,7 +60,7 @@ class AllOrNothingOperationsTest {
         assertUnchanged()
 
         val shipyard = ShipyardEntity("shipyard-1", "Ulstein")
-        val shipyards = ShipyardsViewModel(environment.application)
+        val shipyards = environment.track(ShipyardsViewModel(environment.application))
         shipyards.runAndAwaitViewModelWork {
             shipyards.issue(
                 shipyard,
@@ -78,7 +79,7 @@ class AllOrNothingOperationsTest {
         }
         assertUnchanged()
 
-        val inventory = InventoryViewModel(environment.application)
+        val inventory = environment.track(InventoryViewModel(environment.application))
         inventory.runAndAwaitViewModelWork {
             inventory.applyInventory(
                 "warehouse-main",
@@ -88,7 +89,7 @@ class AllOrNothingOperationsTest {
         }
         assertUnchanged()
 
-        val operations = OperationsViewModel(environment.application)
+        val operations = environment.track(OperationsViewModel(environment.application))
         val collectorScope = CoroutineScope(Dispatchers.Main)
         val collector = collectorScope.launch { operations.warehouses.collect { } }
         try {
@@ -117,7 +118,7 @@ class AllOrNothingOperationsTest {
             }
             assertUnchanged()
         } finally {
-            collector.cancel()
+            collector.cancelAndJoin()
             collectorScope.cancel()
         }
     }
