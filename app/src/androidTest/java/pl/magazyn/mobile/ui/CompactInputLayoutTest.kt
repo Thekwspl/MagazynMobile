@@ -1,7 +1,6 @@
 package pl.magazyn.mobile.ui
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
@@ -48,6 +47,22 @@ class CompactInputLayoutTest {
         compose.onNodeWithText("Codex").performScrollTo().assertIsDisplayed().assertHasClickAction()
         compose.onNodeWithText("Błąd Gemini").assertExists()
         compose.onNodeWithText("Błąd Codex").assertExists()
+    }
+
+    @Test fun recognizedOrderUsesCatalogUnitAndKeepsHistoricalNotesWithoutEditingThem() {
+        val product = pl.magazyn.mobile.data.ProductWithStock("p", "Przewód", null, "m", "", "", "", "", "", "", false, 0.0, 0, false, 0.0, true)
+        val item = ParsedItem("Przewód", null, 15, "szt.", 1f, notes = "Historyczne uwagi", productId = "p")
+        compose.setContent {
+            MaterialTheme { Box(Modifier.width(360.dp)) {
+                ParsedNoteReviewContent("", ParsedNote(null, listOf(item), kind = ParsedInputKind.ORDER), null,
+                    emptyList(), listOf(product), emptyList(), emptyList(), {}, { _, _ -> }, { _, _, _, _, _, _ -> }, {}, { _, _, _, _ -> })
+            } }
+        }
+        compose.onNodeWithContentDescription("Popraw").performScrollTo().performClick()
+        compose.onNodeWithText("Jednostka").performScrollTo().assert(hasSetTextAction().not())
+        compose.onNodeWithText("m").assertExists()
+        compose.onNodeWithText("Uwagi").assertDoesNotExist()
+        compose.onNodeWithText("Historyczne uwagi").assertExists()
     }
 
     @Test fun newOrderUsesVariantQuantityReadonlyUnitAndNoNotesField() {

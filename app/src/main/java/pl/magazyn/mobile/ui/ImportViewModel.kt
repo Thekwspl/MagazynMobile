@@ -87,7 +87,7 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun applyImport(preview: ImportPreview): String = database.withTransaction {
+    internal suspend fun applyImport(preview: ImportPreview): String = database.withTransaction {
         val existingBatch = database.importDao().findBatchByHash(preview.fileHash)
         val repairMode = existingBatch != null
         if (repairMode && preview.kind != ImportKind.SHIPYARDS) error("Ten plik został już wcześniej zaimportowany")

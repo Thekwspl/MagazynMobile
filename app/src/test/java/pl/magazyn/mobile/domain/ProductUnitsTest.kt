@@ -31,6 +31,12 @@ class ProductUnitsTest {
         assertEquals("Historia", mapped.notes)
         assertEquals(15L, mapped.quantity)
     }
+    @Test fun severalMessageLinesCannotHideOneConflictingUnit() {
+        assertEquals("szt.", ProductUnits.messageUnit("Śruby 3 opak.; Śruby 10 szt.", listOf("Śruby"), "opak."))
+        assertEquals("m", ProductUnits.messageUnit("Przewód 15 m; Śruby 10 szt.", listOf("Przewód"), "m"))
+        assertEquals(2L, ProductUnits.explicitQuantity("Rękawice x2 pary"))
+        assertEquals("Rękawice ", ProductUnits.removeExplicitQuantity("Rękawice x2 pary"))
+    }
     @Test fun geminiKeepsMessageUnitSeparateFromCatalogUnit() {
         val item = GeminiNoteAnalyzer().parseResponse("""{"kind":"ORDER","items":[{"name":"Śruby","quantity":10,"unit":"opak.","requestedUnit":"szt."}]}""").items.single()
         assertTrue(ProductUnits.needsConfirmation(item, "opak."))

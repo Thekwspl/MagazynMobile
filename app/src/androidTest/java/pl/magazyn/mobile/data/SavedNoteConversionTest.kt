@@ -14,6 +14,7 @@ import org.junit.runner.RunWith
 import pl.magazyn.mobile.*
 import pl.magazyn.mobile.agent.*
 import pl.magazyn.mobile.domain.*
+import pl.magazyn.mobile.ui.insertPlainNote
 import pl.magazyn.mobile.ui.HomeViewModel
 import pl.magazyn.mobile.ui.RecognitionMethod
 

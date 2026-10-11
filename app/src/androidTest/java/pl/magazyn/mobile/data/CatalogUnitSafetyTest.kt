@@ -10,6 +10,7 @@ import pl.magazyn.mobile.*
 import pl.magazyn.mobile.domain.*
 import pl.magazyn.mobile.ui.HomeViewModel
 import pl.magazyn.mobile.ui.OrdersViewModel
+import pl.magazyn.mobile.ui.ImportViewModel
 
 @RunWith(AndroidJUnit4::class)
 class CatalogUnitSafetyTest {
@@ -35,6 +36,22 @@ class CatalogUnitSafetyTest {
         assertTrue(line.rawText.contains("Historyczne uwagi"))
         assertEquals(10.0, db.stockDao().find("warehouse-main", "product-1")!!.quantity, 0.0)
         assertEquals(0L, db.queryLong("SELECT COUNT(*) FROM stock_movements"))
+    }
+
+    @Test fun conflictingImportRollsBackWholeBatchAndKeepsCatalogAndStock() = runBlocking {
+        db.productDao().insert(ProductEntity("product-2", "Przewód", unit = "m"))
+        db.stockDao().upsert(listOf(StockBalanceEntity("warehouse-main", "product-2", 3.0)))
+        val vm = env.track(ImportViewModel(env.application))
+        val preview = ImportPreview(ImportKind.STOCK, "fixture.xlsx", "fixture-hash", listOf(
+            StockImportRow(2, "row-2", "Przewód", 15, true, "m"),
+            StockImportRow(3, "row-3", "Produkt 52", 20, true, "opak.")), emptyList(), 0, emptyList(), false)
+        try { vm.applyImport(preview); fail("Import niezgodnej jednostki powinien zostać odrzucony") }
+        catch (expected: IllegalStateException) { assertTrue(expected.message!!.contains("Jednostka importu")) }
+        assertEquals(3.0, db.stockDao().find("warehouse-main", "product-2")!!.quantity, 0.0)
+        assertEquals(10.0, db.stockDao().find("warehouse-main", "product-1")!!.quantity, 0.0)
+        assertEquals("szt.", db.productDao().findById("product-1")!!.unit)
+        assertEquals(0L, db.queryLong("SELECT COUNT(*) FROM stock_movements"))
+        assertEquals(0L, db.queryLong("SELECT COUNT(*) FROM import_batches"))
     }
 
     @Test fun unknownProductKeepsSourceUnitAndMappingUsesCurrentCatalogWithoutChangingProduct() = runBlocking {

@@ -229,7 +229,7 @@ class HomeViewModel @JvmOverloads constructor(
         if (request.mode.preferredKind != null && request.mode.preferredKind != note.kind) return false
         _reviewSave.value = ReviewSaveUiState()
         _noteReview.value = NoteReviewUiState(request.text, note.copy(items = note.items.map { item ->
-            item.copy(requestedUnit = ProductUnits.messageUnit(request.text, listOf(item.name))
+            item.copy(requestedUnit = ProductUnits.messageUnit(request.text, listOf(item.name), item.unit)
                 ?: (if (note.items.size == 1) ProductUnits.explicitUnit(request.text) else null) ?: item.requestedUnit)
         }), sourceNoteId = request.sourceNoteId, request = request, notice = notice)
         return true
