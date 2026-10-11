@@ -331,7 +331,11 @@ private fun OrderDetails(
     val createsNegative = selectedLines.filter { it.productId != null }.groupBy { it.productId }.any { (_, grouped) ->
         grouped.first().stockQuantity - grouped.sumOf { it.quantity } < 0
     }
-    val ready = (employeeId != null || !shipyardName.isNullOrBlank()) && selectedLines.isNotEmpty() && selectedLines.all { it.productId != null }
+    val ready = (employeeId != null || !shipyardName.isNullOrBlank()) && selectedLines.isNotEmpty() && selectedLines.all { line ->
+        line.productId != null && products.firstOrNull { it.id == line.productId }?.let { product ->
+            !pl.magazyn.mobile.domain.ProductUnits.conflict(line.unit, product.unit)
+        } != false
+    }
 
     Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Kompletowanie zamówienia", style = MaterialTheme.typography.titleLarge)
@@ -353,6 +357,7 @@ private fun OrderDetails(
         if (employeeId == null && !shipyardName.isNullOrBlank()) Text("To zamówienie zostanie wydane na stan stoczni.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         HorizontalDivider()
         lines.forEach { line ->
+            val catalogUnit = products.firstOrNull { it.id == line.productId }?.unit ?: line.unit
             Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(line.isPrepared, { onPrepared(line.id, it) }, enabled = line.productId != null)
                 Column(Modifier.weight(1f)) {
@@ -361,10 +366,11 @@ private fun OrderDetails(
                     } else {
                         Text(line.rawText, fontWeight = FontWeight.SemiBold)
                     }
+                    if (pl.magazyn.mobile.domain.ProductUnits.conflict(line.unit, catalogUnit)) Text("Zapisano ${line.unit}, Karta ma $catalogUnit — popraw i potwierdź ilość", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                     if (line.productId == null) Text("Nie rozpoznano przedmiotu — przypisz go", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                 }
                 Text(
-                    "${formatWholeQuantity(line.quantity)} ${line.unit}",
+                    "${formatWholeQuantity(line.quantity)} $catalogUnit",
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -607,6 +613,9 @@ private fun OrderLineDialog(line: OrderDetailLine, products: List<ProductWithSto
     var addingProduct by remember { mutableStateOf(false) }
     var createdProduct by remember { mutableStateOf<ProductWithStock?>(null) }
     val availableProducts = createdProduct?.let { products + it } ?: products
+    val selectedProduct = availableProducts.firstOrNull { it.id == selectedId }
+    var unitConfirmed by rememberSaveable(selectedId, selectedProduct?.unit) { mutableStateOf(false) }
+    val unitConflict = selectedProduct?.let { pl.magazyn.mobile.domain.ProductUnits.conflict(line.unit, it.unit) } == true
     val tokens = query.split(Regex("\\s+")).filter(String::isNotBlank)
     val matches = availableProducts.map { product ->
         product to tokens.count { token -> pl.magazyn.mobile.domain.matchesSearch(token, product.name, product.variant.orEmpty(), product.aliases, product.tags, product.groupName, product.subgroupName, product.category) }
@@ -633,7 +642,17 @@ private fun OrderLineDialog(line: OrderDetailLine, products: List<ProductWithSto
                     )
                 }
             }
-            OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), label = { Text("Ilość") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, Modifier.weight(1f), label = { Text("Ilość") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(selectedProduct?.unit ?: line.unit, {}, Modifier.weight(1f), readOnly = true, label = { Text("Jednostka") })
+            }
+            if (unitConflict) {
+                Text("Pozycja ma ${line.unit}, Karta ma ${selectedProduct?.unit}. Sprawdź ilość; jednostki nie są przeliczane.", color = MaterialTheme.colorScheme.error)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(unitConfirmed, { unitConfirmed = it })
+                    Text("Potwierdzam ilość w jednostce Karty")
+                }
+            }
         } },
         confirmButton = { Button(onClick = { onSave(availableProducts.firstOrNull { it.id == selectedId }, quantity.toLongOrNull() ?: 1) }, enabled = selectedId != null && (quantity.toLongOrNull() ?: 0) > 0) { Text("Zapisz") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Anuluj") } },

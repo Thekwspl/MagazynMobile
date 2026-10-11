@@ -22,6 +22,8 @@ data class ParsedItem(
     val productId: String? = null,
     val recipientId: String? = null,
     val recipientKind: String? = null,
+    val requestedUnit: String? = null,
+    val confirmedCatalogUnit: String? = null,
 )
 
 enum class ParsedInputKind { ORDER, TASK, CONTACT, NOTE }
@@ -139,10 +141,10 @@ class NoteParser {
         val recipientText = if (separatorIndex > 0) cleanSegment.substring(0, separatorIndex).trim() else ""
         val itemText = if (separatorIndex > 0) cleanSegment.substring(separatorIndex + 1).trim() else cleanSegment
         val compactWorkwearSize = compactWorkwearSizeRegex.find(itemText)
-        if (separatorIndex <= 0 && !quantityRegex.containsMatchIn(itemText) && !sizeRegex.containsMatchIn(itemText) && compactWorkwearSize == null && !Regex("(?i)^kask(?:\\s+.+)?$").matches(itemText.trim())) return null
+        if (separatorIndex <= 0 && !quantityRegex.containsMatchIn(itemText) && ProductUnits.explicitUnit(itemText) == null && !sizeRegex.containsMatchIn(itemText) && compactWorkwearSize == null && !Regex("(?i)^kask(?:\\s+.+)?$").matches(itemText.trim())) return null
         val variant = sizeRegex.find(itemText)?.groupValues?.get(1) ?: compactWorkwearSize?.groupValues?.get(2)
-        val quantity = quantityRegex.find(itemText)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()?.roundToLong() ?: 1L
-        val cleanedName = itemText
+        val quantity = ProductUnits.explicitQuantity(itemText) ?: quantityRegex.find(itemText)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()?.roundToLong() ?: 1L
+        val cleanedName = ProductUnits.removeExplicitQuantity(itemText)
             .replace(phoneRegex, "")
             .replace(sizeRegex, "")
             .replace(compactWorkwearSizeRegex, "")
@@ -163,7 +165,7 @@ class NoteParser {
             name = conventionName,
             variant = variant,
             quantity = quantity.coerceAtLeast(1),
-            unit = when {
+            unit = ProductUnits.explicitUnit(itemText) ?: when {
                 conventionName.contains("but", true) -> "para"
                 conventionName.contains("paczk", true) -> "paczka"
                 conventionName.contains("karton", true) -> "karton"
@@ -171,6 +173,7 @@ class NoteParser {
             },
             confidence = 0.58f,
             recipientName = personName,
+            requestedUnit = ProductUnits.explicitUnit(itemText),
         )
     }
 

@@ -132,6 +132,7 @@ private fun ProductEditor(
     var name by rememberSaveable(product?.id) { mutableStateOf(product?.name.orEmpty()) }
     var variant by rememberSaveable(product?.id) { mutableStateOf(product?.variant.orEmpty()) }
     var unit by rememberSaveable(product?.id) { mutableStateOf(product?.unit ?: "szt.") }
+    var unitChangeConfirmed by rememberSaveable(product?.id, unit) { mutableStateOf(false) }
     var category by rememberSaveable(product?.id) { mutableStateOf(product?.category.orEmpty()) }
     var groupName by rememberSaveable(product?.id) { mutableStateOf(product?.groupName.orEmpty()) }
     var subgroupName by rememberSaveable(product?.id) { mutableStateOf(product?.subgroupName.orEmpty()) }
@@ -263,6 +264,13 @@ private fun ProductEditor(
                 Text("Nie będzie widoczny na zwykłych listach i przy ręcznym wyborze.", style = MaterialTheme.typography.labelSmall)
             }
         }
+        if (product != null && pl.magazyn.mobile.domain.ProductUnits.conflict(product.unit, unit)) {
+            Text("Zmiana jednostki nie przeliczy istniejących stanów ani historii. Zamówienia z inną jednostką będą wymagały sprawdzenia.", color = MaterialTheme.colorScheme.error)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(unitChangeConfirmed, { unitChangeConfirmed = it })
+                Text("Potwierdzam zmianę znaczenia jednostki istniejących stanów", Modifier.weight(1f))
+            }
+        }
         Button(
             onClick = {
                 onSave(
@@ -285,7 +293,7 @@ private fun ProductEditor(
                     ),
                 )
             },
-            enabled = name.isNotBlank() && unit.isNotBlank(),
+            enabled = name.isNotBlank() && unit.isNotBlank() && (product == null || !pl.magazyn.mobile.domain.ProductUnits.conflict(product.unit, unit) || unitChangeConfirmed),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Zapisz dane przedmiotu")

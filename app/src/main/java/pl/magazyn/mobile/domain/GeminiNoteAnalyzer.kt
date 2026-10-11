@@ -19,7 +19,7 @@ data class AiCatalogItem(
     val tags: String,
 )
 
-class GeminiNoteAnalyzer {
+class GeminiNoteAnalyzer(private val transport: (suspend (String, String) -> String)? = null) {
     val lastModel: String = PRIMARY_MODEL
     suspend fun analyze(
         apiKey: String,
@@ -73,7 +73,7 @@ class GeminiNoteAnalyzer {
             Nie wymyślaj brakujących danych. Godziny lotów, linie lotnicze i niejednoznaczne fragmenty wpisz do notes zadania lub osoby. TASK nigdy nie ma automatycznie tworzyć pracownika ani miejsca.
             Dla innych typów zwróć WYŁĄCZNIE poprawny JSON w postaci:
             {"kind":"ORDER","shipyardName":"Ulstein","suggestedIssueDate":"2026-09-05","people":[{"fullName":"Jan Kowalski","position":"spawacz","confidence":0.9}],"items":[{"recipientName":"Jan Kowalski","name":"Buty spawalnicze","variant":"44","quantity":1,"unit":"para","notes":"","confidence":0.9}],"phoneNumbers":[],"tasks":[]}
-            Dozwolone jednostki: szt., para, paczka, opak., pudełko, karton, komplet. confidence od 0 do 1.
+            Jednostka produktu pochodzi z katalogu, także m, l i jednostki niestandardowe. Nie zmieniaj jednostki katalogowej i nie przeliczaj ilości. Jeżeli tekst podaje jednostkę, zachowaj ją osobno w requestedUnit każdej pozycji, nawet gdy jest sprzeczna z katalogiem; gdy tekst nie podaje jednostki, requestedUnit=null. confidence od 0 do 1.
 
             KATALOG (pomaga dopasować nazwę; nie oznacza stanu magazynowego):
             $catalogText
@@ -114,6 +114,7 @@ class GeminiNoteAnalyzer {
     }
 
     private suspend fun post(apiKey: String, prompt: String): String {
+        transport?.let { return it(apiKey, prompt) }
         var lastError: GeminiApiException? = null
         repeat(3) { attempt ->
             try {
@@ -196,6 +197,7 @@ class GeminiNoteAnalyzer {
                     confidence = it.optDouble("confidence", 0.5).toFloat().coerceIn(0f, 1f),
                     recipientName = it.nullableString("recipientName")?.let(::normalizeFullPersonName),
                     notes = it.optString("notes").trim(),
+                    requestedUnit = if (it.has("requestedUnit")) it.nullableString("requestedUnit") else it.nullableString("unit"),
                 ).takeIf { item -> name.isNotBlank() }
             }
         }.flatMap { item -> RecognitionRules.products(item, learningRules) }

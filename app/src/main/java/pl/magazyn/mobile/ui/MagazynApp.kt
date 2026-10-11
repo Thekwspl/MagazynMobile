@@ -212,11 +212,15 @@ private fun AppNavigation(navController: NavHostController, padding: PaddingValu
                 noteId = noteId,
                 onBack = { navController.popBackStack() },
                 onEdit = { navController.navigate("notes/$noteId/edit") },
-                onConvert = { note ->
-                    homeViewModel.openSavedNoteAsOrder(note.id, note.rawText)
-                    navController.navigate("note-review")
-                },
+                homeViewModel = viewModel(viewModelStoreOwner = entry),
+                onReview = { navController.navigate("notes/$noteId/review") { launchSingleTop = true } },
             )
+        }
+        composable("notes/{noteId}/review") { entry ->
+            val noteId = entry.arguments?.getString("noteId").orEmpty()
+            val sourceEntry = remember(entry) { navController.getBackStackEntry("notes/$noteId") }
+            ParsedNoteReviewScreen(contentPadding = padding, onBack = { navController.popBackStack() },
+                viewModel = viewModel(viewModelStoreOwner = sourceEntry))
         }
         composable("notes/{noteId}/edit") { entry ->
             NoteEditorScreen(

@@ -25,6 +25,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import pl.magazyn.mobile.data.OrderNotebookEntity
+import pl.magazyn.mobile.domain.QuickInputMode
 
 @Composable
 fun NotesScreen(
@@ -52,8 +53,8 @@ fun NotesScreen(
                             Text(noteExcerpt(note.rawText), maxLines = 3, overflow = TextOverflow.Ellipsis)
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                                 Text(formatNoteTimestamp(note.createdAtEpochMillis), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (note.status == "CONVERTED") {
-                                    Text("Utworzono zamówienie", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                if (noteNeedsRepeatWarning(note.status)) {
+                                    Text(noteConversionLabel(note.status), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
@@ -105,13 +106,43 @@ fun NoteDetailsScreen(
     noteId: String,
     onBack: () -> Unit,
     onEdit: () -> Unit,
-    onConvert: (OrderNotebookEntity) -> Unit,
+    onReview: () -> Unit,
+    homeViewModel: HomeViewModel,
     viewModel: NotesViewModel = viewModel(),
 ) {
     val notes by viewModel.notes.collectAsStateWithLifecycle()
     val note = notes.firstOrNull { it.id == noteId }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var confirmRepeatConversion by rememberSaveable { mutableStateOf(false) }
+    var target by rememberSaveable(noteId) { mutableStateOf<QuickInputMode?>(null) }
+    var pendingMethod by remember { mutableStateOf<RecognitionMethod?>(null) }
+    val ai by homeViewModel.aiAnalysis.collectAsStateWithLifecycle()
+    val codex by homeViewModel.codexAnalysis.collectAsStateWithLifecycle()
+    val conversion by homeViewModel.conversion.collectAsStateWithLifecycle()
+    val message by homeViewModel.conversionMessage.collectAsStateWithLifecycle()
+    LaunchedEffect(note?.rawText, note?.status) {
+        if (conversion?.sourceNoteId == noteId && (note == null || conversion?.text != note.rawText)) homeViewModel.cancelSavedNoteConversion()
+    }
+    DisposableEffect(noteId) {
+        onDispose { if (homeViewModel.noteReview.value == null) homeViewModel.cancelSavedNoteConversion() }
+    }
+    LaunchedEffect(ai.result, codex.result) {
+        val result = ai.result ?: codex.result
+        val request = if (ai.result != null) ai.request else codex.request
+        if (result != null && request?.sourceNoteId == noteId) {
+            homeViewModel.openReview(result, request, ai.error)
+            if (ai.result != null) homeViewModel.consumeAiResult(request) else homeViewModel.consumeCodexResult(request)
+        }
+    }
+    val review by homeViewModel.noteReview.collectAsStateWithLifecycle()
+    LaunchedEffect(review?.id) {
+        if (homeViewModel.noteReview.value?.sourceNoteId == noteId) onReview()
+    }
+    fun convert(method: RecognitionMethod) {
+        val source = note ?: return
+        val mode = target ?: return
+        homeViewModel.analyzeSavedNote(source.id, source.rawText, mode, method)
+    }
 
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
         NotesTopBar("Notatka", onBack)
@@ -124,21 +155,31 @@ fun NoteDetailsScreen(
             ) {
                 Text(formatNoteTimestamp(note.createdAtEpochMillis), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(note.rawText, style = MaterialTheme.typography.bodyLarge)
-                if (note.status == "CONVERTED") {
+                if (noteNeedsRepeatWarning(note.status)) {
                     Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium) {
                         Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.ReceiptLong, null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Z tej notatki utworzono już zamówienie")
+                            Text(noteConversionLabel(note.status))
                         }
                     }
                 }
                 HorizontalDivider()
-                Button(onClick = { if (noteNeedsRepeatWarning(note.status)) confirmRepeatConversion = true else onConvert(note) }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.ReceiptLong, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Przerób na zamówienie")
+                message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+                Text("Przerób na", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(QuickInputMode.ORDER, QuickInputMode.TASK).forEach { mode ->
+                        FilterChip(selected = target == mode, onClick = {
+                            if (target != mode) { homeViewModel.cancelSavedNoteConversion(); target = mode }
+                        }, label = { Text(if (mode == QuickInputMode.ORDER) "Zamówienie" else "Zadanie") })
+                    }
                 }
+                RecognitionButtons(target != null, ai.isLoading, codex.isLoading,
+                    onOffline = { pendingMethod = RecognitionMethod.OFFLINE; if (noteNeedsRepeatWarning(note.status)) confirmRepeatConversion = true else convert(RecognitionMethod.OFFLINE) },
+                    onGemini = { pendingMethod = RecognitionMethod.GEMINI; if (noteNeedsRepeatWarning(note.status)) confirmRepeatConversion = true else convert(RecognitionMethod.GEMINI) },
+                    onCodex = { pendingMethod = RecognitionMethod.CODEX; if (noteNeedsRepeatWarning(note.status)) confirmRepeatConversion = true else convert(RecognitionMethod.CODEX) })
+                RecognitionFeedback(ai.error, codex.error, codex.isLoading, codex.reply, codex.answers,
+                    homeViewModel::setCodexChoiceAnswer, homeViewModel::setCodexTextAnswer, homeViewModel::submitCodexAnswers)
                 OutlinedButton(onClick = onEdit, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Edit, null)
                     Spacer(Modifier.width(8.dp))
@@ -169,9 +210,9 @@ fun NoteDetailsScreen(
     if (confirmRepeatConversion && note != null) {
         AlertDialog(
             onDismissRequest = { confirmRepeatConversion = false },
-            title = { Text("Zamówienie już utworzono") },
-            text = { Text("Z tej notatki zapisano już zamówienie. Ponowne przetworzenie może utworzyć duplikat.") },
-            confirmButton = { Button(onClick = { confirmRepeatConversion = false; onConvert(note) }) { Text("Przerób ponownie") } },
+            title = { Text("Notatka była już przetworzona") },
+            text = { Text("Z tej notatki zapisano już zamówienie lub zadanie. Ponowne przetworzenie może utworzyć duplikat.") },
+            confirmButton = { Button(onClick = { confirmRepeatConversion = false; pendingMethod?.let { convert(it) } }) { Text("Przerób ponownie") } },
             dismissButton = { TextButton(onClick = { confirmRepeatConversion = false }) { Text("Anuluj") } },
         )
     }
@@ -189,7 +230,9 @@ private fun NotesTopBar(title: String, onBack: () -> Unit) {
 
 internal fun canSaveNote(text: String): Boolean = text.isNotBlank()
 
-internal fun noteNeedsRepeatWarning(status: String): Boolean = status == "CONVERTED"
+internal fun noteNeedsRepeatWarning(status: String): Boolean = status in setOf("CONVERTED", "CONVERTED_TASK")
+
+internal fun noteConversionLabel(status: String): String = if (status == "CONVERTED_TASK") "Utworzono zadanie" else "Utworzono zamówienie"
 
 internal fun noteExcerpt(text: String): String = text.trim().replace(Regex("\\s+"), " ")
 

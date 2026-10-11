@@ -15,7 +15,7 @@ concurrency:
 jobs:
   instrumentation:
     name: androidTest API ${{ matrix.api }}
-    if: github.head_ref == 'fix/1.2.0-release-gate-api26'
+    if: github.head_ref == 'fix/1.2.0-release-gate-api26' || github.head_ref == 'feature/1.2.1'
     needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 45

@@ -223,6 +223,7 @@ private fun OperationProductLine(
                 )
                 if (canRemove) IconButton(onClick = onRemove, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.DeleteOutline, "Usuń pozycję") }
             }
+            products.firstOrNull { it.id == line.productId }?.let { Text("Jednostka: ${it.unit}", style = MaterialTheme.typography.labelMedium) }
             if (line.suggestionsVisible) SuggestionList(matches, key = { it.id }) { product ->
                 OutlinedCard(onClick = {
                     onChange(line.copy(productId = product.id, query = product.name + product.variant?.let { " · $it" }.orEmpty(), suggestionsVisible = false))
