@@ -121,8 +121,10 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
                     } else {
                         when (val resolution = ImportParser.resolveImportedProduct(row.productName, products)) {
                             is ImportedProductResolution.Matched -> {
-                                val product = resolution.product.copy(unit = row.unit)
-                                    .also { database.productDao().update(it) }
+                                val product = resolution.product
+                                check(!pl.magazyn.mobile.domain.ProductUnits.conflict(row.unit, product.unit)) {
+                                    "Jednostka importu ${row.unit} różni się od Karty przedmiotu ${product.name}: ${product.unit}. Wyjaśnij plik przed importem."
+                                }
                                 val oldQuantity = database.stockDao().find("warehouse-main", product.id)?.quantity ?: 0.0
                                 database.stockDao().upsert(
                                     listOf(StockBalanceEntity("warehouse-main", product.id, row.quantity.toDouble(), row.quantityKnown)),
@@ -150,7 +152,7 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
                                             movementId = stockMovementId,
                                             productId = product.id,
                                             quantityDelta = row.quantity.toDouble() - oldQuantity,
-                                            unit = row.unit,
+                                            unit = product.unit,
                                         ),
                                     )
                                 }

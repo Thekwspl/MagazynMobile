@@ -275,7 +275,8 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
             pl.magazyn.mobile.domain.ParsedItem(product.name, product.variant, item.quantity.toLong(), product.unit, 1f,
                 recipientName = person?.fullName ?: yard?.name,
                 notes = (listOf("Dostępne: ${item.available} ${product.unit}") + reply.warnings).joinToString("; "), productId = product.id,
-                recipientId = recipient.id, recipientKind = recipient.kind)
+                recipientId = recipient.id, recipientKind = recipient.kind,
+                requestedUnit = pl.magazyn.mobile.domain.ProductUnits.messageUnit(rawText, listOf(product.name) + product.aliases.split(',')))
         }
         val parsedPerson = person?.let { pl.magazyn.mobile.domain.ParsedPerson(it.fullName, null, 1f) }
         return pl.magazyn.mobile.domain.ParsedNote(parsedPerson, items, kind = pl.magazyn.mobile.domain.ParsedInputKind.ORDER,

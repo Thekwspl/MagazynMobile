@@ -15,6 +15,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import pl.magazyn.mobile.domain.ProductUnits
 import pl.magazyn.mobile.domain.RecognitionRules
 import pl.magazyn.mobile.domain.QuickInputMode
 import pl.magazyn.mobile.domain.GeminiModeResponseException
@@ -77,7 +80,9 @@ data class HomeUiState(
     val pendingImportCount: Int = 0,
 )
 
-data class QuickInputUiState(val text: String = "", val mode: QuickInputMode = QuickInputMode.ALL, val revision: Long = 0) {
+enum class RecognitionMethod { OFFLINE, GEMINI, CODEX }
+
+data class QuickInputUiState(val text: String = "", val mode: QuickInputMode = QuickInputMode.ALL, val revision: Long = 0, val sourceNoteId: String? = null) {
     fun edit(text: String) = if (this.text == text) this else copy(text = text, revision = revision + 1)
     fun select(mode: QuickInputMode) = if (this.mode == mode) this else copy(mode = mode, revision = revision + 1)
 }
@@ -109,13 +114,16 @@ data class NoteReviewUiState(
     val notice: String? = null,
 )
 
-class HomeViewModel(application: Application) : AndroidViewModel(application) {
+class HomeViewModel @JvmOverloads constructor(
+    application: Application,
+    private val aiAnalyzer: GeminiNoteAnalyzer = GeminiNoteAnalyzer(),
+    private val agentRepositoryFactory: (() -> AgentRepository)? = null,
+) : AndroidViewModel(application) {
     private val database = (application as MagazynApplication).database
     private val visibility = ProductVisibilityStore(application)
     private val parser = NoteParser()
     private val taskParser = TaskTextParser()
     private val aiKeyStore = AiKeyStore(application)
-    private val aiAnalyzer = GeminiNoteAnalyzer()
     private val _aiAnalysis = MutableStateFlow(AiAnalysisUiState())
     val aiAnalysis: StateFlow<AiAnalysisUiState> = _aiAnalysis.asStateFlow()
     private val _codexAnalysis = MutableStateFlow(CodexAnalysisUiState())
@@ -127,6 +135,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val reviewSave = _reviewSave.asStateFlow()
     private val _quickInput = MutableStateFlow(QuickInputUiState())
     val quickInput: StateFlow<QuickInputUiState> = _quickInput.asStateFlow()
+    private val _conversion = MutableStateFlow<QuickInputUiState?>(null)
+    val conversion: StateFlow<QuickInputUiState?> = _conversion.asStateFlow()
+    private val _conversionMessage = MutableStateFlow<String?>(null)
+    val conversionMessage: StateFlow<String?> = _conversionMessage.asStateFlow()
+    private var conversionRevision = 0L
+    private var conversionProducts: List<pl.magazyn.mobile.data.ProductWithStock> = emptyList()
+    private var conversionPeople: List<pl.magazyn.mobile.data.EmployeeSummary> = emptyList()
+    private var conversionYards: List<ShipyardEntity> = emptyList()
+    private var conversionPlaces: List<pl.magazyn.mobile.data.TaskPlaceView> = emptyList()
+    private var conversionRules: List<ParserLearningRuleEntity> = emptyList()
+    private var conversionLeaders: List<pl.magazyn.mobile.data.ShipyardLeaderLink> = emptyList()
+    private val recognitionProducts get() = if (_conversion.value != null) conversionProducts else allProducts.value
+    private val recognitionPeople get() = if (_conversion.value != null) conversionPeople else people.value
+    private val recognitionYards get() = if (_conversion.value != null) conversionYards else shipyards.value
+    private fun currentRequest() = _conversion.value ?: _quickInput.value
     private val _noteReview = MutableStateFlow<NoteReviewUiState?>(null)
     val noteReview: StateFlow<NoteReviewUiState?> = _noteReview.asStateFlow()
     val people = database.employeeDao().observeSummaries()
@@ -182,7 +205,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun invalidateAnalysis(next: QuickInputUiState) {
-        if (next == _quickInput.value) return
+        if (_conversion.value != null || next == _quickInput.value) return
         _quickInput.value = next
         analysisJob?.cancel()
         activeAgentRepository = null
@@ -201,16 +224,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         invalidateAnalysis(_quickInput.value.select(mode))
     }
 
-    fun openReview(note: ParsedNote, request: QuickInputUiState = _quickInput.value, notice: String? = null): Boolean {
-        if (request != _quickInput.value || _reviewSave.value.isSaving) return false
+    fun openReview(note: ParsedNote, request: QuickInputUiState = currentRequest(), notice: String? = null): Boolean {
+        if (request != currentRequest() || _reviewSave.value.isSaving) return false
         if (request.mode.preferredKind != null && request.mode.preferredKind != note.kind) return false
         _reviewSave.value = ReviewSaveUiState()
-        _noteReview.value = NoteReviewUiState(request.text, note, request = request, notice = notice)
+        _noteReview.value = NoteReviewUiState(request.text, note.copy(items = note.items.map { item ->
+            item.copy(requestedUnit = ProductUnits.messageUnit(request.text, listOf(item.name))
+                ?: (if (note.items.size == 1) ProductUnits.explicitUnit(request.text) else null) ?: item.requestedUnit)
+        }), sourceNoteId = request.sourceNoteId, request = request, notice = notice)
         return true
     }
 
     private fun canSaveReview(id: String?): Boolean = id == null || _noteReview.value?.let {
-        it.id == id && (it.request == null || it.request == _quickInput.value)
+        it.id == id && (it.request == null || it.request == currentRequest())
     } == true
 
     fun saveReviewedNote(review: NoteReviewUiState, onSaved: () -> Unit = {}) {
@@ -234,42 +260,99 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun openSavedNoteAsOrder(noteId: String, rawText: String) {
+    // A saved note has its own request identity; the unfinished Quick Input is untouched.
+    fun analyzeSavedNote(noteId: String, rawText: String, mode: QuickInputMode, method: RecognitionMethod) {
+        if (_reviewSave.value.isSaving || mode !in listOf(QuickInputMode.ORDER, QuickInputMode.TASK)) return
+        if (_conversion.value?.let { it.sourceNoteId == noteId && it.text == rawText && it.mode == mode } == true && (_aiAnalysis.value.isLoading || _codexAnalysis.value.isLoading)) return
+        cancelSavedNoteConversion()
+        _conversionMessage.value = null
+        val request = QuickInputUiState(rawText, mode, ++conversionRevision, noteId)
+        _conversion.value = request
+        _aiAnalysis.value = AiAnalysisUiState(isLoading = true, request = request)
+        analysisJob = viewModelScope.launch {
+            runCatching {
+                checkSourceNote(request)
+                conversionProducts = database.productDao().observeAllWithStock("warehouse-main").first()
+                conversionPeople = database.employeeDao().observeSummaries().first()
+                conversionYards = database.shipyardDao().getAllNow()
+                // These flows are eager, but wait for the actual database snapshots before Offline.
+                val rules = database.learningRuleDao().observeAll().first()
+                val places = database.taskStructureDao().observePlaces().first()
+                val leaders = database.shipyardDao().observeAllLeaderLinks().first()
+                conversionPlaces = places
+                conversionRules = rules
+                conversionLeaders = leaders
+                if (request != currentRequest()) return@runCatching
+                _aiAnalysis.value = AiAnalysisUiState()
+                when (method) {
+                    RecognitionMethod.OFFLINE -> openReview(recognize(rawText, mode, rules, places, leaders), request)
+                    RecognitionMethod.GEMINI -> analyzeWithAi(rawText)
+                    RecognitionMethod.CODEX -> analyzeWithCodex(rawText)
+                }
+            }.onFailure {
+                if (request == currentRequest()) _aiAnalysis.value = AiAnalysisUiState(error = it.message ?: "Nie udało się odczytać notatki.", request = request)
+            }
+        }
+    }
+
+    // Existing callers keep using the same Offline conversion path.
+    fun openSavedNoteAsOrder(noteId: String, rawText: String) =
+        analyzeSavedNote(noteId, rawText, QuickInputMode.ORDER, RecognitionMethod.OFFLINE)
+
+    private suspend fun checkSourceNote(request: QuickInputUiState) {
+        request.sourceNoteId?.let { id ->
+            val source = database.notebookDao().findNote(id)
+            check(source != null && source.status != "ARCHIVED" && source.rawText == request.text) {
+                "Notatka została zmieniona lub usunięta. Uruchom konwersję ponownie."
+            }
+        }
+    }
+
+    fun cancelSavedNoteConversion() {
         if (_reviewSave.value.isSaving) return
-        _noteReview.value = NoteReviewUiState(
-            rawText = rawText,
-            note = recognize(rawText, QuickInputMode.ORDER),
-            sourceNoteId = noteId,
-        )
+        analysisJob?.cancel()
+        _conversion.value = null
+        activeAgentRepository = null
+        _aiAnalysis.value = AiAnalysisUiState()
+        _codexAnalysis.value = CodexAnalysisUiState()
+        _noteReview.value = null
+        _reviewSave.value = ReviewSaveUiState()
     }
 
     fun closeReview(completed: Boolean = false) {
         if (_reviewSave.value.isSaving) return
+        val source = _noteReview.value?.sourceNoteId
         _noteReview.value = null
         _reviewSave.value = ReviewSaveUiState()
-        if (completed) invalidateAnalysis(_quickInput.value.edit(""))
+        if (source != null || _conversion.value != null) cancelSavedNoteConversion()
+        else if (completed) invalidateAnalysis(_quickInput.value.edit(""))
     }
 
-    fun recognize(text: String, mode: QuickInputMode = _quickInput.value.mode): ParsedNote {
+    fun recognize(
+        text: String, mode: QuickInputMode = _quickInput.value.mode,
+        rules: List<ParserLearningRuleEntity> = if (_conversion.value != null) conversionRules else learningRules.value,
+        places: List<pl.magazyn.mobile.data.TaskPlaceView> = if (_conversion.value != null) conversionPlaces else taskPlaces.value,
+        leaders: List<pl.magazyn.mobile.data.ShipyardLeaderLink> = if (_conversion.value != null) conversionLeaders else shipyardLeaderLinks.value,
+    ): ParsedNote {
         if (mode == QuickInputMode.ALL) {
-            val forced = RecognitionRules.patternKind(text, learningRules.value)?.let { kind -> QuickInputMode.entries.firstOrNull { it.preferredKind == kind } }
-            if (forced != null) return recognize(text, forced)
+            val forced = RecognitionRules.patternKind(text, rules)?.let { kind -> QuickInputMode.entries.firstOrNull { it.preferredKind == kind } }
+            if (forced != null) return recognize(text, forced, rules, places, leaders)
         }
         val parsed = RecognitionRules.note(parser.parse(text, mode,
-            taskPlaces.value.map { TaskPlaceLookup(it.id, it.name, it.aliases.split(',').map(String::trim).filter(String::isNotBlank)) },
-            people.value.map { TaskEmployeeLookup(it.id, it.firstName, it.lastName, it.aliases.split(',').map(String::trim).filter(String::isNotBlank)) }, learningRules.value), text, learningRules.value, mode)
+            places.map { TaskPlaceLookup(it.id, it.name, it.aliases.split(',').map(String::trim).filter(String::isNotBlank)) },
+            recognitionPeople.map { TaskEmployeeLookup(it.id, it.firstName, it.lastName, it.aliases.split(',').map(String::trim).filter(String::isNotBlank)) }, rules), text, rules, mode)
         if (mode == QuickInputMode.NOTE || mode == QuickInputMode.TASK) return parsed
         if (mode == QuickInputMode.ALL && taskParser.looksLikeTask(text)) {
             val draft = taskParser.parse(
                 text = text,
-                places = taskPlaces.value.map { place -> TaskPlaceLookup(place.id, place.name, place.aliases.split(',').map(String::trim).filter(String::isNotBlank)) },
-                employees = people.value.map { TaskEmployeeLookup(it.id, it.firstName, it.lastName, it.aliases.split(',').map(String::trim).filter(String::isNotBlank)) },
+                places = places.map { place -> TaskPlaceLookup(place.id, place.name, place.aliases.split(',').map(String::trim).filter(String::isNotBlank)) },
+                employees = recognitionPeople.map { TaskEmployeeLookup(it.id, it.firstName, it.lastName, it.aliases.split(',').map(String::trim).filter(String::isNotBlank)) },
             )
             return parsed.copy(kind = ParsedInputKind.TASK, tasks = emptyList(), taskDraft = draft)
         }
         val expandedItems = parsed.items.flatMap { item ->
             val itemKey = ImportParser.key(item.name)
-            val bundleMatches = allProducts.value.filter { product ->
+            val bundleMatches = recognitionProducts.filter { product ->
                 !product.isArchived && !product.isHidden && product.aliases.split(',').map { ImportParser.key(it) }.any { it.isNotBlank() && it == itemKey }
             }
             if (RecognitionRules.isOnePiece(item) || bundleMatches.size < 2) listOf(item) else bundleMatches.map { product ->
@@ -277,27 +360,27 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         val textKey = ImportParser.key(text)
-        val namedYards = shipyards.value.filterNot { it.isArchived }.filter { yard ->
+        val namedYards = recognitionYards.filterNot { it.isArchived }.filter { yard ->
             (listOf(yard.name) + yard.aliases.split(',') + yard.tags.split(',')).map(ImportParser::key)
                 .filter(String::isNotBlank).any { label -> textKey.contains(label) }
         }
-        val leaderIds = people.value.filter { person ->
+        val leaderIds = recognitionPeople.filter { person ->
             (listOf(person.fullName) + person.aliases.split(',')).map(ImportParser::key)
                 .filter { it.length >= 4 }.any { textKey.contains(it) }
         }.map { it.id }.toSet()
-        val leaderYardIds = shipyardLeaderLinks.value.filter { it.employeeId in leaderIds }.map { it.shipyardId }.toSet()
-        val leaderYards = shipyards.value.filter { !it.isArchived && it.id in leaderYardIds }
+        val leaderYardIds = leaders.filter { it.employeeId in leaderIds }.map { it.shipyardId }.toSet()
+        val leaderYards = recognitionYards.filter { !it.isArchived && it.id in leaderYardIds }
         val detectedShipyard = if (namedYards.isNotEmpty()) namedYards.singleOrNull()?.name else leaderYards.singleOrNull()?.name
         return parsed.copy(items = expandedItems, shipyardName = detectedShipyard)
     }
 
     private fun beginAnalysis(): QuickInputUiState {
-        invalidateAnalysis(_quickInput.value.copy(revision = _quickInput.value.revision + 1))
-        return _quickInput.value
+        if (_conversion.value == null) invalidateAnalysis(_quickInput.value.copy(revision = _quickInput.value.revision + 1))
+        return currentRequest()
     }
 
     fun analyzeWithAi(text: String) {
-        val input = _quickInput.value
+        val input = currentRequest()
         if (text != input.text || _aiAnalysis.value.isLoading || _codexAnalysis.value.isLoading || _reviewSave.value.isSaving) return
         val apiKey = aiKeyStore.readApiKey()
         if (apiKey.isNullOrBlank()) {
@@ -312,28 +395,28 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 aiAnalyzer.analyze(
                     apiKey = apiKey,
                     rawText = text,
-                    catalog = allProducts.value.map {
+                    catalog = recognitionProducts.map {
                         AiCatalogItem(it.name, it.variant, it.unit, it.aliases, it.tags)
                     },
-                    shipyards = shipyards.value.map { yard ->
-                        val leaderIds = shipyardLeaderLinks.value.filter { it.shipyardId == yard.id }.map { it.employeeId }.toSet()
-                        val leaders = people.value.filter { it.id in leaderIds }.joinToString(", ") { person ->
+                    shipyards = recognitionYards.map { yard ->
+                        val leaderIds = (if (request.sourceNoteId != null) conversionLeaders else shipyardLeaderLinks.value).filter { it.shipyardId == yard.id }.map { it.employeeId }.toSet()
+                        val leaders = recognitionPeople.filter { it.id in leaderIds }.joinToString(", ") { person ->
                             listOf(person.fullName, person.aliases).filter(String::isNotBlank).joinToString(" / ")
                         }
                         "${yard.name} | aliasy: ${yard.aliases} | tagi: ${yard.tags} | prowadzący: $leaders"
                     },
-                    taskPlaces = taskPlaces.value.map { place ->
+                    taskPlaces = (if (request.sourceNoteId != null) conversionPlaces else taskPlaces.value).map { place ->
                         TaskPlaceLookup(place.id, place.name, place.aliases.split(',').map(String::trim).filter(String::isNotBlank))
                     },
-                    employees = people.value.map { employee ->
+                    employees = recognitionPeople.map { employee ->
                         TaskEmployeeLookup(employee.id, employee.firstName, employee.lastName, employee.aliases.split(',').map(String::trim).filter(String::isNotBlank))
                     },
                     redactPhoneNumbers = aiKeyStore.redactPhoneNumbers,
                     mode = request.mode,
                     learningRules = database.learningRuleDao().observeAll().first(),
                 )
-            }.onSuccess {
-                if (request != _quickInput.value) return@onSuccess
+            }.mapCatching { result -> checkSourceNote(request); result }.onSuccess {
+                if (request != currentRequest()) return@onSuccess
                 aiKeyStore.recordConnection(true, aiAnalyzer.lastModel, "Analiza zakończona powodzeniem")
                 // Niepełny TASK w trybie ALL kierujemy do istniejącego parsera Offline do ręcznej weryfikacji.
                 val result = if (it.kind == ParsedInputKind.TASK && it.taskDraft == null) {
@@ -341,7 +424,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 } else it
                 _aiAnalysis.value = AiAnalysisUiState(result = result, request = request)
             }.onFailure {
-                if (request != _quickInput.value) return@onFailure
+                if (request != currentRequest()) return@onFailure
                 if (it is GeminiModeResponseException) {
                     _aiAnalysis.value = AiAnalysisUiState(result = recognize(text, request.mode), request = request,
                         error = "Odpowiedź Gemini nie pasowała do trybu. Użyto rozpoznawania Offline; sprawdź wynik.")
@@ -358,17 +441,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun analyzeWithCodex(text: String) {
-        val input = _quickInput.value
+        val input = currentRequest()
         if (text.isBlank() || text != input.text || _aiAnalysis.value.isLoading || _codexAnalysis.value.isLoading || _reviewSave.value.isSaving) return
         val request = beginAnalysis()
         _codexAnalysis.value = CodexAnalysisUiState(isLoading = true, request = request)
         analysisJob = viewModelScope.launch {
             runCatching {
-                val repository = AgentRepository(agentConnection.client(), RoomAgentDataSource(database), AgentRevision(getApplication<Application>())::next)
+                val repository = agentRepositoryFactory?.invoke() ?: AgentRepository(agentConnection.client(), RoomAgentDataSource(database), AgentRevision(getApplication<Application>())::next)
                 activeAgentRepository = repository
                 showCodexReply(repository, repository.analyze(text, request.mode), request)
             }.onFailure {
-                if (request != _quickInput.value) return@onFailure
+                if (request != currentRequest()) return@onFailure
                 _codexAnalysis.value = CodexAnalysisUiState(error = it.message ?: "Analiza Codex nie powiodła się.")
             }
         }
@@ -385,14 +468,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val repository = activeAgentRepository ?: throw AgentFailure("Sesja Codex wygasła. Uruchom analizę ponownie.")
                 showCodexReply(repository, repository.choose(reply, candidateId), request)
             }.onFailure {
-                if (request == _quickInput.value) _codexAnalysis.value = state.copy(error = it.message ?: "Nie udało się wznowić sesji.")
+                if (request == currentRequest()) _codexAnalysis.value = state.copy(error = it.message ?: "Nie udało się wznowić sesji.")
             }
         }
     }
 
     fun setCodexChoiceAnswer(questionId: String, candidateId: String) {
         val state = _codexAnalysis.value
-        if (state.isLoading || state.request != _quickInput.value) return
+        if (state.isLoading || state.request != currentRequest()) return
         val question = state.reply?.clarifications?.firstOrNull { it.id == questionId } ?: return
         if (question.type != AgentClarificationType.CHOICE || question.candidates.none { it.id == candidateId }) return
         _codexAnalysis.value = state.copy(answers = state.answers +
@@ -401,7 +484,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setCodexTextAnswer(questionId: String, text: String) {
         val state = _codexAnalysis.value
-        if (state.isLoading || state.request != _quickInput.value) return
+        if (state.isLoading || state.request != currentRequest()) return
         val question = state.reply?.clarifications?.firstOrNull { it.id == questionId } ?: return
         if (question.type == AgentClarificationType.CHOICE) return
         val answers = if (text.isBlank()) state.answers - questionId else state.answers +
@@ -422,7 +505,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val repository = activeAgentRepository ?: throw AgentFailure("Sesja Codex wygasła. Uruchom analizę ponownie.")
                 showCodexReply(repository, repository.answer(reply, answers), request)
             }.onFailure {
-                if (request != _quickInput.value) return@onFailure
+                if (request != currentRequest()) return@onFailure
                 _codexAnalysis.value = state.copy(isLoading = false,
                     error = it.message ?: "Nie udało się wysłać odpowiedzi.")
             }
@@ -430,14 +513,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun showCodexReply(repository: AgentRepository, reply: AgentReply, request: QuickInputUiState) {
-        if (request != _quickInput.value) return
+        if (request != currentRequest()) return
+        checkSourceNote(request)
         val state = when (reply.status) {
             AgentStatus.PROPOSAL -> CodexAnalysisUiState(result = repository.review(reply), request = request)
             AgentStatus.NEEDS_USER_CHOICE -> CodexAnalysisUiState(reply = reply, request = request)
             AgentStatus.ERROR -> CodexAnalysisUiState(error = reply.error ?: "Agent zwrócił błąd.")
             AgentStatus.NEEDS_DATA -> CodexAnalysisUiState(error = "Agent wymaga dodatkowych danych.")
         }
-        if (request == _quickInput.value) _codexAnalysis.value = state
+        if (request == currentRequest()) _codexAnalysis.value = state
     }
 
     fun consumeCodexResult(request: QuickInputUiState? = _codexAnalysis.value.request) {
@@ -462,11 +546,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun saveReview(reviewId: String?, onSaved: () -> Unit, write: suspend () -> Unit) {
         if (_reviewSave.value.isSaving || !canSaveReview(reviewId)) return
+        val sourceRequest = _noteReview.value?.request?.takeIf { it.sourceNoteId != null }
+        val sourceKind = _noteReview.value?.note?.kind
         _reviewSave.value = ReviewSaveUiState(isSaving = true)
         viewModelScope.launch {
-            runCatching { write() }.onSuccess {
+            runCatching {
+                database.withTransaction {
+                    sourceRequest?.let { checkSourceNote(it) }
+                    write()
+                    sourceRequest?.sourceNoteId?.let {
+                        database.notebookDao().setNoteStatus(it, if (sourceKind == ParsedInputKind.TASK) "CONVERTED_TASK" else "CONVERTED")
+                    }
+                }
+            }.onSuccess {
+                if (sourceRequest != null) _conversionMessage.value = if (sourceKind == ParsedInputKind.TASK) "Z notatki utworzono zadanie" else "Z notatki utworzono zamówienie"
                 _reviewSave.value = ReviewSaveUiState()
-                if (reviewId != null) closeReview(completed = true)
+                if (reviewId != null || sourceRequest != null) closeReview(completed = true)
                 onSaved()
             }.onFailure { _reviewSave.value = ReviewSaveUiState(error = it.message ?: "Nie udało się zapisać wyniku.") }
         }
@@ -573,7 +668,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         onSaved: () -> Unit = {},
     ) {
         if (approvedPairs.isEmpty() || !canSaveReview(reviewId)) return
-        val sourceNoteId = _noteReview.value?.sourceNoteId
         saveReview(reviewId, onSaved) {
             database.withTransaction {
                 if (rememberCorrections) approvedPairs.forEach { (source, corrected) ->
@@ -672,19 +766,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                                 // Remis pozostaje do ręcznego mapowania; nie wybieramy przypadkowego rozmiaru.
                                 val product = item.productId?.let { id -> catalog.firstOrNull { it.id == id && !it.isArchived } }
                                     ?: candidates.singleOrNull()
+                                if (product != null) check(!ProductUnits.needsConfirmation(item, product.unit)) {
+                                    "Jednostka wiadomości (${item.requestedUnit}) różni się od jednostki Karty (${product.unit}). Potwierdź ilość w jednostce Karty."
+                                }
                                 OrderLineEntity(
                                     id = UUID.randomUUID().toString(),
                                     orderId = orderId,
                                     productId = product?.id,
                                     rawText = listOfNotNull(item.name, item.variant, item.notes.takeIf(String::isNotBlank)).joinToString(" · "),
                                     quantity = item.quantity.toDouble(),
-                                    unit = item.unit,
+                                    unit = product?.unit ?: item.unit,
                                     verificationStatus = if (product == null) "NEEDS_MAPPING" else "VERIFIED",
                                 )
                             },
                         )
                     }
-                sourceNoteId?.let { database.notebookDao().setNoteStatus(it, "CONVERTED") }
             }
             // Powrót do Start następuje dopiero po zatwierdzeniu transakcji. Room Flow
             // ma wtedy już nowe dane i kafel „Do zrobienia” odświeża się reaktywnie.
@@ -744,6 +840,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun correctNegativeStock(item: NegativeStockItem, actualQuantity: Long) {
         viewModelScope.launch {
             database.withTransaction {
+                val product = database.productDao().findById(item.productId) ?: return@withTransaction
                 val current = database.stockDao().find(item.warehouseId, item.productId)?.quantity ?: item.quantity
                 val movementId = UUID.randomUUID().toString()
                 database.stockDao().upsert(listOf(StockBalanceEntity(item.warehouseId, item.productId, actualQuantity.toDouble(), true)))
@@ -759,7 +856,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     ),
                 )
                 database.movementDao().insertLine(
-                    StockMovementLineEntity(UUID.randomUUID().toString(), movementId, item.productId, actualQuantity - current, item.unit),
+                    StockMovementLineEntity(UUID.randomUUID().toString(), movementId, item.productId, actualQuantity - current, product.unit),
                 )
             }
         }
@@ -770,15 +867,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             database.withTransaction {
                 val sourceAliases = items.map { it.rawProductName.trim() }.filter(String::isNotBlank).distinct()
-                val stockUnit = items.firstOrNull { it.kind == "STOCK" }?.recipientLabel.orEmpty()
                 val existingProduct = productId?.let { database.productDao().findById(it) }
+                if (existingProduct != null && items.filter { it.kind == "STOCK" }.any { ProductUnits.conflict(it.recipientLabel, existingProduct.unit) }) {
+                    withContext(Dispatchers.Main.immediate) {
+                        android.widget.Toast.makeText(getApplication(), "Jednostka importu różni się od Karty przedmiotu. Wyjaśnij dane importu przed przypisaniem.", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    return@withTransaction
+                }
                 val product = existingProduct?.let { existing ->
                     val aliases = (existing.aliases.split(",") + sourceAliases)
                         .map(String::trim).filter(String::isNotBlank)
                         .distinctBy(ImportParser::key).joinToString(", ")
                     existing.copy(
                         aliases = aliases,
-                        unit = stockUnit.ifBlank { existing.unit },
                     ).also { database.productDao().update(it) }
                 } ?: ProductEntity(
                     id = UUID.randomUUID().toString(),

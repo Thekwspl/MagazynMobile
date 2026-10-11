@@ -122,11 +122,12 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         if (quantity <= 0) return
         viewModelScope.launch {
             val previous = database.orderDao().findLineById(lineId) ?: return@launch
+            val catalogUnit = productId?.let { database.productDao().findById(it)?.unit } ?: previous.unit
             val cleanText = rawText.trim()
             val newQuantity = quantity.toDouble()
-            if (previous.productId == productId && previous.quantity == newQuantity && previous.unit == unit) return@launch
+            if (previous.productId == productId && previous.quantity == newQuantity && previous.unit == catalogUnit) return@launch
             database.orderDao().updateLine(
-                lineId, productId, cleanText, newQuantity, unit,
+                lineId, productId, cleanText, newQuantity, catalogUnit,
                 if (productId == null) "NEEDS_MAPPING" else "VERIFIED",
             )
             val previousName = previous.productId?.let { database.productDao().findById(it) }
@@ -139,7 +140,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 if (previous.productId != productId) {
                     add("Poprawiono:\n\nZ: \"$previousName\"\n\nNa: \"$newName\"")
                 }
-                if (previous.quantity != newQuantity || previous.unit != unit) {
+                if (previous.quantity != newQuantity || previous.unit != catalogUnit) {
                     add("Poprawiono ilość \"$newName\"\n\nZ: ${quantityLabel(previous.quantity)}\n\nNa: ${quantityLabel(newQuantity)}")
                 }
             }
@@ -294,6 +295,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 val products = database.productDao().findByIds(selectedLines.map { checkNotNull(it.productId) }.distinct())
                 val resolvedLines = resolveAllOperationProducts(selectedLines, products) { checkNotNull(it.productId) }
                     ?: return@withTransaction false
+                if (resolvedLines.any { pl.magazyn.mobile.domain.ProductUnits.conflict(it.request.unit, it.product.unit) }) return@withTransaction false
                 val recipientLabel = if (shipyard != null) shipyard.name else {
                     selectedEmployeeId?.let { database.employeeDao().findById(it) }
                         ?.let { "${it.firstName} ${it.lastName}".trim() }
@@ -369,7 +371,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 true
             }
             if (!productsResolved) {
-                Toast.makeText(getApplication(), "Nie zrealizowano zamówienia: co najmniej jeden przedmiot nie istnieje lub nie został przypisany.", Toast.LENGTH_LONG).show()
+                Toast.makeText(getApplication(), "Nie zrealizowano zamówienia: sprawdź przypisanie przedmiotów i zgodność jednostek z Kartą.", Toast.LENGTH_LONG).show()
             }
         }
     }

@@ -74,7 +74,7 @@ class NotesIntegrationTest {
         val parsed = ParsedNote(person = null, items = listOf(item), kind = ParsedInputKind.ORDER)
         val viewModel = environment.track(HomeViewModel(environment.application))
 
-        viewModel.openSavedNoteAsOrder("source-note", rawText)
+        viewModel.runAndAwaitViewModelWork { viewModel.openSavedNoteAsOrder("source-note", rawText) }
         viewModel.runAndAwaitViewModelWork {
             viewModel.saveDraftOrder(rawText, parsed, listOf(item to item), rememberCorrections = false)
         }

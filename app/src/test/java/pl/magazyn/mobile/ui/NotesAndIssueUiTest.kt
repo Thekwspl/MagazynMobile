@@ -58,6 +58,14 @@ class NotesAndIssueUiTest {
         }
     }
 
+    @Test fun legacyAndTaskConversionsBothWarnBeforeRepeating() {
+        assertTrue(noteNeedsRepeatWarning("CONVERTED"))
+        assertTrue(noteNeedsRepeatWarning("CONVERTED_TASK"))
+        assertFalse(noteNeedsRepeatWarning("ACTIVE"))
+        assertEquals("Utworzono zadanie", noteConversionLabel("CONVERTED_TASK"))
+        assertEquals("Utworzono zamówienie", noteConversionLabel("CONVERTED"))
+    }
+
     @Test fun quickInputDefaultsToAllAndModeChangesKeepOriginalText() {
         val initial = QuickInputUiState()
         assertEquals(pl.magazyn.mobile.domain.QuickInputMode.ALL, initial.mode)

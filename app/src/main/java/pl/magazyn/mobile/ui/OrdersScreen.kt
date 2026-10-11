@@ -607,6 +607,9 @@ private fun OrderLineDialog(line: OrderDetailLine, products: List<ProductWithSto
     var addingProduct by remember { mutableStateOf(false) }
     var createdProduct by remember { mutableStateOf<ProductWithStock?>(null) }
     val availableProducts = createdProduct?.let { products + it } ?: products
+    val selectedProduct = availableProducts.firstOrNull { it.id == selectedId }
+    var unitConfirmed by rememberSaveable(selectedId, selectedProduct?.unit) { mutableStateOf(false) }
+    val unitConflict = selectedProduct?.let { pl.magazyn.mobile.domain.ProductUnits.conflict(line.unit, it.unit) } == true
     val tokens = query.split(Regex("\\s+")).filter(String::isNotBlank)
     val matches = availableProducts.map { product ->
         product to tokens.count { token -> pl.magazyn.mobile.domain.matchesSearch(token, product.name, product.variant.orEmpty(), product.aliases, product.tags, product.groupName, product.subgroupName, product.category) }
@@ -633,7 +636,17 @@ private fun OrderLineDialog(line: OrderDetailLine, products: List<ProductWithSto
                     )
                 }
             }
-            OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), label = { Text("Ilość") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, Modifier.weight(1f), label = { Text("Ilość") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(selectedProduct?.unit ?: line.unit, {}, Modifier.weight(1f), readOnly = true, label = { Text("Jednostka") })
+            }
+            if (unitConflict) {
+                Text("Pozycja ma ${line.unit}, Karta ma ${selectedProduct?.unit}. Sprawdź ilość; jednostki nie są przeliczane.", color = MaterialTheme.colorScheme.error)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(unitConfirmed, { unitConfirmed = it })
+                    Text("Potwierdzam ilość w jednostce Karty")
+                }
+            }
         } },
         confirmButton = { Button(onClick = { onSave(availableProducts.firstOrNull { it.id == selectedId }, quantity.toLongOrNull() ?: 1) }, enabled = selectedId != null && (quantity.toLongOrNull() ?: 0) > 0) { Text("Zapisz") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Anuluj") } },

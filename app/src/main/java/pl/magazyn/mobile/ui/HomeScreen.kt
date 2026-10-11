@@ -3,6 +3,7 @@ package pl.magazyn.mobile.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,6 +28,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import pl.magazyn.mobile.domain.ParsedNote
 import pl.magazyn.mobile.domain.ParsedInputKind
 import pl.magazyn.mobile.domain.QuickInputMode
+import pl.magazyn.mobile.domain.ProductUnits
 import pl.magazyn.mobile.agent.AgentClarificationAnswer
 import pl.magazyn.mobile.agent.AgentClarificationType
 import pl.magazyn.mobile.agent.areRequiredClarificationsAnswered
@@ -292,7 +294,6 @@ fun ParsedNoteReviewScreen(
                     saving = saving.isSaving,
                     onSave = { draft ->
                         viewModel.saveTaskDraft(current.rawText, draft, reviewId = current.id) {
-                            viewModel.closeReview(completed = true)
                             onBack()
                         }
                     },
@@ -310,7 +311,6 @@ fun ParsedNoteReviewScreen(
                 onCreatePerson = viewModel::createPersonForRecognizedOrder,
                 onSaveTasks = {
                     viewModel.saveTasks(current.rawText, note.tasks, reviewId = current.id) {
-                        viewModel.closeReview(completed = true)
                         onBack()
                     }
                 },
@@ -322,7 +322,6 @@ fun ParsedNoteReviewScreen(
                         rememberCorrections,
                         reviewId = current.id,
                     ) {
-                        viewModel.closeReview(completed = true)
                         onBack()
                     }
                 },
@@ -354,7 +353,7 @@ private fun WarehouseHeader(onNotifications: () -> Unit) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SmartInput(
+internal fun SmartInput(
     value: String,
     mode: QuickInputMode,
     onModeChange: (QuickInputMode) -> Unit,
@@ -374,38 +373,56 @@ private fun SmartInput(
 ) {
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(11.dp)) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                QuickInputMode.entries.forEach { option ->
+                    FilterChip(selected = mode == option, onClick = { onModeChange(option) },
+                        label = { Text(option.label, maxLines = 1) })
+                }
+            }
             OutlinedTextField(
-                value = value,
-                onValueChange = onChange,
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
-                maxLines = Int.MAX_VALUE,
+                value = value, onValueChange = onChange, modifier = Modifier.fillMaxWidth(),
+                minLines = 3, maxLines = Int.MAX_VALUE,
                 enabled = !aiLoading && !codexLoading,
                 label = { Text("Szybkie pole") },
                 placeholder = { Text("Wklej zamówienie, zadanie albo wpisz osobę, miejsce lub przedmiot…") },
             )
-            FlowRow(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = 2) {
-                QuickInputMode.entries.forEach { option ->
-                    FilterChip(selected = mode == option, onClick = { onModeChange(option) },
-                        enabled = true, label = { Text(option.label) })
-                }
+            RecognitionButtons(value.isNotBlank(), aiLoading, codexLoading,
+                onRecognizeLocal, onRecognizeAi, onRecognizeCodex)
+            RecognitionFeedback(aiError, codexError, codexLoading, codexChoice, codexAnswers,
+                onSelectCodexChoice, onChangeCodexText, onSubmitCodexAnswers)
+        }
+    }
+}
+
+@Composable
+internal fun RecognitionButtons(
+    enabled: Boolean, aiLoading: Boolean, codexLoading: Boolean,
+    onOffline: () -> Unit, onGemini: () -> Unit, onCodex: () -> Unit,
+) {
+    // Scroll only this row at large font sizes; the controls never wrap.
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf("Offline" to onOffline, "Gemini" to onGemini, "Codex" to onCodex).forEach { (label, action) ->
+            OutlinedButton(onClick = action, enabled = enabled && !aiLoading && !codexLoading,
+                modifier = Modifier.weight(1f).widthIn(min = 90.dp), contentPadding = PaddingValues(horizontal = 8.dp)) {
+                Text(label, maxLines = 1)
             }
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onRecognizeLocal, enabled = value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.weight(1f)) {
-                    Text("Offline")
-                }
-                Button(onClick = onRecognizeAi, enabled = value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.weight(1f)) {
-                    if (aiLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    else Icon(Icons.Default.AutoAwesome, null)
-                    Spacer(Modifier.width(5.dp))
-                    Text(if (aiLoading) "Analizuję" else "Gemini")
-                }
-            }
-            OutlinedButton(onClick = onRecognizeCodex, enabled = mode.supportsCodex && value.isNotBlank() && !aiLoading && !codexLoading, modifier = Modifier.fillMaxWidth().padding(top = 5.dp)) {
-                if (codexLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                Text(if (codexLoading) " Analizuję w Codex…" else "Codex")
-            }
-            Text("Codex przygotuje wynik w wybranym trybie do Twojego zatwierdzenia.", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+    if (aiLoading || codexLoading) Row(verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+        Spacer(Modifier.width(8.dp))
+        Text("Trwa analiza…", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+internal fun RecognitionFeedback(
+    aiError: String?, codexError: String?, codexLoading: Boolean,
+    codexChoice: pl.magazyn.mobile.agent.AgentReply?, codexAnswers: Map<String, AgentClarificationAnswer>,
+    onSelectCodexChoice: (String, String) -> Unit, onChangeCodexText: (String, String) -> Unit,
+    onSubmitCodexAnswers: () -> Unit,
+) {
             aiError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
             codexError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
             if (codexChoice?.status == pl.magazyn.mobile.agent.AgentStatus.NEEDS_USER_CHOICE) {
@@ -459,10 +476,7 @@ private fun SmartInput(
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 ) { Text("Wyślij odpowiedzi") }
             }
-            Text("AI tworzy tylko propozycję — niczego nie zapisuje automatycznie.", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
-        }
-    }
-}
+ }
 
 @Composable
 private fun QuickButtons(onNewOrder: () -> Unit, onQuickIssue: () -> Unit, onNewEmployee: () -> Unit) {
@@ -776,7 +790,7 @@ private fun PendingMappingDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ParsedNoteReviewContent(
+internal fun ParsedNoteReviewContent(
     rawText: String,
     note: ParsedNote,
     matchedPersonName: String?,
@@ -920,6 +934,10 @@ private fun ParsedNoteReviewContent(
                     Column(Modifier.weight(1f)) {
                         Text(productTitle(productMatch?.name ?: item.name, productMatch?.variant ?: item.variant), fontWeight = FontWeight.SemiBold)
                         item.notes.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        if (productMatch != null && ProductUnits.needsConfirmation(item, productMatch.unit)) {
+                            Text("Wiadomość: ${item.requestedUnit}; Karta: ${productMatch.unit}. Wyjaśnij ilość przed zapisaniem.", color = MaterialTheme.colorScheme.error)
+                            TextButton(onClick = { editingItem = index }) { Text("Wyjaśnij jednostkę") }
+                        }
                         if (productMatches.isEmpty()) Text("Nie rozpoznano przedmiotu", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                         else if (productMatch == null) Text("Kilka pasujących przedmiotów — wybierz właściwy", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                         else if (productMatch.isHidden) Text("Ten przedmiot jest ukryty — możesz wybrać inną aktywną pozycję.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
@@ -940,7 +958,7 @@ private fun ParsedNoteReviewContent(
                         }
                     }
                     Text(
-                        "${formatWholeQuantity(item.quantity)} ${item.unit}",
+                        "${formatWholeQuantity(item.quantity)} ${productMatch?.unit ?: item.unit}",
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -988,7 +1006,7 @@ private fun ParsedNoteReviewContent(
                         if (productMatches.isNotEmpty()) {
                             Text("Proponowane przedmioty", style = MaterialTheme.typography.labelMedium)
                             SuggestionList(productMatches, key = { it.id }) { product ->
-                                OutlinedButton(onClick = { editedItems[index] = item.copy(name = product.name, variant = product.variant, unit = product.unit, productId = product.id) }, Modifier.fillMaxWidth()) {
+                                OutlinedButton(onClick = { editedItems[index] = item.copy(name = product.name, variant = product.variant, unit = product.unit, productId = product.id, confirmedCatalogUnit = null) }, Modifier.fillMaxWidth()) {
                                     ProductInfo(product.name, product.variant, product.groupName, product.subgroupName, Modifier.weight(1f), stockQuantity = product.stockQuantity.takeIf { product.stockKnown }, unit = product.unit)
                                 }
                             }
@@ -999,8 +1017,8 @@ private fun ParsedNoteReviewContent(
                         }
                         HorizontalDivider(Modifier.padding(vertical = 3.dp))
                         Text("3. Szczegóły", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(item.variant.orEmpty(), { editedItems[index] = item.copy(variant = it.ifBlank { null }, productId = null) }, Modifier.weight(1f).keepAboveKeyboard(), label = { Text("Wariant") })
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(item.variant.orEmpty(), { editedItems[index] = item.copy(variant = it.ifBlank { null }, productId = null) }, Modifier.weight(1.2f).widthIn(min = 100.dp).keepAboveKeyboard(), label = { Text("Wariant") })
                             OutlinedTextField(
                                 quantityTexts[index].orEmpty(),
                                 { value ->
@@ -1008,13 +1026,18 @@ private fun ParsedNoteReviewContent(
                                     quantityTexts[index] = digits
                                     digits.toLongOrNull()?.let { editedItems[index] = item.copy(quantity = it.coerceAtLeast(1)) }
                                 },
-                                Modifier.weight(1f).keepAboveKeyboard(),
+                                Modifier.weight(1f).widthIn(min = 85.dp).keepAboveKeyboard(),
                                 label = { Text("Ilość") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             )
+                            OutlinedTextField(productMatch?.unit ?: item.unit, {}, Modifier.weight(0.8f).widthIn(min = 90.dp), readOnly = true, label = { Text("Jednostka") })
                         }
-                        OutlinedTextField(item.unit, { editedItems[index] = item.copy(unit = it, productId = null) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Jednostka") })
-                        OutlinedTextField(item.notes, { editedItems[index] = item.copy(notes = it) }, Modifier.fillMaxWidth().keepAboveKeyboard(), label = { Text("Uwagi") })
+                        if (productMatch != null && ProductUnits.needsConfirmation(item, productMatch.unit)) {
+                            Text("Wiadomość podaje ${item.requestedUnit}, a przedmiot ma ${productMatch.unit}. Popraw ilość lub wybierz właściwy przedmiot.", color = MaterialTheme.colorScheme.error)
+                            OutlinedButton(onClick = { editedItems[index] = item.copy(unit = productMatch.unit, confirmedCatalogUnit = productMatch.unit) }) {
+                                Text("Potwierdzam ${item.quantity} ${productMatch.unit}")
+                            }
+                        }
                     }
                     }
                 }
@@ -1065,7 +1088,9 @@ private fun ParsedNoteReviewContent(
                             if (approvedItems[index] == true) sourceItems.getOrNull(index)?.let { source ->
                                 val withDefault = if (corrected.recipientName.isNullOrBlank() && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim(), recipientId = null, recipientKind = null) else corrected
                                 val storageRecipient = withDefault.recipientName?.let { recipient -> recognizedPerson(recipient, people)?.fullName ?: recipient }
-                                source to withDefault.copy(recipientName = storageRecipient)
+                                val product = corrected.productId?.let { id -> products.firstOrNull { it.id == id } }
+                                    ?: productIndex.matches(corrected, strictOfflineMatching = !note.analyzedByAi).singleOrNull()
+                                source to withDefault.copy(recipientName = storageRecipient, productId = product?.id, unit = product?.unit ?: withDefault.unit)
                             } else null
                         },
                         rememberCorrections,
@@ -1074,7 +1099,11 @@ private fun ParsedNoteReviewContent(
                     )
                 },
                 enabled = approvedItems.values.any { it } && approvedItems.keys.filter { approvedItems[it] == true }.all {
-                    !quantityTexts[it].isNullOrBlank() && editedItems.getOrNull(it)?.name?.isNotBlank() == true
+                    !quantityTexts[it].isNullOrBlank() && editedItems.getOrNull(it)?.let { item ->
+                        val product = item.productId?.let { id -> products.firstOrNull { it.id == id } }
+                            ?: productIndex.matches(item, strictOfflineMatching = !note.analyzedByAi).singleOrNull()
+                        item.name.isNotBlank() && (product == null || !ProductUnits.needsConfirmation(item, product.unit))
+                    } == true
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Utwórz szkic z zatwierdzonych pozycji") }
