@@ -1,9 +1,13 @@
 package pl.magazyn.mobile.data
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.junit.After
@@ -40,6 +44,8 @@ class SavedNoteConversionTest {
                     geminiResponse(mode)
                 }
                 val vm = env.track(HomeViewModel(env.application, analyzer) { AgentRepository(client, RoomAgentDataSource(db)) { 1 } })
+                val ordersBeforeAnalysis = db.queryLong("SELECT COUNT(*) FROM orders")
+                val tasksBeforeAnalysis = db.queryLong("SELECT COUNT(*) FROM notebook_tasks")
                 vm.runAndAwaitViewModelWork {
                     vm.updateQuickInput("Niedokończona wiadomość")
                     vm.selectQuickInputMode(QuickInputMode.NOTE)
@@ -60,6 +66,8 @@ class SavedNoteConversionTest {
                 assertEquals(raw, review.rawText)
                 assertEquals(mode.preferredKind, review.note.kind)
                 assertEquals("ACTIVE", db.notebookDao().findNote(id)!!.status)
+                assertEquals(ordersBeforeAnalysis, db.queryLong("SELECT COUNT(*) FROM orders"))
+                assertEquals(tasksBeforeAnalysis, db.queryLong("SELECT COUNT(*) FROM notebook_tasks"))
                 assertEquals(0L, db.queryLong("SELECT COUNT(*) FROM stock_movements"))
                 if (method == RecognitionMethod.CODEX) assertEquals(mode, requestedMode)
                 val beforeOrders = db.queryLong("SELECT COUNT(*) FROM orders")
@@ -97,12 +105,35 @@ class SavedNoteConversionTest {
             started.complete(Unit)
             withContext(NonCancellable) { release.await(); finished.complete(Unit); geminiResponse(QuickInputMode.ORDER) }
         }))
+        val existingWork = vm.viewModelScope.coroutineContext[Job]!!.children.toSet()
         vm.analyzeSavedNote("source", "Produkt rozmiar 52 x1", QuickInputMode.ORDER, RecognitionMethod.GEMINI)
-        started.await()
+        withTimeout(15_000) { started.await() }
+        val oldWork = vm.viewModelScope.coroutineContext[Job]!!.children.filterNot(existingWork::contains).toList()
         vm.runAndAwaitViewModelWork { vm.analyzeSavedNote("source", "Produkt rozmiar 52 x1", QuickInputMode.TASK, RecognitionMethod.OFFLINE) }
-        release.complete(Unit); finished.await()
+        release.complete(Unit)
+        withTimeout(15_000) { finished.await(); oldWork.joinAll() }
         assertEquals(ParsedInputKind.TASK, vm.noteReview.value!!.note.kind)
         assertNull(vm.aiAnalysis.value.result)
+        assertEquals("ACTIVE", db.notebookDao().findNote("source")!!.status)
+        assertEquals(0L, db.queryLong("SELECT COUNT(*) FROM orders"))
+    }
+
+    @Test fun sourceEditedDuringCodexAnalysisDiscardsLateProposal() = runBlocking {
+        db.notebookDao().insertPlainNote("Produkt x2", "source")
+        val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        val client = FixtureAgent { mode -> started.complete(Unit); release.await(); proposal(mode) }
+        val vm = env.track(HomeViewModel(env.application, GeminiNoteAnalyzer()) { AgentRepository(client, RoomAgentDataSource(db)) { 1 } })
+        val existingWork = vm.viewModelScope.coroutineContext[Job]!!.children.toSet()
+        vm.analyzeSavedNote("source", "Produkt x2", QuickInputMode.ORDER, RecognitionMethod.CODEX)
+        withTimeout(15_000) { started.await() }
+        val work = vm.viewModelScope.coroutineContext[Job]!!.children.filterNot(existingWork::contains).toList()
+        db.notebookDao().updateNoteText("source", "Poprawiony tekst")
+        release.complete(Unit)
+        withTimeout(15_000) { work.joinAll() }
+        assertNull(vm.codexAnalysis.value.result)
+        assertNull(vm.noteReview.value)
+        assertNotNull(vm.codexAnalysis.value.error)
+        assertEquals("Poprawiony tekst", db.notebookDao().findNote("source")!!.rawText)
         assertEquals("ACTIVE", db.notebookDao().findNote("source")!!.status)
         assertEquals(0L, db.queryLong("SELECT COUNT(*) FROM orders"))
     }
@@ -139,9 +170,19 @@ class SavedNoteConversionTest {
         db.notebookDao().insertPlainNote("Transport", "source")
         val questions = listOf(
             AgentClarificationQuestion("place", "Miejsce?", AgentClarificationType.TEXT, emptyList(), true),
-            AgentClarificationQuestion("confirm", "Potwierdzasz?", AgentClarificationType.YES_NO, emptyList(), true))
+            AgentClarificationQuestion("confirm", "Potwierdzasz?", AgentClarificationType.YES_NO, emptyList(), true),
+            AgentClarificationQuestion("person", "Osoba?", AgentClarificationType.CHOICE,
+                listOf(AgentCandidate("employee-1", "Jan Kowalski", "person")), true))
+        var reads = 0
         var answers: List<AgentClarificationAnswer> = emptyList()
-        val client = object : FixtureAgent({ proposal(it).copy(status = AgentStatus.NEEDS_USER_CHOICE, task = null, clarifications = questions) }) {
+        val client = object : FixtureAgent({ proposal(it).copy(status = AgentStatus.NEEDS_DATA, task = null,
+            needsData = listOf(AgentToolRequest.Stock("stock", listOf("product-1")))) }) {
+            override suspend fun toolResults(sessionId: String, results: JSONObject): AgentReply {
+                assertEquals("session", sessionId)
+                assertEquals(1, results.getJSONArray("results").length())
+                reads++
+                return proposal(QuickInputMode.TASK).copy(status = AgentStatus.NEEDS_USER_CHOICE, task = null, clarifications = questions)
+            }
             override suspend fun answers(sessionId: String, supplied: List<AgentClarificationAnswer>): AgentReply {
                 assertEquals("session", sessionId); answers = supplied; return proposal(QuickInputMode.TASK)
             }
@@ -150,9 +191,12 @@ class SavedNoteConversionTest {
         vm.analyzeSavedNote("source", "Transport", QuickInputMode.TASK, RecognitionMethod.CODEX)
         eventually("Codex powinien zadać pytania") { vm.codexAnalysis.value.reply != null }
         vm.runAndAwaitViewModelWork {
-            vm.setCodexTextAnswer("place", "Port"); vm.setCodexTextAnswer("confirm", "Tak"); vm.submitCodexAnswers()
+            vm.setCodexTextAnswer("place", "Port"); vm.setCodexTextAnswer("confirm", "Tak")
+            vm.setCodexChoiceAnswer("person", "employee-1"); vm.submitCodexAnswers()
         }
-        assertEquals(listOf("Port", "Tak"), answers.map { it.text })
+        assertEquals(1, reads)
+        assertEquals(listOf("Port", "Tak", null), answers.map { it.text })
+        assertEquals("employee-1", answers.last().candidateId)
         assertEquals("source", vm.codexAnalysis.value.request!!.sourceNoteId)
         assertEquals(QuickInputMode.TASK, vm.codexAnalysis.value.request!!.mode)
         assertTrue(vm.openReview(vm.codexAnalysis.value.result!!, vm.codexAnalysis.value.request!!))
@@ -170,7 +214,7 @@ class SavedNoteConversionTest {
         emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), null, mode.preferredKind!!,
         task = if (mode == QuickInputMode.TASK) ParsedTaskDraft("Transport", null, "", emptyList(), ParseConfidence.REVIEW) else null)
 
-    private open class FixtureAgent(private val respond: (QuickInputMode) -> AgentReply) : AgentClient {
+    private open class FixtureAgent(private val respond: suspend (QuickInputMode) -> AgentReply) : AgentClient {
         override suspend fun authStatus() = JSONObject().put("authMode", "chatgpt")
         override suspend fun fullSync(catalog: JSONObject) { assertTrue(catalog.has("recognitionRules")); assertTrue(catalog.getJSONArray("products").length() > 0) }
         override suspend fun message(text: String) = error("Forced mode required")

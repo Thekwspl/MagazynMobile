@@ -165,7 +165,7 @@ class NoteParser {
             name = conventionName,
             variant = variant,
             quantity = quantity.coerceAtLeast(1),
-            unit = when {
+            unit = ProductUnits.explicitUnit(itemText) ?: when {
                 conventionName.contains("but", true) -> "para"
                 conventionName.contains("paczk", true) -> "paczka"
                 conventionName.contains("karton", true) -> "karton"

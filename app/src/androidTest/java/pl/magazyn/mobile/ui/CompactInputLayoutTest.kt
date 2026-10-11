@@ -60,7 +60,7 @@ class CompactInputLayoutTest {
         }
         compose.onNodeWithContentDescription("Popraw").performScrollTo().performClick()
         compose.onNodeWithText("Jednostka").performScrollTo().assert(hasSetTextAction().not())
-        compose.onNodeWithText("m").assertExists()
+        compose.onNode(hasText("Jednostka") and hasText("m")).assertExists()
         compose.onNodeWithText("Uwagi").assertDoesNotExist()
         compose.onNodeWithText("Historyczne uwagi").assertExists()
     }

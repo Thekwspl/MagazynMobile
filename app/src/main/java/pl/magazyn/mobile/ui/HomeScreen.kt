@@ -958,7 +958,7 @@ internal fun ParsedNoteReviewContent(
                         }
                     }
                     Text(
-                        "${formatWholeQuantity(item.quantity)} ${productMatch?.unit ?: item.unit}",
+                        "${formatWholeQuantity(item.quantity)} ${ProductUnits.displayUnit(item, productMatch?.unit)}",
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -1030,7 +1030,7 @@ internal fun ParsedNoteReviewContent(
                                 label = { Text("Ilość") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             )
-                            OutlinedTextField(productMatch?.unit ?: item.unit, {}, Modifier.weight(0.8f).widthIn(min = 90.dp), readOnly = true, label = { Text("Jednostka") })
+                            OutlinedTextField(ProductUnits.displayUnit(item, productMatch?.unit), {}, Modifier.weight(0.8f).widthIn(min = 90.dp), readOnly = true, label = { Text("Jednostka") })
                         }
                         if (productMatch != null && ProductUnits.needsConfirmation(item, productMatch.unit)) {
                             Text("Wiadomość podaje ${item.requestedUnit}, a przedmiot ma ${productMatch.unit}. Popraw ilość lub wybierz właściwy przedmiot.", color = MaterialTheme.colorScheme.error)
@@ -1090,7 +1090,7 @@ internal fun ParsedNoteReviewContent(
                                 val storageRecipient = withDefault.recipientName?.let { recipient -> recognizedPerson(recipient, people)?.fullName ?: recipient }
                                 val product = corrected.productId?.let { id -> products.firstOrNull { it.id == id } }
                                     ?: productIndex.matches(corrected, strictOfflineMatching = !note.analyzedByAi).singleOrNull()
-                                source to withDefault.copy(recipientName = storageRecipient, productId = product?.id, unit = product?.unit ?: withDefault.unit)
+                                source to withDefault.copy(recipientName = storageRecipient, productId = product?.id, unit = ProductUnits.displayUnit(withDefault, product?.unit))
                             } else null
                         },
                         rememberCorrections,

@@ -30,5 +30,6 @@ object ProductUnits {
         !requestedUnit.isNullOrBlank() && key(requestedUnit) != key(catalogUnit)
     fun needsConfirmation(item: ParsedItem, catalogUnit: String): Boolean =
         conflict(item.requestedUnit, catalogUnit) && item.confirmedCatalogUnit != catalogUnit
+    fun displayUnit(item: ParsedItem, catalogUnit: String?): String = catalogUnit ?: item.requestedUnit ?: item.unit
     fun catalogItem(item: ParsedItem, catalogUnit: String): ParsedItem = item.copy(unit = catalogUnit)
 }

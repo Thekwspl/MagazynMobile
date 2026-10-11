@@ -31,6 +31,14 @@ class ProductUnitsTest {
         assertEquals("Historia", mapped.notes)
         assertEquals(15L, mapped.quantity)
     }
+    @Test fun unknownProductPreservesExplicitUnitAndQuantity() {
+        val item = NoteParser().parse("Nieznany przewód 15 m", QuickInputMode.ORDER).items.single()
+        assertEquals("m", item.unit)
+        assertEquals("m", ProductUnits.displayUnit(item, null))
+        assertEquals(15L, item.quantity)
+        assertEquals("opak.", ProductUnits.displayUnit(item, "opak."))
+        assertTrue(ProductUnits.needsConfirmation(item, "opak."))
+    }
     @Test fun severalMessageLinesCannotHideOneConflictingUnit() {
         assertEquals("szt.", ProductUnits.messageUnit("Śruby 3 opak.; Śruby 10 szt.", listOf("Śruby"), "opak."))
         assertEquals("m", ProductUnits.messageUnit("Przewód 15 m; Śruby 10 szt.", listOf("Przewód"), "m"))

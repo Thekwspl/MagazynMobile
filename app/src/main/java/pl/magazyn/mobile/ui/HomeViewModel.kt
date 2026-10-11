@@ -461,7 +461,7 @@ class HomeViewModel @JvmOverloads constructor(
         val state = _codexAnalysis.value
         val reply = state.reply ?: return
         val request = state.request ?: return
-        if (state.isLoading || request != _quickInput.value || !request.mode.supportsCodex) return
+        if (state.isLoading || request != currentRequest() || !request.mode.supportsCodex) return
         _codexAnalysis.value = state.copy(isLoading = true)
         analysisJob = viewModelScope.launch {
             runCatching {
@@ -495,7 +495,7 @@ class HomeViewModel @JvmOverloads constructor(
     fun submitCodexAnswers() {
         val state = _codexAnalysis.value
         val request = state.request ?: return
-        if (state.isLoading || request != _quickInput.value || !request.mode.supportsCodex) return
+        if (state.isLoading || request != currentRequest() || !request.mode.supportsCodex) return
         val reply = state.reply ?: return
         val answers = reply.clarifications.mapNotNull { state.answers[it.id] }
         if (!areRequiredClarificationsAnswered(reply.clarifications, answers)) return
@@ -775,7 +775,7 @@ class HomeViewModel @JvmOverloads constructor(
                                     productId = product?.id,
                                     rawText = listOfNotNull(item.name, item.variant, item.notes.takeIf(String::isNotBlank)).joinToString(" · "),
                                     quantity = item.quantity.toDouble(),
-                                    unit = product?.unit ?: item.unit,
+                                    unit = ProductUnits.displayUnit(item, product?.unit),
                                     verificationStatus = if (product == null) "NEEDS_MAPPING" else "VERIFIED",
                                 )
                             },
