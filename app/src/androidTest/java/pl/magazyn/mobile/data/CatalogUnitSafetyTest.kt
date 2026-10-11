@@ -11,6 +11,8 @@ import pl.magazyn.mobile.domain.*
 import pl.magazyn.mobile.ui.HomeViewModel
 import pl.magazyn.mobile.ui.OrdersViewModel
 import pl.magazyn.mobile.ui.ImportViewModel
+import pl.magazyn.mobile.ui.RecognitionMethod
+import pl.magazyn.mobile.ui.insertPlainNote
 
 @RunWith(AndroidJUnit4::class)
 class CatalogUnitSafetyTest {
@@ -36,6 +38,28 @@ class CatalogUnitSafetyTest {
         assertTrue(line.rawText.contains("Historyczne uwagi"))
         assertEquals(10.0, db.stockDao().find("warehouse-main", "product-1")!!.quantity, 0.0)
         assertEquals(0L, db.queryLong("SELECT COUNT(*) FROM stock_movements"))
+    }
+
+    @Test fun catalogAliasCannotHideConflictingMessageUnitInGeminiMultiItemResult() = runBlocking {
+        db.productDao().update(db.productDao().findById("product-1")!!.copy(unit = "opak.", aliases = "Wkręty"))
+        db.productDao().insert(ProductEntity("cable", "Przewód", unit = "m"))
+        val raw = "Wkręty 10 szt.; Przewód 15 m"
+        db.notebookDao().insertPlainNote(raw, "source")
+        AiKeyStore(env.application).saveApiKey("fixture-key")
+        val vm = env.track(HomeViewModel(env.application, GeminiNoteAnalyzer { _, _ ->
+            """{"kind":"ORDER","items":[{"name":"Produkt","variant":"52","quantity":10,"unit":"opak.","requestedUnit":null},{"name":"Przewód","quantity":15,"unit":"m","requestedUnit":null}]}"""
+        }))
+        vm.analyzeSavedNote("source", raw, QuickInputMode.ORDER, RecognitionMethod.GEMINI)
+        eventually("Gemini powinno zwrócić propozycję") { vm.aiAnalysis.value.result != null }
+        assertTrue(vm.openReview(vm.aiAnalysis.value.result!!, vm.aiAnalysis.value.request!!))
+        val review = vm.noteReview.value!!
+        assertEquals("szt.", review.note.items.first().requestedUnit)
+        assertTrue(ProductUnits.needsConfirmation(review.note.items.first(), "opak."))
+        vm.runAndAwaitViewModelWork {
+            vm.saveDraftOrder(raw, review.note, review.note.items.map { it to it }, false, review.id)
+        }
+        assertEquals(0L, db.queryLong("SELECT COUNT(*) FROM orders"))
+        assertEquals("ACTIVE", db.notebookDao().findNote("source")!!.status)
     }
 
     @Test fun conflictingImportRollsBackWholeBatchAndKeepsCatalogAndStock() = runBlocking {
