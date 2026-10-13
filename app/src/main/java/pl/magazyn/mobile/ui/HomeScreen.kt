@@ -980,7 +980,7 @@ internal fun ParsedNoteReviewContent(
                             Text("Sprawdź produkt, wariant, ilość i odbiorcę z tego fragmentu. Możesz też wyłączyć pozycję checkboxem.", style = MaterialTheme.typography.bodySmall)
                             OutlinedButton(onClick = { editedItems[index] = item.copy(requiresSourceConfirmation = false) },
                                 enabled = item.name.isNotBlank() && !quantityTexts[index].isNullOrBlank() &&
-                                    (item.sourceRecipient == null || item.recipientKind == "person" && item.recipientId != null)) { Text("Potwierdzam dane fragmentu") }
+                                    (item.sourceRecipient == null || item.recipientKind in setOf("person", "shipyard") && item.recipientId != null)) { Text("Potwierdzam dane fragmentu") }
                         }
                         Text("1. Odbiorca", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                         OutlinedTextField(
@@ -1093,7 +1093,7 @@ internal fun ParsedNoteReviewContent(
                 if (approvedItems[index] == true && item.requiresSourceConfirmation) add(ReviewWarning("source-$index", ReviewWarningCategory.COVERAGE, "Nierozstrzygnięty fragment: ${item.sourceText}", true))
                 if (approvedItems[index] == true && product != null && ProductUnits.needsConfirmation(item, product.unit)) add(ReviewWarning("unit-$index", ReviewWarningCategory.UNIT, "${item.name}: wiadomość ${item.requestedUnit}, Karta ${product.unit}", true))
                 if (approvedItems[index] == true && product == null) add(ReviewWarning("product-$index", ReviewWarningCategory.PRODUCT, "${item.name}: wymaga mapowania", true))
-                if (approvedItems[index] == true && item.sourceRecipient != null && item.recipientKind != "person") add(ReviewWarning("recipient-$index", ReviewWarningCategory.RECIPIENT, "${item.name}: wybierz osobę ${item.sourceRecipient}", true))
+                if (approvedItems[index] == true && item.sourceRecipient != null && (item.recipientKind !in setOf("person", "shipyard") || item.recipientId == null)) add(ReviewWarning("recipient-$index", ReviewWarningCategory.RECIPIENT, "${item.name}: wybierz odbiorcę ${item.sourceRecipient}", true))
             }
         }
         RecognitionWarnings(if (note.agentProposal) "Uwagi Codexa" else if (note.analyzedByAi) "Uwagi Gemini" else "Uwagi rozpoznawania", note.reviewWarnings + localWarnings)

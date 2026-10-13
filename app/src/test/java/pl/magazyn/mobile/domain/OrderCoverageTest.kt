@@ -40,6 +40,13 @@ class OrderCoverageTest {
         assertTrue(result.items.all { it.sourceIds.isNotEmpty() })
         assertEquals(1,result.sourceRequests.size)
     }
+    @Test fun explicitKnownShipyardRecipientIsNotForcedIntoPersonSelection() {
+        val one=proposal.copy(items=listOf(proposal.items.last().copy(recipientName="Elektro",recipientId="yard")))
+        val result=OrderCoverage.reconcile("3 opalarki dla Elektro",one,catalog,listOf("Elektro"))
+        assertEquals(1,result.items.size)
+        assertFalse(result.items.single().requiresSourceConfirmation)
+        assertTrue(OrderCoverage.canSave(result,result.items))
+    }
     @Test fun recipientBeforeDashIsAccountedForWithoutInventingAnotherProduct() {
         val one=proposal.copy(items=listOf(proposal.items.last().copy(recipientName="Jan Kowalski",recipientKind="person")))
         val result=OrderCoverage.reconcile("Jan Kowalski - Opalarka x3",one,catalog,emptyList())

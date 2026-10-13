@@ -53,6 +53,9 @@ object OrderCoverage {
             val recipientLabels = listOfNotNull(sourcePerson) + RecognitionRules.active(rules).filter {
                 it.ruleType == "PERSON" && it.triggerKey == ImportParser.key(sourcePerson.orEmpty())
             }.map { it.learnedName }
+            val sourceIsShipyard = sourcePerson != null && (headerLabels.any {
+                ImportParser.key(it) == ImportParser.key(sourcePerson)
+            } || Regex("(?i)\\bstoczni\\p{L}*\\b").containsMatchIn(sourcePerson))
             val sourceVariant = variant(request.text)
             val sourceLabels = (listOf(request.text) + parsed.map { it.name }).distinct()
             val candidates = catalog.filter { product ->
@@ -65,7 +68,7 @@ object OrderCoverage {
                 val item = items[index]
                 val productMatch = item.productId != null && candidates.any { it.id == item.productId } ||
                     sourceLabels.any { labelMatches(it, item.name) } || candidates.any { labelMatches(item.name, it.name) && variantKey(item.variant.orEmpty()) == variantKey(it.variant.orEmpty()) }
-                val correctRecipient = sourcePerson == null || item.recipientKind != "shipyard" &&
+                val correctRecipient = sourcePerson == null || (if (sourceIsShipyard) item.recipientKind == "shipyard" else item.recipientKind != "shipyard") &&
                     item.recipientName?.let { name -> recipientLabels.any { labelMatches(it, name) } } == true
                 val correctVariant = sourceVariant == null || item.variant?.let {
                     variantKey(it) == variantKey(sourceVariant)
