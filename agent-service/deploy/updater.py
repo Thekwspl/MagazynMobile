@@ -209,15 +209,15 @@ class Updater:
         fd=os.open(self.root,os.O_DIRECTORY)
         try: os.fsync(fd)
         finally: os.close(fd)
-    def recover(self,allow_loss=False):
+    def recover(self,allow_loss=False,bootstrap=False):
         transaction=json.loads(self.journal.read_text())
         old=Path(transaction['previous'])
-        if self.current.resolve()==old:
+        if self.current.resolve()==old and transaction.get('phase','prepared')=='prepared':
             with contextlib.suppress(UpdateError): self.service.resume()
             self.journal.unlink(); self.record('ROLLED_BACK',stage='pre-switch-recovery',current=str(old))
             return 'ROLLED_BACK'
         if not old.is_dir() or (old!=Path(self.config['baseline']) and old.parent!=self.root/'releases'): raise UpdateError('ROLLBACK_PATH_INVALID')
-        self.service.idle(allow_loss=allow_loss)
+        self.service.idle(allow_loss=allow_loss,bootstrap=bootstrap)
         self.point(old); self.service.restart()
         meta=json.loads((old/'release.json').read_text()) if (old/'release.json').is_file() else None
         self.service.health(meta)
@@ -232,7 +232,7 @@ class Updater:
             try:
                 if self.journal.exists():
                     if not apply: return 'RECOVERY_REQUIRED'
-                    return self.recover(allow_loss)
+                    return self.recover(allow_loss,bootstrap)
                 manifest,url=self.github.latest()
                 node=subprocess.run([self.config['node'],'--version'],check=True,capture_output=True,text=True,timeout=10).stdout.strip()
                 compatible(manifest,int(node.removeprefix('v').split('.')[0]),platform.system().lower(),{'x86_64':'x64','aarch64':'arm64'}.get(platform.machine(),platform.machine()))
@@ -265,7 +265,7 @@ class Updater:
                         for name,hashed in expected.items():
                             if not (destination/name).is_file() or hashlib.sha256((destination/name).read_bytes()).hexdigest()!=hashed: raise UpdateError('RELEASE_DIRECTORY_MODIFIED')
                     else: os.replace(stage,destination)
-                atomic_json(self.journal,dict(previous=str(old),next=str(destination),tag=manifest['tag']))
+                atomic_json(self.journal,dict(previous=str(old),next=str(destination),tag=manifest['tag'],phase='prepared'))
                 try: self.service.idle(allow_loss=allow_loss,bootstrap=bootstrap)
                 except UpdateError:
                     with contextlib.suppress(UpdateError): self.service.resume()
@@ -273,6 +273,7 @@ class Updater:
                     raise
                 try:
                     self.record('INSTALLING',previous=installed['tag'] if installed else 'baseline',next=manifest['tag'],integrity='PASS')
+                    atomic_json(self.journal,dict(previous=str(old),next=str(destination),tag=manifest['tag'],phase='activating'))
                     self.point(destination); self.service.restart(); self.service.health(manifest)
                     atomic_json(self.root/'previous.json',dict(path=str(old)))
                     if failed.exists(): failed.unlink()

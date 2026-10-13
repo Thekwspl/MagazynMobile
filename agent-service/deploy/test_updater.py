@@ -87,6 +87,13 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual('ROLLED_BACK',self.updater.run(True))
         self.assertEqual('DEFERRED',self.updater.run(True)); self.assertEqual(2,self.service.restarts)
         self.assertEqual('SUCCESS',self.updater.run(True,retry_failed=True))
+    def test_failed_rollback_restart_is_recovered_even_when_pointer_is_already_old(self):
+        self.service.fail_health=True
+        self.service.restart=Mock(side_effect=[None,UpdateError('SERVICE_RESTART_FAILED'),None])
+        self.assertEqual('FAILED',self.updater.run(True)); self.assert_old()
+        self.assertTrue(self.updater.journal.exists())
+        self.assertEqual('ROLLED_BACK',self.updater.run(True)); self.assert_old()
+        self.assertEqual(3,self.service.restart.call_count)
     def test_crash_journal_recovers_previous_version(self):
         self.service.crash=True
         with self.assertRaises(SystemExit): self.updater.run(True)
