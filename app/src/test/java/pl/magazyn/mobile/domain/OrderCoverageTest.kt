@@ -82,6 +82,8 @@ class OrderCoverageTest {
         val one=proposal.copy(items=listOf(proposal.items.last().copy(quantity=2)))
         val result=OrderCoverage.reconcile("Opalarka x2\nOpalarka x2",one,catalog,emptyList())
         assertEquals(2,result.items.single().sourceIds.size)
+        assertEquals(listOf("Opalarka x2","Opalarka x2"),result.items.single().sourceText!!.lines())
+        assertEquals(result.items.single().sourceText,OrderCoverage.reconcile("Opalarka x2\nOpalarka x2",result,catalog,emptyList()).items.single().sourceText)
         assertTrue(result.items.single().requiresSourceConfirmation)
         assertFalse(OrderCoverage.canSave(result,result.items))
     }

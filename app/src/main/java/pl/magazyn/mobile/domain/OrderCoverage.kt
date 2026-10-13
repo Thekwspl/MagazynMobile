@@ -46,7 +46,7 @@ object OrderCoverage {
                 val withoutDate = line.replace(Regex("\\b\\d{1,2}\\.\\d{1,2}(?:\\.\\d{4})?\\b"), "").trim()
                 withoutDate.isBlank() || headerLabels.any { ImportParser.key(it) == ImportParser.key(withoutDate) }
             }.mapIndexed { index, text -> SourceOrderRequest("source-$index", text) }.toList()
-        val items = note.items.map { it.copy(sourceIds = emptySet()) }.toMutableList()
+        val items = note.items.map { it.copy(sourceIds = emptySet(), sourceText = null) }.toMutableList()
         requests.forEach { request ->
             val parsed = NoteParser().parse(request.text, QuickInputMode.ORDER, learningRules = rules).items
             val sourcePerson = recipient(request.text) ?: parsed.mapNotNull { it.recipientName }.distinct().singleOrNull()
@@ -98,7 +98,7 @@ object OrderCoverage {
                 val item = items[index]
                 val requestedQuantity = sourceQuantity(request.text)
                 items[index] = item.copy(sourceIds = item.sourceIds + request.id,
-                    sourceText = listOfNotNull(item.sourceText, request.text).distinct().joinToString("\n"), requestedUnit = ProductUnits.explicitUnit(request.text) ?: item.requestedUnit,
+                    sourceText = listOfNotNull(item.sourceText, request.text).joinToString("\n"), requestedUnit = ProductUnits.explicitUnit(request.text) ?: item.requestedUnit,
                     requiresSourceConfirmation = item.requiresSourceConfirmation || item.sourceIds.isNotEmpty() || matching.size > 1 || ambiguousList ||
                         requestedQuantity != null && requestedQuantity != item.quantity)
             } else {
