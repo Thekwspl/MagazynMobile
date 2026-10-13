@@ -56,6 +56,7 @@ object OrderCoverage {
             val sourceIsShipyard = sourcePerson != null && (headerLabels.any {
                 ImportParser.key(it) == ImportParser.key(sourcePerson)
             } || Regex("(?i)\\bstoczni\\p{L}*\\b").containsMatchIn(sourcePerson))
+            val ambiguousList = Regex("(?i)\\b(?:i|oraz)\\b|\\+|,(?!\\s*(?:\\d|rozmiar\\b|r\\.))").containsMatchIn(request.text)
             val sourceVariant = variant(request.text)
             val sourceLabels = (listOf(request.text) + parsed.map { it.name }).distinct()
             val candidates = catalog.filter { product ->
@@ -98,7 +99,7 @@ object OrderCoverage {
                 val requestedQuantity = sourceQuantity(request.text)
                 items[index] = item.copy(sourceIds = item.sourceIds + request.id,
                     sourceText = listOfNotNull(item.sourceText, request.text).distinct().joinToString("\n"), requestedUnit = ProductUnits.explicitUnit(request.text) ?: item.requestedUnit,
-                    requiresSourceConfirmation = item.requiresSourceConfirmation || item.sourceIds.isNotEmpty() || matching.size > 1 ||
+                    requiresSourceConfirmation = item.requiresSourceConfirmation || item.sourceIds.isNotEmpty() || matching.size > 1 || ambiguousList ||
                         requestedQuantity != null && requestedQuantity != item.quantity)
             } else {
                 val guessed = parsed.singleOrNull()

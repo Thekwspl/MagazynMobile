@@ -90,6 +90,13 @@ class OrderCoverageTest {
         val result=OrderCoverage.reconcile("3 opalarki",duplicate,catalog,emptyList())
         assertTrue(result.items.all { it.requiresSourceConfirmation })
     }
+    @Test fun additionalGenericPackageRequestCannotHideBehindTheSameCatalogUnit() {
+        val c=listOf(product("h","Opalarka",null,"kpl"))
+        val p=ParsedNote(null,listOf(ParsedItem("Opalarka",null,2,"kpl",1f,productId="h")),kind=ParsedInputKind.ORDER)
+        val result=OrderCoverage.reconcile("2 opalarki i 2 komplety",p,c,emptyList())
+        assertFalse(OrderCoverage.canSave(result,result.items))
+        assertTrue(result.items.any {it.requiresSourceConfirmation && it.sourceText=="2 opalarki i 2 komplety"})
+    }
     @Test fun knownProductDoesNotCoverUnknownRequestOnSameLine() {
         val result=OrderCoverage.reconcile("3 opalarki i tajemniczy element",proposal,catalog,emptyList())
         assertTrue(result.items.any { it.requiresSourceConfirmation && it.sourceText=="3 opalarki i tajemniczy element" })
