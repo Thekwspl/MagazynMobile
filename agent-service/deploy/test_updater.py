@@ -1,8 +1,8 @@
 import shutil
 import contextlib, fcntl, hashlib, io, json, os, tarfile, tempfile, threading, unittest
 from pathlib import Path
-from unittest.mock import patch
-from updater import Updater, UpdateError, Deferred, compatible, verify_archive, atomic_json, read_secret, load_config
+from unittest.mock import patch, Mock
+from updater import Updater, UpdateError, Deferred, compatible, verify_archive, atomic_json, read_secret, load_config, SystemService
 from publish_release import publish
 from render_systemd import render
 
@@ -125,6 +125,22 @@ class UpdaterTest(unittest.TestCase):
             render(config,out,'/opt/updater.py','/etc/config.json',17)
             timer=(out/'magazyn-agent-update.timer').read_text()
             self.assertIn('OnBootSec=2min',timer); self.assertIn('OnUnitInactiveSec=17min',timer); self.assertNotIn('OnCalendar',timer); self.assertNotIn(hour,timer)
+
+class StoppedServiceRecoveryTest(unittest.TestCase):
+    def test_unavailable_api_only_allows_automatic_recovery_when_systemd_proves_no_process(self):
+        service=object.__new__(SystemService); service.config={'service':'fixture.service'}
+        service.request=Mock(side_effect=UpdateError('LOCAL_API_UNAVAILABLE'))
+        cases=[('failed','0',True),('inactive','0',True),('active','24',False),('activating','0',False),('failed','24',False)]
+        for state,pid,safe in cases:
+            with self.subTest(state=state,pid=pid), patch('updater.subprocess.run',return_value=Mock(stdout=f'ActiveState={state}\nMainPID={pid}\n',returncode=0)):
+                if safe: service.idle()
+                else:
+                    with self.assertRaises(Deferred): service.idle()
+    def test_missing_control_and_systemctl_failure_do_not_claim_idleness(self):
+        service=object.__new__(SystemService); service.config={'service':'fixture.service'}
+        service.request=Mock(side_effect=UpdateError('LOCAL_API_UNAVAILABLE'))
+        with patch('updater.subprocess.run',side_effect=OSError('fixture')):
+            with self.assertRaises(Deferred): service.idle()
 
 class FakeRelease:
     def __init__(self): self.release=None; self.files={}; self.published=False; self.fail_upload=False

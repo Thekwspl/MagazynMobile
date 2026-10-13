@@ -155,12 +155,19 @@ class SystemService:
             opener=urllib.request.build_opener(NoRedirect())
             with opener.open(req,timeout=10) as response: return json.load(response)
         except (OSError,urllib.error.URLError,ValueError): raise UpdateError('LOCAL_API_UNAVAILABLE') from None
+    def stopped(self):
+        # A missing control endpoint does not prove idleness. Only a stopped unit with no main process does.
+        try:
+            result=subprocess.run(['systemctl','show',self.config['service'],'--property=ActiveState','--property=MainPID'],check=True,timeout=10,capture_output=True,text=True)
+            state=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+            return state.get('ActiveState') in {'inactive','failed'} and state.get('MainPID')=='0'
+        except (OSError,subprocess.SubprocessError): return False
     def idle(self,allow_loss=False,bootstrap=False):
         try:
             self.request('/v1/update/drain','POST')
             status=self.request('/v1/runtime')
         except UpdateError:
-            if bootstrap and allow_loss: return
+            if bootstrap and allow_loss or self.stopped(): return
             raise Deferred('UPDATE_CONTROL_UNAVAILABLE') from None
         if not allow_loss and (status.get('activeRequests')!=0 or status.get('pendingSessions')!=0):
             self.resume(); raise Deferred('ACTIVE_SESSIONS')
