@@ -40,9 +40,12 @@ def load_config(path):
         if not isinstance(config.get(key),str) or not config[key] or any(c in config[key] for c in ['\n','\r','\x00']): raise UpdateError('CONFIG_'+key.upper())
     if not re.fullmatch(r'[A-Za-z0-9_.@-]+\.service',config['service']): raise UpdateError('SERVICE_INVALID')
     for key in ['root','current','node','environment_file','update_token_file','baseline']:
-        if not Path(config[key]).is_absolute() or any(c.isspace() for c in config[key]): raise UpdateError('PATH_'+key.upper())
+        if not Path(config[key]).is_absolute() or any(c.isspace() or c=='%' for c in config[key]): raise UpdateError('PATH_'+key.upper())
     parsed=urllib.parse.urlparse(config['local_url'])
     if parsed.scheme!='http' or parsed.hostname!='127.0.0.1' or parsed.path not in ['', '/'] or parsed.username: raise UpdateError('LOCAL_URL_INVALID')
+    root=Path(config['root'])
+    if root.exists() and (root.stat().st_mode & 0o022 or root.stat().st_uid!=os.geteuid()): raise UpdateError('ROOT_PERMISSIONS')
+    if not Path(config['current']).is_symlink(): raise UpdateError('CURRENT_NOT_SYMLINK')
     if config.get('repository','Thekwspl/MagazynMobile')!='Thekwspl/MagazynMobile': raise UpdateError('REPOSITORY_INVALID')
     if Path(config['current']).parent.resolve()!=Path(config['root']).resolve(): raise UpdateError('CURRENT_OUTSIDE_ROOT')
     if Path(config['root']).resolve()==Path(config['baseline']).resolve() or Path(config['root']).resolve().is_relative_to(Path(config['baseline']).resolve()): raise UpdateError('ROOT_OVERLAPS_BASELINE')
@@ -102,7 +105,8 @@ def compatible(manifest,node_major,os_name='linux',arch='x64'):
     if manifest.get('appVersion')!=manifest['tag'][1:] or not isinstance(manifest.get('packageVersion'),str): raise UpdateError('APP_VERSION_MISMATCH')
     if not re.fullmatch('[0-9a-f]{40}',manifest.get('commit','')) or not re.fullmatch('[0-9a-f]{64}',manifest.get('sha256','')): raise UpdateError('MANIFEST_INVALID')
     runtime=manifest.get('runtime',{})
-    if sys.version_info<(3,11): raise UpdateError('PYTHON_INCOMPATIBLE')
+    python_min=runtime.get('pythonMin','')
+    if not re.fullmatch(r'\d+\.\d+',python_min) or sys.version_info[:2]<tuple(map(int,python_min.split('.'))): raise UpdateError('PYTHON_INCOMPATIBLE')
     if runtime.get('os')!=os_name or runtime.get('arch')!=arch or not isinstance(runtime.get('nodeMin'),int) or node_major<runtime['nodeMin']: raise UpdateError('RUNTIME_INCOMPATIBLE')
     if manifest.get('asset')!=f'agent-service-{manifest["tag"]}.tar.gz' or not REQUIRED.issubset(set(manifest.get('requiredFiles',[]))): raise UpdateError('MANIFEST_FILES_INVALID')
     if not isinstance(manifest.get('size'),int) or not 0<manifest['size']<=200_000_000 or not isinstance(manifest.get('expandedBytes'),int) or not 0<manifest['expandedBytes']<=512_000_000: raise UpdateError('MANIFEST_SIZE_INVALID')
@@ -213,7 +217,7 @@ class Updater:
         self.journal.unlink(); self.record('ROLLED_BACK',previous=transaction['next'],current=str(old),stage='recovery')
         with contextlib.suppress(UpdateError): self.service.resume()
         return 'ROLLED_BACK'
-    def run(self,apply=False,allow_loss=False,bootstrap=False):
+    def run(self,apply=False,allow_loss=False,bootstrap=False,retry_failed=False):
         self.root.mkdir(parents=True,exist_ok=True)
         with (self.root/'update.lock').open('a') as lock:
             try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -232,6 +236,8 @@ class Updater:
                 if installed and version(installed['tag'])>=version(manifest['tag']):
                     if installed['tag']==manifest['tag'] and installed['commit']!=manifest['commit']: raise UpdateError('INSTALLED_TAG_IMMUTABLE')
                     self.record('UP_TO_DATE',current=installed['tag']); return 'UP_TO_DATE'
+                failed=self.root/'failed-activation.json'
+                if apply and not retry_failed and failed.exists() and json.loads(failed.read_text()).get('sha256')==manifest['sha256']: raise Deferred('PREVIOUS_ACTIVATION_FAILED')
                 if self.free_space()<manifest['expandedBytes']*2+manifest['size']+64_000_000: raise UpdateError('DISK_SPACE_INSUFFICIENT')
                 self.record('DOWNLOADING',next=manifest['tag'],stage='download')
                 (self.root/'releases').mkdir(exist_ok=True)
@@ -262,12 +268,14 @@ class Updater:
                     self.record('INSTALLING',previous=installed['tag'] if installed else 'baseline',next=manifest['tag'],integrity='PASS')
                     self.point(destination); self.service.restart(); self.service.health(manifest)
                     atomic_json(self.root/'previous.json',dict(path=str(old)))
+                    if failed.exists(): failed.unlink()
                     self.journal.unlink(); self.record('SUCCESS',previous=installed['tag'] if installed else 'baseline',current=manifest['tag'],commit=manifest['commit'],integrity='PASS',health='PASS')
                     return 'SUCCESS'
-                except UpdateError:
+                except UpdateError as activation_error:
                     self.point(old); self.service.restart()
                     self.service.health(installed)
-                    self.journal.unlink(); self.record('ROLLED_BACK',current=installed['tag'] if installed else 'baseline',attempted=manifest['tag'],stage='activation')
+                    atomic_json(failed,dict(sha256=manifest['sha256'],commit=manifest['commit'],tag=manifest['tag'],cause=str(activation_error)))
+                    self.journal.unlink(); self.record('ROLLED_BACK',current=installed['tag'] if installed else 'baseline',attempted=manifest['tag'],stage='activation',cause=str(activation_error),integrity='PASS',health='FAILED',rollbackHealth='PASS')
                     return 'ROLLED_BACK'
                 finally:
                     with contextlib.suppress(UpdateError): self.service.resume()
@@ -278,7 +286,7 @@ class Updater:
                 self.record('FAILED',stage=code); return 'FAILED'
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(); parser.add_argument('--config',type=Path,required=True); parser.add_argument('--apply',action='store_true'); parser.add_argument('--allow-session-loss',action='store_true'); parser.add_argument('--bootstrap',action='store_true'); parser.add_argument('--status',action='store_true')
+    parser=argparse.ArgumentParser(); parser.add_argument('--config',type=Path,required=True); parser.add_argument('--apply',action='store_true'); parser.add_argument('--allow-session-loss',action='store_true'); parser.add_argument('--bootstrap',action='store_true'); parser.add_argument('--retry-failed',action='store_true'); parser.add_argument('--status',action='store_true')
     args=parser.parse_args()
     try:
         config=load_config(args.config)
@@ -287,10 +295,16 @@ if __name__=='__main__':
             active=Path(config['current']).resolve()
             metadata=active/'release.json'
             installed=json.loads(metadata.read_text()) if metadata.exists() else {'tag':'baseline'}
-            print(json.dumps({'installed':{key:installed.get(key) for key in ['tag','commit','protocolVersion']},
+            try:
+                runtime=SystemService(config).request('/v1/runtime')
+                running=dict(schemaVersion=runtime.get('schemaVersion'),mode=runtime.get('mode'),
+                    tag=runtime.get('release',{}).get('tag'),commit=runtime.get('release',{}).get('commit'),
+                    activeRequests=runtime.get('activeRequests'),pendingSessions=runtime.get('pendingSessions'),draining=runtime.get('draining'))
+            except UpdateError: running={'status':'RUNTIME_DIAGNOSTICS_UNAVAILABLE'}
+            print(json.dumps({'running':running,'installed':{key:installed.get(key) for key in ['tag','commit','protocolVersion']},
                 'lastResult':json.loads(state.read_text()) if state.exists() else {'status':'NOT_CONFIGURED'}}))
         else:
-            result=Updater(config,GitHub(),SystemService(config)).run(args.apply,args.allow_session_loss,args.bootstrap)
+            result=Updater(config,GitHub(),SystemService(config)).run(args.apply,args.allow_session_loss,args.bootstrap,args.retry_failed)
             print(json.dumps({'status':result})); raise SystemExit(1 if result in ['FAILED','RECOVERY_REQUIRED'] else 0)
     except (UpdateError,OSError,ValueError):
         print('{"status":"FAILED","stage":"configuration"}'); raise SystemExit(1)

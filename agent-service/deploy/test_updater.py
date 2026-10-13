@@ -30,7 +30,7 @@ class FakeGitHub:
 
 def fixture_archive(tag='v1.2.2',extra=None,omit=None):
     metadata=dict(formatVersion=1,tag=tag,appVersion=tag[1:],packageVersion='0.1.0',commit='a'*40,
-        protocolVersion=2,supportedClientProtocols=[2],runtime=dict(nodeMin=18,os='linux',arch='x64'))
+        protocolVersion=2,supportedClientProtocols=[2],runtime=dict(nodeMin=18,pythonMin='3.11',os='linux',arch='x64'))
     files={'dist/src/server.js':b'code','dist/src/contracts.js':b'protocol','node_modules/zod/package.json':b'{}',
         'package.json':b'{}','release.json':json.dumps(metadata).encode()}
     if omit: files.pop(omit)
@@ -82,6 +82,11 @@ class UpdaterTest(unittest.TestCase):
         self.service.fail_start=True; self.assertEqual('ROLLED_BACK',self.updater.run(True)); self.assert_old(); self.assertEqual(2,self.service.restarts)
     def test_health_failure_rolls_back(self):
         self.service.fail_health=True; self.assertEqual('ROLLED_BACK',self.updater.run(True)); self.assert_old()
+    def test_failed_version_is_not_restarted_on_each_timer_tick(self):
+        self.service.fail_health=True
+        self.assertEqual('ROLLED_BACK',self.updater.run(True))
+        self.assertEqual('DEFERRED',self.updater.run(True)); self.assertEqual(2,self.service.restarts)
+        self.assertEqual('SUCCESS',self.updater.run(True,retry_failed=True))
     def test_crash_journal_recovers_previous_version(self):
         self.service.crash=True
         with self.assertRaises(SystemExit): self.updater.run(True)
@@ -90,6 +95,10 @@ class UpdaterTest(unittest.TestCase):
         atomic_json(self.updater.journal,dict(previous=str(self.old),next=str(self.root/'releases/v1.2.2')))
         self.service.busy=True; self.service.draining=True
         self.assertEqual('ROLLED_BACK',self.updater.run(True)); self.assertEqual(0,self.service.restarts); self.assertFalse(self.service.draining)
+    def test_explicit_manual_session_loss_override_is_not_automatic(self):
+        self.service.busy=True
+        self.assertEqual('DEFERRED',self.updater.run(True))
+        self.assertEqual('SUCCESS',self.updater.run(True,allow_loss=True)); self.assertEqual(1,self.service.restarts)
     def test_active_sessions_defer(self):
         self.service.busy=True; self.assertEqual('DEFERRED',self.updater.run(True)); self.assert_old(); self.assertFalse(self.service.draining)
     def test_parallel_attempt_uses_kernel_lock(self):
@@ -97,7 +106,7 @@ class UpdaterTest(unittest.TestCase):
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             self.assertEqual('DEFERRED_LOCKED',self.updater.run(True)); self.assertEqual(0,self.service.restarts)
     def test_protocol_and_runtime_incompatibility(self):
-        for change in [dict(protocolVersion=3),dict(supportedClientProtocols=[3]),dict(runtime=dict(nodeMin=999,os='linux',arch='x64'))]:
+        for change in [dict(protocolVersion=3),dict(supportedClientProtocols=[3]),dict(runtime=dict(nodeMin=999,pythonMin='3.11',os='linux',arch='x64')),dict(runtime=dict(nodeMin=18,pythonMin='999.0',os='linux',arch='x64'))]:
             with self.assertRaises(UpdateError): compatible({**self.manifest,**change},24)
     def test_changed_bytes_under_installed_tag_rejected(self):
         self.assertEqual('SUCCESS',self.updater.run(True)); self.github.manifest['commit']='b'*40

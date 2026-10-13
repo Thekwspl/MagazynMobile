@@ -35,11 +35,11 @@ object OrderCoverage {
     }
     private fun variantKey(text: String): String = ImportParser.key(text).removePrefix("m").let { it.toIntOrNull()?.toString() ?: it }
     private fun sourceQuantity(text: String): Long? = ProductUnits.explicitQuantity(text)
-        ?: Regex("^[-•]?\\s*(\\d+)\\s+").find(text.trim())?.groupValues?.get(1)?.toLongOrNull()
+        ?: Regex("(?i)(?:^[-•]?\\s*|\\bx\\s*|×\\s*)(\\d+)\\b").find(text.trim())?.groupValues?.get(1)?.toLongOrNull()
     private fun recipient(text: String): String? = Regex("(?i)\\bdla\\s+(.+)$").find(text)?.groupValues?.get(1)?.trim()
     private fun variant(text: String): String? = Regex("(?i)\\b(?:rozmiar|r\\.)\\s*(m?\\d{1,2}|[a-z]{1,3})\\b").find(text)?.groupValues?.get(1)
 
-    fun reconcile(raw: String, note: ParsedNote, catalog: List<ProductWithStock>, headerLabels: List<String>): ParsedNote {
+    fun reconcile(raw: String, note: ParsedNote, catalog: List<ProductWithStock>, headerLabels: List<String>, rules: List<pl.magazyn.mobile.data.ParserLearningRuleEntity> = emptyList()): ParsedNote {
         if (note.kind != ParsedInputKind.ORDER || raw.isBlank()) return note
         val requests = raw.lineSequence().flatMap { it.split(';').asSequence() }.map(String::trim)
             .filter(String::isNotBlank).filterNot { line ->
@@ -48,9 +48,12 @@ object OrderCoverage {
             }.mapIndexed { index, text -> SourceOrderRequest("source-$index", text) }.toList()
         val items = note.items.map { it.copy(sourceIds = emptySet()) }.toMutableList()
         requests.forEach { request ->
-            val sourcePerson = recipient(request.text)
+            val parsed = NoteParser().parse(request.text, QuickInputMode.ORDER, learningRules = rules).items
+            val sourcePerson = recipient(request.text) ?: parsed.mapNotNull { it.recipientName }.distinct().singleOrNull()
+            val recipientLabels = listOfNotNull(sourcePerson) + RecognitionRules.active(rules).filter {
+                it.ruleType == "PERSON" && it.triggerKey == ImportParser.key(sourcePerson.orEmpty())
+            }.map { it.learnedName }
             val sourceVariant = variant(request.text)
-            val parsed = NoteParser().parse(request.text, QuickInputMode.ORDER).items
             val sourceLabels = (listOf(request.text) + parsed.map { it.name }).distinct()
             val candidates = catalog.filter { product ->
                 (listOf(product.name) + product.aliases.split(',')).filter(String::isNotBlank).any { label ->
@@ -63,7 +66,7 @@ object OrderCoverage {
                 val productMatch = item.productId != null && candidates.any { it.id == item.productId } ||
                     sourceLabels.any { labelMatches(it, item.name) } || candidates.any { labelMatches(item.name, it.name) && variantKey(item.variant.orEmpty()) == variantKey(it.variant.orEmpty()) }
                 val correctRecipient = sourcePerson == null || item.recipientKind != "shipyard" &&
-                    item.recipientName?.let { labelMatches(sourcePerson, it) } == true
+                    item.recipientName?.let { name -> recipientLabels.any { labelMatches(it, name) } } == true
                 val correctVariant = sourceVariant == null || item.variant?.let {
                     variantKey(it) == variantKey(sourceVariant)
                 } == true
@@ -71,14 +74,19 @@ object OrderCoverage {
             }
             // One source can legitimately expand into several products; every distinct catalog target must be accounted for.
             val allTargetsCovered = candidates.isEmpty() || candidates.all { p -> matching.any { index ->
-                items[index].productId == p.id || labelMatches(items[index].name, p.name)
+                items[index].productId == p.id || items[index].productId == null && labelMatches(items[index].name, p.name) &&
+                    variantKey(items[index].variant.orEmpty()) == variantKey(p.variant.orEmpty())
             } }
             // A known product in a sentence does not account for an additional unknown product.
             // Keep the complete fragment for an explicit decision when meaningful words remain.
-            val accountedLabels = candidates.flatMap { listOf(it.name) + it.aliases.split(',') } +
+            val learnedLabels = RecognitionRules.active(rules).filter { rule ->
+                rule.ruleType == "PRODUCT" && labelMatches(request.text, rule.sourceLabel) &&
+                    parsed.any { ImportParser.key(it.name) == ImportParser.key(rule.learnedName) }
+            }.map { it.sourceLabel }
+            val accountedLabels = learnedLabels + candidates.flatMap { listOf(it.name) + it.aliases.split(',') } +
                 matching.map { items[it].name } + listOfNotNull(sourcePerson)
             val accountedWords = accountedLabels.flatMap(::tokens)
-            val syntaxWords = tokens("rozmiar sztuka sztuki sztuk para pary opakowanie opakowania opak paczka paczki metr metry litr litry komplet komplety kpl rolka rolki karton kartony pudelko pudelka dla")
+            val syntaxWords = tokens("rozmiar sztuka sztuki sztuk para pary opakowanie opakowania opak paczka paczki metr metry litr litry komplet komplety kpl rolka rolki karton kartony pudelko pudelka dla ciuchy ubranie kombinezon monterskie spawalnicze jednoczesciowy one piece")
             val residual = tokens(request.text).any { word ->
                 !word.matches(Regex("m?\\d+")) && accountedWords.none { similar(word, it) } && syntaxWords.none { similar(word, it) }
             }
@@ -86,8 +94,9 @@ object OrderCoverage {
                 val item = items[index]
                 val requestedQuantity = sourceQuantity(request.text)
                 items[index] = item.copy(sourceIds = item.sourceIds + request.id,
-                    sourceText = request.text, requestedUnit = ProductUnits.explicitUnit(request.text) ?: item.requestedUnit,
-                    requiresSourceConfirmation = item.requiresSourceConfirmation || requestedQuantity != null && requestedQuantity != item.quantity)
+                    sourceText = listOfNotNull(item.sourceText, request.text).distinct().joinToString("\n"), requestedUnit = ProductUnits.explicitUnit(request.text) ?: item.requestedUnit,
+                    requiresSourceConfirmation = item.requiresSourceConfirmation || item.sourceIds.isNotEmpty() || matching.size > 1 ||
+                        requestedQuantity != null && requestedQuantity != item.quantity)
             } else {
                 val guessed = parsed.singleOrNull()
                 items += ParsedItem(name = guessed?.name ?: request.text.trimStart('-', '•', ' '),

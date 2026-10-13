@@ -40,6 +40,49 @@ class OrderCoverageTest {
         assertTrue(result.items.all { it.sourceIds.isNotEmpty() })
         assertEquals(1,result.sourceRequests.size)
     }
+    @Test fun recipientBeforeDashIsAccountedForWithoutInventingAnotherProduct() {
+        val one=proposal.copy(items=listOf(proposal.items.last().copy(recipientName="Jan Kowalski",recipientKind="person")))
+        val result=OrderCoverage.reconcile("Jan Kowalski - Opalarka x3",one,catalog,emptyList())
+        assertEquals(1,result.items.size)
+        assertFalse(result.items.single().requiresSourceConfirmation)
+        assertTrue(OrderCoverage.canSave(result,result.items))
+    }
+    @Test fun activeLearnedProductAliasIsUsedBySourceReconciliation() {
+        val rule=pl.magazyn.mobile.data.ParserLearningRuleEntity("rule","swietlik","Świetlik","Opalarka",null,"szt.",updatedAtEpochMillis=1)
+        val one=proposal.copy(items=listOf(proposal.items.last().copy(quantity=2)))
+        val result=OrderCoverage.reconcile("Świetlik x2",one,catalog,emptyList(),listOf(rule))
+        assertEquals(1,result.items.size)
+        assertEquals(setOf("source-0"),result.items.single().sourceIds)
+        assertFalse(result.items.single().requiresSourceConfirmation)
+    }
+    @Test fun ambiguousCatalogVariantsCannotBeAccountedForByNameOnly() {
+        val c=listOf(product("g9","Rękawice","9","para"),product("g10","Rękawice","10","para"))
+        val p=ParsedNote(null,listOf(ParsedItem("Rękawice","9",2,"para",1f,productId="g9")),kind=ParsedInputKind.ORDER)
+        val result=OrderCoverage.reconcile("2 rękawice",p,c,emptyList())
+        assertTrue(result.items.any { it.sourceText=="2 rękawice" && it.requiresSourceConfirmation })
+        assertFalse(OrderCoverage.canSave(result,result.items))
+    }
+    @Test fun bundleExpandedIntoSeveralCatalogProductsKeepsOneSourceAndRequiresQuantityDecision() {
+        val c=listOf(product("g","Rękawice",null,"para","zestaw PPE"),product("b","Buty",null,"para","zestaw PPE"))
+        val p=ParsedNote(null,listOf(ParsedItem("Rękawice",null,1,"para",1f,productId="g"),ParsedItem("Buty",null,1,"para",1f,productId="b")),kind=ParsedInputKind.ORDER)
+        val result=OrderCoverage.reconcile("1 zestaw PPE",p,c,emptyList())
+        assertEquals(1,result.sourceRequests.size)
+        assertEquals(2,result.items.size)
+        assertTrue(result.items.all { it.sourceIds==setOf("source-0") && it.requiresSourceConfirmation })
+        assertFalse(OrderCoverage.canSave(result,result.items))
+    }
+    @Test fun repeatedSourceLinesCannotSilentlyShareOneQuantity() {
+        val one=proposal.copy(items=listOf(proposal.items.last().copy(quantity=2)))
+        val result=OrderCoverage.reconcile("Opalarka x2\nOpalarka x2",one,catalog,emptyList())
+        assertEquals(2,result.items.single().sourceIds.size)
+        assertTrue(result.items.single().requiresSourceConfirmation)
+        assertFalse(OrderCoverage.canSave(result,result.items))
+    }
+    @Test fun duplicateModelRowsNeedExplicitResolution() {
+        val duplicate=proposal.copy(items=listOf(proposal.items.last(),proposal.items.last()))
+        val result=OrderCoverage.reconcile("3 opalarki",duplicate,catalog,emptyList())
+        assertTrue(result.items.all { it.requiresSourceConfirmation })
+    }
     @Test fun knownProductDoesNotCoverUnknownRequestOnSameLine() {
         val result=OrderCoverage.reconcile("3 opalarki i tajemniczy element",proposal,catalog,emptyList())
         assertTrue(result.items.any { it.requiresSourceConfirmation && it.sourceText=="3 opalarki i tajemniczy element" })
@@ -50,6 +93,13 @@ class OrderCoverageTest {
         assertTrue(result.items.any { it.requiresSourceConfirmation && it.sourceText=="Nieznany element x7" })
         val changed=OrderCoverage.reconcile("Opalarka 10 szt.",proposal,catalog,emptyList())
         assertTrue(changed.items.first { it.productId=="h" }.requiresSourceConfirmation)
+    }
+    @Test fun geminiDiagnosticsAreGlobalWhileBusinessAndConditionNotesRemain() {
+        val note=GeminiNoteAnalyzer().parseResponse("""{"kind":"ORDER","items":[{"name":"Opalarka","notes":"Dostępne: 3 szt."},{"name":"Buty","notes":"Stan: uszkodzone"},{"name":"Rękawice","notes":"Zwrot po zmianie"}],"warnings":["Dostępne: 3 szt.","Zwrot po zmianie"]}""")
+        assertEquals("",note.items[0].notes)
+        assertEquals("Stan: uszkodzone",note.items[1].notes)
+        assertEquals("Zwrot po zmianie",note.items[2].notes)
+        assertEquals(2,note.reviewWarnings.size)
     }
     @Test fun userNotesRemainAndDiagnosticsStaySeparate() {
         val note=proposal.copy(reviewWarnings=listOf(ReviewWarning("a",ReviewWarningCategory.GENERAL,"A"),ReviewWarning("b",ReviewWarningCategory.GENERAL,"B")))

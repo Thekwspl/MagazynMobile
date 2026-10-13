@@ -6,7 +6,7 @@ from updater import load_config
 
 def render(config,output,updater_path,config_path,interval=30):
     if not 5<=interval<=1440: raise ValueError('INTERVAL_INVALID')
-    if not Path(updater_path).is_absolute() or not Path(config_path).is_absolute(): raise ValueError('PATH_INVALID')
+    if any(not Path(path).is_absolute() or any(c.isspace() or c=='%' for c in path) for path in [updater_path,config_path]): raise ValueError('PATH_INVALID')
     output.mkdir(parents=True,exist_ok=True)
     (output/'magazyn-agent-update.service').write_text(f'''[Unit]
 Description=Check approved MagazynMobile agent release

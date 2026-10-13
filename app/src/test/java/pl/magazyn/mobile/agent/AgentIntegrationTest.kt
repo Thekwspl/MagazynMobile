@@ -108,6 +108,14 @@ class AgentIntegrationTest {
         }
     }
 
+    @Test fun `review stores availability and diagnostics outside business notes`() = runBlocking {
+        val raw=JSONObject(response("proposal")).put("warnings",JSONArray().put("Sprawdź buty").put("Sprawdź buty").put("Sprawdź inne buty"))
+        val repository=AgentRepository(Client(raw.toString()),Source(mapOf("g" to 0.0)),{1})
+        val note=repository.review(AgentProtocol.parse(raw.toString()))
+        assertEquals("",note.items.single().notes)
+        assertEquals(0.0,note.items.single().availableQuantity!!,0.0)
+        assertEquals(listOf("Sprawdź buty","Sprawdź inne buty"),note.reviewWarnings.map {it.message})
+    }
     @Test fun `multiple IDs and unknown ID do not fabricate stock`() = runBlocking {
         val client = Client(response("needs_data", listOf("g", "o")))
         AgentRepository(client, Source(mapOf("g" to 0.0, "o" to -1.0)), { 1 }).analyze("dwa produkty")

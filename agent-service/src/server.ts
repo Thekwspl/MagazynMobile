@@ -88,7 +88,7 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
         if (request.method === "POST" && url.pathname === "/v1/update/resume") { draining = false; return json(response, 200, { draining }); }
         return json(response, 404, { error: "not_found" });
       }
-      if (url.pathname.startsWith("/v1/") && !(request.method === "GET" && url.pathname === "/v1/auth/status")) {
+      if (url.pathname.startsWith("/v1/")) {
         if (draining && (url.pathname === "/v1/sessions/message" || url.pathname.includes("catalog/") || url.pathname.includes("/auth/")))
           return json(response, 503, { error: "UPDATE_DRAINING", message: "Usługa przygotowuje aktualizację. Spróbuj ponownie." });
         counted = true; inFlight++;

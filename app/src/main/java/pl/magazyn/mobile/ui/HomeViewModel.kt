@@ -229,7 +229,8 @@ class HomeViewModel @JvmOverloads constructor(
         if (request.mode.preferredKind != null && request.mode.preferredKind != note.kind) return false
         _reviewSave.value = ReviewSaveUiState()
         val complete = pl.magazyn.mobile.domain.OrderCoverage.reconcile(request.text, note, recognitionProducts,
-            recognitionYards.flatMap { listOf(it.name) + it.aliases.split(',') + it.tags.split(',') })
+            recognitionYards.flatMap { listOf(it.name) + it.aliases.split(',') + it.tags.split(',') },
+            rules = if (_conversion.value != null) conversionRules else learningRules.value)
         _noteReview.value = NoteReviewUiState(request.text, complete.copy(items = complete.items.map { item ->
             val itemKey = ImportParser.key(item.name)
             val labels = listOf(item.name) + recognitionProducts.filter { product ->
@@ -728,8 +729,9 @@ class HomeViewModel @JvmOverloads constructor(
                 val employees = database.employeeDao().getAllNow()
                 val catalog = database.productDao().getAllNow()
                 val activeShipyards = database.shipyardDao().getAllNow().filterNot { it.isArchived }
-                approvedItems.groupBy { it.recipientName ?: note.shipyardName ?: "Bez odbiorcy" }
-                    .forEach { (recipient, items) ->
+                approvedItems.groupBy { Triple(it.recipientName ?: note.shipyardName ?: "Bez odbiorcy", it.recipientId, it.recipientKind) }
+                    .forEach { (recipientIdentity, items) ->
+                        val recipient = recipientIdentity.first
                         val recipientKey = ImportParser.key(recipient)
                         val fixedRecipientId = items.mapNotNull { it.recipientId?.takeIf { _ -> it.recipientName == recipient } }.distinct().singleOrNull()
                         val explicitYard = items.any { it.recipientKind == "shipyard" && it.recipientId == fixedRecipientId }
