@@ -1110,7 +1110,9 @@ internal fun ParsedNoteReviewContent(
                         onSaveOrder(
                             editedItems.mapIndexedNotNull { index, corrected ->
                             if (approvedItems[index] == true) sourceItems.getOrNull(index)?.let { source ->
-                                val withDefault = if (corrected.recipientName.isNullOrBlank() && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim(), recipientId = null, recipientKind = null) else corrected
+                                val withDefault = if (corrected.recipientName.isNullOrBlank() && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim(),
+                                    recipientId = if (defaultRecipientIsShipyard) recognizedRecipientShipyard(defaultRecipientName, shipyards)?.id else recognizedPerson(defaultRecipientName, people)?.id,
+                                    recipientKind = if (defaultRecipientIsShipyard) "shipyard" else "person") else corrected
                                 val storageRecipient = withDefault.recipientName?.let { recipient -> recognizedPerson(recipient, people)?.fullName ?: recipient }
                                 val product = corrected.productId?.let { id -> products.firstOrNull { it.id == id } }
                                     ?: productIndex.matches(corrected, strictOfflineMatching = !note.analyzedByAi).singleOrNull()

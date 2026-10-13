@@ -47,4 +47,17 @@ class OrderCoverageIntegrationTest {
         assertEquals(0L,db.queryLong("SELECT COUNT(*) FROM stock_movements"))
     }
 
+    @Test fun explicitAndImplicitRowsForSameShipyardRemainOneDraftDespitePersonWithSameLabel()=runBlocking {
+        db.employeeDao().insert(EmployeeEntity("employee-2","Elektro","Elektro",""))
+        val yard=ParsedItem("Produkt","52",2,"szt.",1f,recipientName="Elektro",productId="product-1",recipientId="yard",recipientKind="shipyard")
+        val implicit=yard.copy(quantity=1,recipientId=null)
+        val note=ParsedNote(null,listOf(yard,implicit),kind=ParsedInputKind.ORDER,shipyardName="Elektro")
+        val vm=env.track(HomeViewModel(env.application))
+        vm.runAndAwaitViewModelWork { vm.saveDraftOrder("Produkt",note,note.items.map {it to it},false) }
+        assertEquals(1L,db.queryLong("SELECT COUNT(*) FROM orders"))
+        assertEquals(1L,db.queryLong("SELECT COUNT(*) FROM orders WHERE shipyardId='yard' AND employeeId IS NULL"))
+        assertEquals(2L,db.queryLong("SELECT COUNT(*) FROM order_lines"))
+        assertEquals(0L,db.queryLong("SELECT COUNT(*) FROM stock_movements"))
+    }
+
 }

@@ -729,16 +729,27 @@ class HomeViewModel @JvmOverloads constructor(
                 val employees = database.employeeDao().getAllNow()
                 val catalog = database.productDao().getAllNow()
                 val activeShipyards = database.shipyardDao().getAllNow().filterNot { it.isArchived }
-                approvedItems.groupBy { Triple(it.recipientName ?: note.shipyardName ?: "Bez odbiorcy", it.recipientId, it.recipientKind) }
+                approvedItems.groupBy { item ->
+                    val label = item.recipientName ?: note.shipyardName ?: "Bez odbiorcy"
+                    val key = ImportParser.key(label)
+                    val person = if (item.recipientKind == "shipyard") null else
+                        employees.firstOrNull { it.id == item.recipientId && item.recipientKind == "person" } ?: employees.firstOrNull {
+                            ImportParser.key(it.fullName) == key || it.aliases.split(',').any { alias -> ImportParser.key(alias) == key }
+                        }
+                    val yard = if (person != null) null else activeShipyards.firstOrNull { it.id == item.recipientId && item.recipientKind == "shipyard" }
+                        ?: activeShipyards.firstOrNull { ImportParser.key(it.name) == key }
+                    Triple(person?.fullName ?: yard?.name ?: label, person?.id ?: yard?.id ?: item.recipientId,
+                        if (person != null) "person" else if (yard != null) "shipyard" else item.recipientKind)
+                }
                     .forEach { (recipientIdentity, items) ->
                         val recipient = recipientIdentity.first
                         val recipientKey = ImportParser.key(recipient)
-                        val fixedRecipientId = items.mapNotNull { it.recipientId?.takeIf { _ -> it.recipientName == recipient } }.distinct().singleOrNull()
-                        val explicitYard = items.any { it.recipientKind == "shipyard" && it.recipientId == fixedRecipientId }
-                        val employee = if (explicitYard) null else (employees.firstOrNull { it.id == fixedRecipientId && items.any { item -> item.recipientKind == "person" } } ?: employees.firstOrNull {
+                        val fixedRecipientId = recipientIdentity.second
+                        val explicitYard = recipientIdentity.third == "shipyard"
+                        val employee = if (explicitYard) null else (employees.firstOrNull { it.id == fixedRecipientId && recipientIdentity.third == "person" } ?: employees.firstOrNull {
                             ImportParser.key(it.fullName) == recipientKey || it.aliases.split(',').any { alias -> ImportParser.key(alias) == recipientKey }
                         })
-                        val recipientShipyard = activeShipyards.firstOrNull { it.id == fixedRecipientId && items.any { item -> item.recipientKind == "shipyard" } }
+                        val recipientShipyard = activeShipyards.firstOrNull { it.id == fixedRecipientId && recipientIdentity.third == "shipyard" }
                             ?: activeShipyards.firstOrNull { ImportParser.key(it.name) == recipientKey }
                         val orderId = UUID.randomUUID().toString()
                         database.orderDao().upsertOrders(
