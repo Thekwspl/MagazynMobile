@@ -228,7 +228,9 @@ class HomeViewModel @JvmOverloads constructor(
         if (request != currentRequest() || _reviewSave.value.isSaving) return false
         if (request.mode.preferredKind != null && request.mode.preferredKind != note.kind) return false
         _reviewSave.value = ReviewSaveUiState()
-        _noteReview.value = NoteReviewUiState(request.text, note.copy(items = note.items.map { item ->
+        val complete = pl.magazyn.mobile.domain.OrderCoverage.reconcile(request.text, note, recognitionProducts,
+            recognitionYards.flatMap { listOf(it.name) + it.aliases.split(',') + it.tags.split(',') })
+        _noteReview.value = NoteReviewUiState(request.text, complete.copy(items = complete.items.map { item ->
             val itemKey = ImportParser.key(item.name)
             val labels = listOf(item.name) + recognitionProducts.filter { product ->
                 product.id == item.productId || ImportParser.key(product.name) == itemKey ||
@@ -675,6 +677,9 @@ class HomeViewModel @JvmOverloads constructor(
         if (approvedPairs.isEmpty() || !canSaveReview(reviewId)) return
         saveReview(reviewId, onSaved) {
             database.withTransaction {
+                check(pl.magazyn.mobile.domain.OrderCoverage.canSave(note, approvedPairs.map { it.second })) {
+                    "Nie wszystkie fragmenty zamówienia zostały rozstrzygnięte. Potwierdź pozycje lub jawnie je wyłącz."
+                }
                 if (rememberCorrections) approvedPairs.forEach { (source, corrected) ->
                     val triggerKey = ImportParser.key(source.name)
                     if (triggerKey.isNotBlank()) {
@@ -778,7 +783,7 @@ class HomeViewModel @JvmOverloads constructor(
                                     id = UUID.randomUUID().toString(),
                                     orderId = orderId,
                                     productId = product?.id,
-                                    rawText = listOfNotNull(item.name, item.variant, item.notes.takeIf(String::isNotBlank)).joinToString(" · "),
+                                    rawText = listOfNotNull(product?.name ?: item.name, product?.variant ?: item.variant, item.notes.takeIf(String::isNotBlank)).joinToString(" · "),
                                     quantity = item.quantity.toDouble(),
                                     unit = ProductUnits.displayUnit(item, product?.unit),
                                     verificationStatus = if (product == null) "NEEDS_MAPPING" else "VERIFIED",

@@ -202,10 +202,14 @@ class GeminiNoteAnalyzer(private val transport: (suspend (String, String) -> Str
             }
         }.flatMap { item -> RecognitionRules.products(item, learningRules) }
         val taskDraft = if (kind == ParsedInputKind.TASK) parseTaskDraft(json.optJSONObject("task"), taskPlaces, employees) else null
+        val diagnostics = items.mapNotNull { item -> item.notes.takeIf { text ->
+            listOf("Dostępne:", "Propozycja wymaga", "Nie wykonano zapisu", "Stan:").any { text.startsWith(it, true) }
+        } } + json.stringList("warnings")
         return ParsedNote(
+            reviewWarnings = diagnostics.distinct().mapIndexed { index, text -> ReviewWarning("gemini-$index", ReviewWarningCategory.GENERAL, text) },
             person = people.firstOrNull(),
             people = people,
-            items = items,
+            items = items.map { if (it.notes in diagnostics) it.copy(notes = "") else it },
             phoneNumbers = json.stringList("phoneNumbers"),
             tasks = json.stringList("tasks"),
             kind = kind,

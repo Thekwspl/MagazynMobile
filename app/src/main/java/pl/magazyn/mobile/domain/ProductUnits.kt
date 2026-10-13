@@ -5,8 +5,9 @@ import kotlin.math.roundToLong
 /** Catalog units are authoritative. A different message unit needs a human decision, never a conversion. */
 object ProductUnits {
     private val quantityUnit = Regex("""(?i)(?:x\s*)?(\d+(?:[.,]\d+)?)\s*(szt\.?|sztuk(?:a|i)?|par(?:a|y)?|opak\.?|opakowani(?:e|a)?|paczk(?:a|i|ę)|metr(?:y|ów)?|m|l|litr(?:y|ów)?|kpl\.?|komplet(?:y)?|rolk(?:a|i)|karton(?:y)?|pudełk(?:o|a))(?![\p{L}])""")
-    fun explicitQuantity(text: String): Long? = quantityUnit.find(text)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()?.let { it.roundToLong() }
-    fun explicitUnit(text: String): String? = quantityUnit.find(text)?.groupValues?.get(2)
+    private val singlePackage = Regex("(?i)^\\s*[-•]?\\s*(karton|paczka|opakowanie|komplet)\\b")
+    fun explicitQuantity(text: String): Long? = quantityUnit.find(text)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()?.let { it.roundToLong() } ?: singlePackage.find(text)?.let { 1L }
+    fun explicitUnit(text: String): String? = quantityUnit.find(text)?.groupValues?.get(2) ?: singlePackage.find(text)?.groupValues?.get(1)
     fun messageUnit(text: String, labels: List<String>, catalogUnit: String? = null): String? {
         val fragments = text.split(Regex("[;\\n]"))
         val matching = fragments.filter { fragment -> labels.filter(String::isNotBlank).any { label ->

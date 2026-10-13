@@ -15,7 +15,6 @@ concurrency:
 jobs:
   instrumentation:
     name: androidTest API ${{ matrix.api }}
-    if: github.head_ref == 'fix/1.2.0-release-gate-api26' || github.head_ref == 'feature/1.2.1'
     needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -84,6 +83,12 @@ jobs:
       - name: Testy agent-service (mocki)
         working-directory: agent-service
         run: npm ci && npm test
+
+      - name: Testy aktualizatora i pakietu agent-service
+        run: |
+          python3 -m unittest discover -s agent-service/deploy -p 'test_*.py' -v
+          python3 agent-service/deploy/build_bundle.py --output agent-release --commit "$GITHUB_SHA"
+          python3 agent-service/deploy/check_bundle.py agent-release
 
       - name: Ustaw Java 17
         uses: actions/setup-java@v4
