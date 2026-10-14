@@ -55,7 +55,7 @@ class CompactInputLayoutTest {
         compose.setContent {
             MaterialTheme { Box(Modifier.width(360.dp)) {
                 ParsedNoteReviewContent("", ParsedNote(null, listOf(item), kind = ParsedInputKind.ORDER), null,
-                    emptyList(), listOf(product), emptyList(), emptyList(), {}, { _, _ -> }, { _, _, _, _, _, _ -> }, {}, { _, _, _, _ -> })
+                    emptyList(), listOf(product), emptyList(), emptyList(), {}, { _, _ -> }, { _, _, _, _, _, _ -> }, {}, { _, _, _, _, _ -> })
             } }
         }
         compose.onNodeWithContentDescription("Popraw").performScrollTo().performClick()
@@ -69,7 +69,7 @@ class CompactInputLayoutTest {
         compose.setContent {
             MaterialTheme { Box(Modifier.width(360.dp)) {
                 ParsedNoteReviewContent("", ParsedNote(null, emptyList(), kind = ParsedInputKind.ORDER), null,
-                    emptyList(), emptyList(), emptyList(), emptyList(), {}, { _, _ -> }, { _, _, _, _, _, _ -> }, {}, { _, _, _, _ -> })
+                    emptyList(), emptyList(), emptyList(), emptyList(), {}, { _, _ -> }, { _, _, _, _, _, _ -> }, {}, { _, _, _, _, _ -> })
             } }
         }
         compose.onNodeWithText("Dodaj kolejną pozycję").performScrollTo().performClick()
@@ -82,4 +82,29 @@ class CompactInputLayoutTest {
         compose.onNodeWithText("Jednostka").assert(hasSetTextAction().not())
         compose.onNodeWithText("Uwagi").assertDoesNotExist()
     }
+    @Test fun longOrderRowKeepsQuantityAndEditVisibleAt320dpWithLargeFont() = assertCompactOrderRow(320)
+    @Test fun longOrderRowKeepsQuantityAndEditVisibleAt360dpWithLargeFont() = assertCompactOrderRow(360)
+
+    private fun assertCompactOrderRow(width: Int) {
+        val name="Bardzo długi opis profesjonalnego przewodu magazynowego z dodatkową nazwą wariantu"
+        val product=pl.magazyn.mobile.data.ProductWithStock("p",name,"XL","m","","","","","","",false,0.0,0,false,12.0,true)
+        val item=ParsedItem(name,"XL",15,"m",1f,productId="p")
+        compose.setContent {
+            val density=LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density,1.8f)) {
+                MaterialTheme { Box(Modifier.width(width.dp)) {
+                    ParsedNoteReviewContent("",ParsedNote(null,listOf(item),kind=ParsedInputKind.ORDER),null,
+                        emptyList(),listOf(product),emptyList(),emptyList(),{}, { _, _ -> }, { _, _, _, _, _, _ -> },{}, { _, _, _, _, _ -> })
+                } }
+            }
+        }
+        compose.onNodeWithContentDescription("Popraw").performScrollTo().assertIsDisplayed().assertHasClickAction()
+        compose.onNodeWithText("15 m").assertIsDisplayed()
+        val quantity=compose.onNodeWithText("15 m").fetchSemanticsNode().boundsInRoot
+        val edit=compose.onNodeWithContentDescription("Popraw").fetchSemanticsNode().boundsInRoot
+        assertTrue(quantity.right <= edit.left + 1f)
+        compose.onNodeWithContentDescription("Popraw").performClick()
+        compose.onNodeWithText("Ilość").performScrollTo().assertExists()
+    }
+
 }

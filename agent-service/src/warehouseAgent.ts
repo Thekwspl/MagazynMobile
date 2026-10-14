@@ -45,6 +45,9 @@ export class WarehouseAgent {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
+  pendingSessions(): number {
+    return [...this.sessions.values()].filter(s => ["needs_data", "needs_user_choice"].includes(s.response.status)).length;
+  }
   start(message: string): AgentResponse {
     const sessionId = randomUUID();
     const response = this.resolve(sessionId, message);

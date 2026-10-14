@@ -24,6 +24,11 @@ data class ParsedItem(
     val recipientKind: String? = null,
     val requestedUnit: String? = null,
     val confirmedCatalogUnit: String? = null,
+    val availableQuantity: Double? = null,
+    val sourceIds: Set<String> = emptySet(),
+    val sourceText: String? = null,
+    val requiresSourceConfirmation: Boolean = false,
+    val sourceRecipient: String? = null,
 )
 
 enum class ParsedInputKind { ORDER, TASK, CONTACT, NOTE }
@@ -53,6 +58,9 @@ data class ParsedNote(
     val suggestedIssueDate: String? = null,
     val taskDraft: ParsedTaskDraft? = null,
     val agentProposal: Boolean = false,
+    val reviewWarnings: List<ReviewWarning> = emptyList(),
+    val sourceRequests: List<SourceOrderRequest> = emptyList(),
+    val excludedSourceIds: Set<String> = emptySet(),
 )
 
 /**

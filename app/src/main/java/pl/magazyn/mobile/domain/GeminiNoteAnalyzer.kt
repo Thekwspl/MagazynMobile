@@ -70,6 +70,7 @@ class GeminiNoteAnalyzer(private val transport: (suspend (String, String) -> Str
             Jeżeli pozycja dotyczy całej ekipy, zachowaj odbiorcę opisowo. Zwrot lub wymianę dopisz do notes.
             Dla typu TASK zwróć zadanie jako dane strukturalne w polu task:
             {"kind":"TASK","people":[],"items":[],"phoneNumbers":[],"tasks":[],"task":{"title":"Zjazd","date":"YYYY-MM-DD lub null","notes":"opis nierozstrzygniętych informacji","steps":[{"time":"09:30 lub null","place":"UL lub Kleven lub null","notes":"","people":[{"employeeName":"Piech Łukasz","note":"","confidence":0.9}],"confidence":0.9}]}}
+            Diagnostykę rozpoznania zapisuj osobno w tablicy warnings. notes pozycji to wyłącznie uwagi biznesowe z wiadomości.
             Nie wymyślaj brakujących danych. Godziny lotów, linie lotnicze i niejednoznaczne fragmenty wpisz do notes zadania lub osoby. TASK nigdy nie ma automatycznie tworzyć pracownika ani miejsca.
             Dla innych typów zwróć WYŁĄCZNIE poprawny JSON w postaci:
             {"kind":"ORDER","shipyardName":"Ulstein","suggestedIssueDate":"2026-09-05","people":[{"fullName":"Jan Kowalski","position":"spawacz","confidence":0.9}],"items":[{"recipientName":"Jan Kowalski","name":"Buty spawalnicze","variant":"44","quantity":1,"unit":"para","notes":"","confidence":0.9}],"phoneNumbers":[],"tasks":[]}
@@ -202,10 +203,16 @@ class GeminiNoteAnalyzer(private val transport: (suspend (String, String) -> Str
             }
         }.flatMap { item -> RecognitionRules.products(item, learningRules) }
         val taskDraft = if (kind == ParsedInputKind.TASK) parseTaskDraft(json.optJSONObject("task"), taskPlaces, employees) else null
+        val itemDiagnostics = items.mapNotNull { item -> item.notes.takeIf { text ->
+            listOf("Propozycja wymaga", "Nie wykonano zapisu").any { text.startsWith(it, true) } ||
+                Regex("(?i)^Dostępne:\\s*-?\\d").containsMatchIn(text)
+        } }
+        val diagnostics = itemDiagnostics + json.stringList("warnings")
         return ParsedNote(
+            reviewWarnings = diagnostics.distinct().mapIndexed { index, text -> ReviewWarning("gemini-$index", ReviewWarningCategory.GENERAL, text) },
             person = people.firstOrNull(),
             people = people,
-            items = items,
+            items = items.map { if (it.notes in itemDiagnostics) it.copy(notes = "") else it },
             phoneNumbers = json.stringList("phoneNumbers"),
             tasks = json.stringList("tasks"),
             kind = kind,

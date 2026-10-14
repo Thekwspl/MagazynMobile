@@ -274,13 +274,16 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
                 throw AgentFailure("Propozycja zawiera nieobsługiwaną ilość lub jednostkę produktu ${item.productId}.")
             pl.magazyn.mobile.domain.ParsedItem(product.name, product.variant, item.quantity.toLong(), product.unit, 1f,
                 recipientName = person?.fullName ?: yard?.name,
-                notes = (listOf("Dostępne: ${item.available} ${product.unit}") + reply.warnings).joinToString("; "), productId = product.id,
+                availableQuantity = item.available, productId = product.id,
                 recipientId = recipient.id, recipientKind = recipient.kind,
                 requestedUnit = pl.magazyn.mobile.domain.ProductUnits.messageUnit(rawText, listOf(product.name) + product.aliases.split(','), product.unit))
         }
         val parsedPerson = person?.let { pl.magazyn.mobile.domain.ParsedPerson(it.fullName, null, 1f) }
         return pl.magazyn.mobile.domain.ParsedNote(parsedPerson, items, kind = pl.magazyn.mobile.domain.ParsedInputKind.ORDER,
-            analyzedByAi = true, shipyardName = yard?.name, suggestedIssueDate = reply.deliveryDate, agentProposal = true)
+            analyzedByAi = true, shipyardName = yard?.name, suggestedIssueDate = reply.deliveryDate, agentProposal = true,
+            reviewWarnings = reply.warnings.distinct().mapIndexed { index, warning ->
+                pl.magazyn.mobile.domain.ReviewWarning("agent-$index", pl.magazyn.mobile.domain.ReviewWarningCategory.GENERAL, warning)
+            })
     }
 }
 

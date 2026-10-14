@@ -21,6 +21,9 @@ export class CodexWarehouseAgent {
     private readonly catalog: () => CatalogSnapshot) {}
   close(): void { rmSync(this.cwd, { recursive: true, force: true }); }
 
+  pendingSessions(): number {
+    return [...this.sessions.values()].filter(s => ["needs_data", "needs_user_choice"].includes(s.response.status)).length;
+  }
   private error(sessionId: string, code: string, message: string): AgentResponse {
     return { schemaVersion: PROTOCOL_VERSION, sessionId, status: "error", intent: "ORDER", items: [],
       task: null, note: null, contact: null, recipient: null, deliveryDate: null,

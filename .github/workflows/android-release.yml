@@ -123,6 +123,12 @@ jobs:
         working-directory: agent-service
         run: npm ci && npm test && npm run build
 
+      - name: Testy aktualizatora i gotowego pakietu agent-service
+        run: |
+          python3 -m unittest discover -s agent-service/deploy -p 'test_*.py' -v
+          python3 agent-service/deploy/build_bundle.py --output agent-release --commit "$GITHUB_SHA"
+          python3 agent-service/deploy/check_bundle.py agent-release
+
       - name: Ustaw Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -391,7 +397,6 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
 
       - name: Przygotuj plik wydania
-        if: steps.release.outputs.publish_release == 'true'
         run: cp app/build/outputs/apk/release/app-release.apk MagazynMobile.apk
 
       - name: Utwórz tag wersji
@@ -406,16 +411,10 @@ jobs:
           git tag -a "$TAG" "$GITHUB_SHA" -m "Magazyn Mobile $TAG"
           git push origin "$TAG"
 
-      - name: Opublikuj GitHub Release
-        if: steps.release.outputs.publish_release == 'true'
+      - name: Opublikuj kompletne wydanie APK i agent-service
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.release.outputs.tag }}
-        shell: bash
-        run: gh release create "$TAG" MagazynMobile.apk --verify-tag --generate-notes --title "Magazyn Mobile $TAG"
+        run: python3 agent-service/deploy/publish_release.py --bundle agent-release --apk MagazynMobile.apk --commit "$GITHUB_SHA"
 
-      - name: Podsumowanie bez nowej publikacji
-        if: steps.release.outputs.publish_release != 'true'
-        env:
-          TAG: ${{ steps.release.outputs.tag }}
-        run: echo "Testy i build zakończone. Wydanie $TAG już istnieje, więc nie utworzono duplikatu."
+      - name: Podsumowanie
+        run: echo "Wszystkie wymagane etapy zakończone; komplet assetów zweryfikowany bez nadpisywania wydania."

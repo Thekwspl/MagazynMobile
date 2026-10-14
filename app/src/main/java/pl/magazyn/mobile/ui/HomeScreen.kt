@@ -29,6 +29,8 @@ import pl.magazyn.mobile.domain.ParsedNote
 import pl.magazyn.mobile.domain.ParsedInputKind
 import pl.magazyn.mobile.domain.QuickInputMode
 import pl.magazyn.mobile.domain.ProductUnits
+import pl.magazyn.mobile.domain.ReviewWarning
+import pl.magazyn.mobile.domain.ReviewWarningCategory
 import pl.magazyn.mobile.agent.AgentClarificationAnswer
 import pl.magazyn.mobile.agent.AgentClarificationType
 import pl.magazyn.mobile.agent.areRequiredClarificationsAnswered
@@ -274,7 +276,7 @@ fun ParsedNoteReviewScreen(
         if (note.kind != ParsedInputKind.NOTE) saving.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
         current.notice?.let { Text(it, modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium) }
         if (note.kind == ParsedInputKind.ORDER || note.kind == ParsedInputKind.TASK) {
-            OriginalMessagePanel(current.rawText)
+            OriginalMessagePanel(current.rawText, initiallyCollapsed = note.kind == ParsedInputKind.ORDER)
         }
         Box(Modifier.weight(1f)) {
             if (note.kind == ParsedInputKind.NOTE) {
@@ -299,7 +301,7 @@ fun ParsedNoteReviewScreen(
                     },
                 )
             } else ParsedNoteReviewContent(
-                rawText = if (note.kind == ParsedInputKind.ORDER) "" else current.rawText,
+                rawText = "",
                 note = note,
                 matchedPersonName = matchedPerson?.listDisplayName(),
                 people = people,
@@ -314,10 +316,10 @@ fun ParsedNoteReviewScreen(
                         onBack()
                     }
                 },
-                onSaveOrder = { itemPairs, rememberCorrections, shipyardName, plannedIssueDate ->
+                onSaveOrder = { itemPairs, rememberCorrections, shipyardName, plannedIssueDate, exclusions ->
                     viewModel.saveDraftOrder(
                         current.rawText,
-                        note.copy(shipyardName = shipyardName, suggestedIssueDate = plannedIssueDate),
+                        note.copy(shipyardName = shipyardName, suggestedIssueDate = plannedIssueDate, excludedSourceIds = exclusions),
                         itemPairs,
                         rememberCorrections,
                         reviewId = current.id,
@@ -802,7 +804,7 @@ internal fun ParsedNoteReviewContent(
     onAddProductTags: (String, String) -> Unit,
     onCreatePerson: (String, String, String, String, String, (String, String) -> Unit) -> Unit,
     onSaveTasks: () -> Unit,
-    onSaveOrder: (List<Pair<pl.magazyn.mobile.domain.ParsedItem, pl.magazyn.mobile.domain.ParsedItem>>, Boolean, String?, String) -> Unit,
+    onSaveOrder: (List<Pair<pl.magazyn.mobile.domain.ParsedItem, pl.magazyn.mobile.domain.ParsedItem>>, Boolean, String?, String, Set<String>) -> Unit,
 ) {
     val addedPhones = remember(note) { mutableStateListOf<String>() }
     val sourceItems = remember(note) { mutableStateListOf<pl.magazyn.mobile.domain.ParsedItem>().apply { addAll(note.items) } }
@@ -817,6 +819,7 @@ internal fun ParsedNoteReviewContent(
     var shipyardName by rememberSaveable(note) { mutableStateOf(note.shipyardName) }
     var defaultRecipientName by rememberSaveable(note) { mutableStateOf(note.shipyardName.orEmpty()) }
     var defaultRecipientIsShipyard by rememberSaveable(note) { mutableStateOf(note.shipyardName != null) }
+    var editingRecipient by rememberSaveable { mutableStateOf(false) }
     var shipyardMenu by remember { mutableStateOf(false) }
     var plannedIssueDate by rememberSaveable(note) { mutableStateOf(note.suggestedIssueDate ?: java.time.LocalDate.now().toString()) }
     var showPlannedDatePicker by remember { mutableStateOf(false) }
@@ -829,19 +832,16 @@ internal fun ParsedNoteReviewContent(
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (rawText.isNotBlank()) {
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Oryginalna wiadomość", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Text(rawText, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-        matchedPersonName?.let { name ->
+                if (rawText.isNotBlank()) OriginalMessagePanel(rawText, initiallyCollapsed = note.kind == ParsedInputKind.ORDER)
+        matchedPersonName?.takeIf { note.kind != ParsedInputKind.ORDER }?.let { name ->
             ReviewRow(name, note.person?.position?.let { p -> "stanowisko: $p" } ?: "rozpoznana osoba")
         }
         if (note.kind == ParsedInputKind.ORDER) {
-            if (note.agentProposal) Text("Propozycja Codex — sprawdź odbiorcę, produkty i dostępność przed zapisaniem szkicu.", color = MaterialTheme.colorScheme.primary)
+            OutlinedButton(onClick = { editingRecipient = !editingRecipient }, modifier = Modifier.fillMaxWidth()) {
+                Text("Odbiorca: ${defaultRecipientName.ifBlank { "Wybierz" }}", Modifier.weight(1f), maxLines = 2)
+                Icon(Icons.Default.Edit, "Edytuj odbiorcę")
+            }
+            if (editingRecipient) {
             Text("Domyślny odbiorca", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = !defaultRecipientIsShipyard, onClick = { defaultRecipientIsShipyard = false; defaultRecipientName = "" }, label = { Text("Osoba") }, leadingIcon = if (!defaultRecipientIsShipyard) { { Icon(Icons.Default.Person, null) } } else null)
@@ -874,12 +874,13 @@ internal fun ParsedNoteReviewContent(
                 },
                 enabled = defaultRecipientName.isNotBlank(), modifier = Modifier.fillMaxWidth(),
             ) { Text("Zastosuj do wszystkich bez odbiorcy") }
+            }
             OutlinedButton(onClick = { showPlannedDatePicker = true }, Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.CalendarMonth, null)
                 Spacer(Modifier.width(7.dp))
                 Text(formatDisplayDate(plannedIssueDate))
             }
-            if (note.suggestedIssueDate != null) Text("Data została rozpoznana z zapisu DD.MM w notatce — sprawdź ją przed utworzeniem szkicu.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            Text("Pozycje zamówienia", style = MaterialTheme.typography.titleMedium)
         }
         note.phoneNumbers.forEach { number ->
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
@@ -932,10 +933,13 @@ internal fun ParsedNoteReviewContent(
                 Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(approvedItems[index] == true, { approvedItems[index] = it })
                     Column(Modifier.weight(1f)) {
-                        Text(productTitle(productMatch?.name ?: item.name, productMatch?.variant ?: item.variant), fontWeight = FontWeight.SemiBold)
+                        Text(productTitle(productMatch?.name ?: item.name, productMatch?.variant ?: item.variant), fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        val available = productMatch?.stockQuantity?.takeIf { productMatch.stockKnown } ?: item.availableQuantity
+                        available?.let { Text(if (it == 0.0) "Brak na stanie" else "Stan: ${formatWholeQuantity(it)} ${ProductUnits.displayUnit(item, productMatch?.unit)}", style = MaterialTheme.typography.labelSmall) }
+                        if (item.requiresSourceConfirmation) Text("Fragment wymaga rozstrzygnięcia", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                         item.notes.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                         if (productMatch != null && ProductUnits.needsConfirmation(item, productMatch.unit)) {
-                            Text("Wiadomość: ${item.requestedUnit}; Karta: ${productMatch.unit}. Wyjaśnij ilość przed zapisaniem.", color = MaterialTheme.colorScheme.error)
+                            Text("Jednostka wymaga potwierdzenia", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                             TextButton(onClick = { editingItem = index }) { Text("Wyjaśnij jednostkę") }
                         }
                         if (productMatches.isEmpty()) Text("Nie rozpoznano przedmiotu", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
@@ -959,6 +963,8 @@ internal fun ParsedNoteReviewContent(
                     }
                     Text(
                         "${formatWholeQuantity(item.quantity)} ${ProductUnits.displayUnit(item, productMatch?.unit)}",
+                        modifier = Modifier.widthIn(max = 112.dp),
+                        maxLines = 2,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -969,6 +975,13 @@ internal fun ParsedNoteReviewContent(
                 if (editingItem == index) {
                     ElevatedCard(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        item.sourceText?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        if (item.requiresSourceConfirmation) {
+                            Text("Sprawdź produkt, wariant, ilość i odbiorcę z tego fragmentu. Możesz też wyłączyć pozycję checkboxem.", style = MaterialTheme.typography.bodySmall)
+                            OutlinedButton(onClick = { editedItems[index] = item.copy(requiresSourceConfirmation = false) },
+                                enabled = item.name.isNotBlank() && !quantityTexts[index].isNullOrBlank() &&
+                                    (item.sourceRecipient == null || item.recipientKind in setOf("person", "shipyard") && item.recipientId != null)) { Text("Potwierdzam dane fragmentu") }
+                        }
                         Text("1. Odbiorca", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                         OutlinedTextField(
                             item.recipientName.orEmpty(),
@@ -1073,6 +1086,17 @@ internal fun ParsedNoteReviewContent(
                 Text("Dodaj kolejną pozycję")
             }
         }
+        val localWarnings = editedItems.flatMapIndexed { index, item ->
+            val product = item.productId?.let { id -> products.firstOrNull { it.id == id } }
+                ?: productIndex.matches(item, strictOfflineMatching = !note.analyzedByAi).singleOrNull()
+            buildList {
+                if (approvedItems[index] == true && item.requiresSourceConfirmation) add(ReviewWarning("source-$index", ReviewWarningCategory.COVERAGE, "Nierozstrzygnięty fragment: ${item.sourceText}", true))
+                if (approvedItems[index] == true && product != null && ProductUnits.needsConfirmation(item, product.unit)) add(ReviewWarning("unit-$index", ReviewWarningCategory.UNIT, "${item.name}: wiadomość ${item.requestedUnit}, Karta ${product.unit}", true))
+                if (approvedItems[index] == true && product == null) add(ReviewWarning("product-$index", ReviewWarningCategory.PRODUCT, "${item.name}: wymaga mapowania", true))
+                if (approvedItems[index] == true && item.sourceRecipient != null && (item.recipientKind !in setOf("person", "shipyard") || item.recipientId == null)) add(ReviewWarning("recipient-$index", ReviewWarningCategory.RECIPIENT, "${item.name}: wybierz odbiorcę ${item.sourceRecipient}", true))
+            }
+        }
+        RecognitionWarnings(if (note.agentProposal) "Uwagi Codexa" else if (note.analyzedByAi) "Uwagi Gemini" else "Uwagi rozpoznawania", note.reviewWarnings + localWarnings)
         if (editedItems.isNotEmpty()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(rememberCorrections, { rememberCorrections = it })
@@ -1086,7 +1110,9 @@ internal fun ParsedNoteReviewContent(
                         onSaveOrder(
                             editedItems.mapIndexedNotNull { index, corrected ->
                             if (approvedItems[index] == true) sourceItems.getOrNull(index)?.let { source ->
-                                val withDefault = if (corrected.recipientName.isNullOrBlank() && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim(), recipientId = null, recipientKind = null) else corrected
+                                val withDefault = if ((corrected.recipientName.isNullOrBlank() || isDefaultRecipient(corrected.recipientName.orEmpty(), defaultRecipientName)) && corrected.recipientId == null && corrected.recipientKind == null && defaultRecipientName.isNotBlank()) corrected.copy(recipientName = defaultRecipientName.trim(),
+                                    recipientId = if (defaultRecipientIsShipyard) recognizedRecipientShipyard(defaultRecipientName, shipyards)?.id else recognizedPerson(defaultRecipientName, people)?.id,
+                                    recipientKind = if (defaultRecipientIsShipyard) "shipyard" else "person") else corrected
                                 val storageRecipient = withDefault.recipientName?.let { recipient -> recognizedPerson(recipient, people)?.fullName ?: recipient }
                                 val product = corrected.productId?.let { id -> products.firstOrNull { it.id == id } }
                                     ?: productIndex.matches(corrected, strictOfflineMatching = !note.analyzedByAi).singleOrNull()
@@ -1096,13 +1122,14 @@ internal fun ParsedNoteReviewContent(
                         rememberCorrections,
                         recognizedShipyard?.name,
                         plannedIssueDate,
+                        editedItems.mapIndexedNotNull { index, item -> if (approvedItems[index] != true) item.sourceIds else null }.flatten().toSet(),
                     )
                 },
                 enabled = approvedItems.values.any { it } && approvedItems.keys.filter { approvedItems[it] == true }.all {
                     !quantityTexts[it].isNullOrBlank() && editedItems.getOrNull(it)?.let { item ->
                         val product = item.productId?.let { id -> products.firstOrNull { it.id == id } }
                             ?: productIndex.matches(item, strictOfflineMatching = !note.analyzedByAi).singleOrNull()
-                        item.name.isNotBlank() && (product == null || !ProductUnits.needsConfirmation(item, product.unit))
+                        item.name.isNotBlank() && !item.requiresSourceConfirmation && (product == null || !ProductUnits.needsConfirmation(item, product.unit))
                     } == true
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -1131,9 +1158,9 @@ internal fun ParsedNoteReviewContent(
             initialRecipient = recognizedName,
             onDismiss = { newPersonItemIndex = null },
             onCreate = { first, last, phones, positions, aliases ->
-                onCreatePerson(first, last, phones, positions, aliases) { _, fullName ->
+                onCreatePerson(first, last, phones, positions, aliases) { id, fullName ->
                     editedItems.getOrNull(index)?.let { current ->
-                        editedItems[index] = current.copy(recipientName = personDisplayName(last, first, fullName))
+                        editedItems[index] = current.copy(recipientName = personDisplayName(last, first, fullName), recipientId = id, recipientKind = "person")
                     }
                     newPersonItemIndex = null
                 }

@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CatalogStore, type CatalogDelta, type CatalogSnapshot } from "./catalog.js";
 import { searchCatalog, SEARCH_TOOLS, type SearchTool } from "./catalogTools.js";
@@ -35,12 +36,19 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
   const clientTokenHash = createHash("sha256").update(clientToken).digest();
   const rateLimit = options.rateLimit ?? { max: 60, windowMs: 60_000 };
   const recentSessionRequests: number[] = [];
+  const updateToken = process.env.AGENT_UPDATE_TOKEN_FILE ? readFileSync(process.env.AGENT_UPDATE_TOKEN_FILE, "utf8").trim() : "";
+  let draining = false;
+  let inFlight = 0;
+  let loginPending = false;
+  let release: Record<string, unknown> = { tag: null, commit: null };
+  try { release = JSON.parse(readFileSync(new URL("../../release.json", import.meta.url), "utf8")); } catch { /* Source checkout, not an installed bundle. */ }
   const catalog = new CatalogStore();
   const local = new WarehouseAgent(() => catalog.read());
   const codex = options.codex ?? new CodexAppServerClient();
   const secret = randomBytes(32).toString("hex");
   const mcpScript = fileURLToPath(new URL("./catalogMcp.js", import.meta.url));
   const server = createServer(async (request, response) => {
+    let counted = false;
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
       if (request.method === "POST" && url.pathname === "/_internal/catalog/search") {
@@ -66,6 +74,24 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
             return json(response, 429, { error: "rate_limited" });
           recentSessionRequests.push(now);
         }
+      }
+      if (request.method === "GET" && url.pathname === "/v1/runtime")
+        return json(response, 200, { schemaVersion: PROTOCOL_VERSION, supportedClientProtocols: [PROTOCOL_VERSION],
+          release, mode, draining, activeRequests: inFlight, pendingSessions: agent.pendingSessions() + local.pendingSessions() + (loginPending ? 1 : 0) });
+      if (url.pathname.startsWith("/v1/update/")) {
+        const supplied = request.headers["x-agent-update-token"];
+        const loopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(request.socket.remoteAddress ?? "");
+        if (!loopback || typeof supplied !== "string" || updateToken.length < 43 ||
+            !timingSafeEqual(createHash("sha256").update(supplied).digest(), createHash("sha256").update(updateToken).digest()))
+          return json(response, 403, { error: "update_forbidden" });
+        if (request.method === "POST" && url.pathname === "/v1/update/drain") { draining = true; return json(response, 200, { draining }); }
+        if (request.method === "POST" && url.pathname === "/v1/update/resume") { draining = false; return json(response, 200, { draining }); }
+        return json(response, 404, { error: "not_found" });
+      }
+      if (url.pathname.startsWith("/v1/")) {
+        if (draining && (url.pathname === "/v1/sessions/message" || url.pathname.includes("catalog/") || url.pathname.includes("/auth/")))
+          return json(response, 503, { error: "UPDATE_DRAINING", message: "Usługa przygotowuje aktualizację. Spróbuj ponownie." });
+        counted = true; inFlight++;
       }
       if (request.method === "PUT" && url.pathname === "/v1/catalog/full-sync") {
         catalog.fullSync(await body<CatalogSnapshot>(request)); return json(response, 204, null);
@@ -110,13 +136,16 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
           : local.resumeWithChoice(sessionId, payload.candidateId));
       }
       if (request.method === "GET" && url.pathname === "/v1/auth/status") {
-        await codex.start("codex", mcp()); return json(response, 200, await codex.accountRead());
+        await codex.start("codex", mcp());
+        const account = await codex.accountRead() as { account?: { type?: string }; authMode?: string };
+        if (account.account?.type === "chatgpt" || account.authMode === "chatgpt") loginPending = false;
+        return json(response, 200, account);
       }
       if (request.method === "POST" && url.pathname === "/v1/auth/chatgpt/device-code") {
-        await codex.start("codex", mcp()); return json(response, 200, await codex.startChatGptDeviceLogin());
+        await codex.start("codex", mcp()); loginPending = true; return json(response, 200, await codex.startChatGptDeviceLogin());
       }
       if (request.method === "POST" && url.pathname === "/v1/auth/chatgpt/start") {
-        await codex.start("codex", mcp()); return json(response, 200, await codex.startChatGptLogin());
+        await codex.start("codex", mcp()); loginPending = true; return json(response, 200, await codex.startChatGptLogin());
       }
       if (url.pathname.startsWith("/v1/")) return json(response, 403, { error: "forbidden" });
       return json(response, 404, { error: "not_found" });
@@ -124,7 +153,7 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
       const message = error instanceof Error ? error.message : "unknown_error";
       const status = message.includes("TIMEOUT") ? 504 : message.includes("CODEX_PROTOCOL_ERROR") ? 502 : 400;
       return json(response, status, { error: message });
-    }
+    } finally { if (counted) inFlight--; }
   });
   const mcp = () => {
     const address = server.address();
