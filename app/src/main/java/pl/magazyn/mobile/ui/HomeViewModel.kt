@@ -232,6 +232,7 @@ class HomeViewModel @JvmOverloads constructor(
             recognitionYards.flatMap { listOf(it.name) + it.aliases.split(',') + it.tags.split(',') },
             rules = if (_conversion.value != null) conversionRules else learningRules.value)
         _noteReview.value = NoteReviewUiState(request.text, complete.copy(items = complete.items.map { item ->
+            if (complete.kind == ParsedInputKind.ORDER && item.sourceIds.isNotEmpty()) return@map item
             val itemKey = ImportParser.key(item.name)
             val labels = listOf(item.name) + recognitionProducts.filter { product ->
                 product.id == item.productId || ImportParser.key(product.name) == itemKey ||
