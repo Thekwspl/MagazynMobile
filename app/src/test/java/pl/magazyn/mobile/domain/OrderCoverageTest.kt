@@ -27,6 +27,41 @@ class OrderCoverageTest {
         assertTrue(OrderCoverage.canSave(checked.copy(excludedSourceIds=boots.sourceIds),approved))
         assertFalse(OrderCoverage.canSave(checked,approved))
     }
+    @Test fun conflictingBootsKeepOneRowAndRequireRecipientAndVariantReview() {
+        val wrongBoots = ParsedItem("Buty robocze", "46", 1, "para", 1f,
+            productId = "b46", recipientKind = "shipyard", recipientId = "yard", recipientName = "Elektro")
+        val result = OrderCoverage.reconcile(raw, proposal.copy(items = proposal.items + wrongBoots),
+            catalog + product("b46", "Buty robocze", "46", "para"), listOf("Elektro"))
+        assertEquals(4, result.items.size)
+        val boots = result.items.single { it.productId == "b46" }
+        assertEquals("46", boots.variant)
+        assertTrue(boots.sourceText!!.contains("m47"))
+        assertEquals("Marka Wiewiorki", boots.sourceRecipient)
+        assertNull(boots.recipientKind)
+        assertNull(boots.recipientId)
+        assertTrue(boots.requiresSourceConfirmation)
+        assertFalse(OrderCoverage.canSave(result, result.items))
+    }
+
+    @Test fun missingSecondProductKeepsOnlyItsOwnTextAndQuantity() {
+        val onlyOpalarka = proposal.copy(items = listOf(proposal.items.last().copy(quantity = 2)))
+        val result = OrderCoverage.reconcile("2 opalarki i 3 przedłużacze", onlyOpalarka, catalog, emptyList())
+        assertEquals(2, result.items.size)
+        val missing = result.items.single { it.productId == null }
+        assertEquals("3 przedłużacze", missing.sourceText)
+        assertEquals(3L, missing.quantity)
+        assertTrue(missing.requiresSourceConfirmation)
+        assertFalse(OrderCoverage.canSave(result, result.items))
+    }
+
+    @Test fun reconciliationPreservesUserCorrectionsOnTheSameSource() {
+        val one = proposal.copy(items = listOf(proposal.items.last()))
+        val checked = OrderCoverage.reconcile("2 opalarki", one, catalog, emptyList())
+        val edited = checked.copy(items = checked.items.map { it.copy(quantity = 2, requiresSourceConfirmation = false) })
+        assertEquals(edited, OrderCoverage.reconcile("2 opalarki", edited, catalog, emptyList()))
+        assertTrue(OrderCoverage.canSave(edited, edited.items))
+    }
+
     @Test fun cartonWithoutNumeralStillRequiresUnitConfirmation() {
         assertEquals("Karton",ProductUnits.explicitUnit("- Karton okularow BHP"))
         assertEquals(1L,ProductUnits.explicitQuantity("- Karton okularow BHP"))
@@ -38,7 +73,8 @@ class OrderCoverageTest {
         val p=ParsedNote(null,listOf(ParsedItem("Rękawice",null,2,"para",1f,productId="g"), ParsedItem("Opalarka",null,3,"szt.",1f,productId="h")),kind=ParsedInputKind.ORDER)
         val result=OrderCoverage.reconcile("2 wampirkj i 3 opalarki",p,c,emptyList())
         assertTrue(result.items.all { it.sourceIds.isNotEmpty() })
-        assertEquals(1,result.sourceRequests.size)
+        assertEquals(2,result.sourceRequests.size)
+        assertEquals(2,result.items.size)
     }
     @Test fun explicitKnownShipyardRecipientIsNotForcedIntoPersonSelection() {
         val one=proposal.copy(items=listOf(proposal.items.last().copy(recipientName="Elektro",recipientId="yard")))
@@ -90,14 +126,15 @@ class OrderCoverageTest {
     @Test fun duplicateModelRowsNeedExplicitResolution() {
         val duplicate=proposal.copy(items=listOf(proposal.items.last(),proposal.items.last()))
         val result=OrderCoverage.reconcile("3 opalarki",duplicate,catalog,emptyList())
-        assertTrue(result.items.all { it.requiresSourceConfirmation })
+        assertTrue(result.items.single().requiresSourceConfirmation)
+        assertEquals(3L, result.items.single().quantity)
     }
     @Test fun additionalGenericPackageRequestCannotHideBehindTheSameCatalogUnit() {
         val c=listOf(product("h","Opalarka",null,"kpl"))
         val p=ParsedNote(null,listOf(ParsedItem("Opalarka",null,2,"kpl",1f,productId="h")),kind=ParsedInputKind.ORDER)
         val result=OrderCoverage.reconcile("2 opalarki i 2 komplety",p,c,emptyList())
         assertFalse(OrderCoverage.canSave(result,result.items))
-        assertTrue(result.items.any {it.requiresSourceConfirmation && it.sourceText=="2 opalarki i 2 komplety"})
+        assertTrue(result.items.any {it.requiresSourceConfirmation && it.sourceText=="2 komplety"})
     }
     @Test fun knownProductDoesNotCoverUnknownRequestOnSameLine() {
         val result=OrderCoverage.reconcile("3 opalarki i tajemniczy element",proposal,catalog,emptyList())
