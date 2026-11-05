@@ -32,16 +32,22 @@ class RecognizedOrderEditorTest {
         compose.onNodeWithText("Edytuj pozycję").assertIsDisplayed()
         field("Nazwa, alias lub tag").performTextReplacement("Przewód")
         field("Ilość").performTextReplacement("7")
-        field("Osoba lub stocznia").performTextReplacement("Rura")
-        compose.onNodeWithText("Anuluj").performScrollTo().performClick()
+        field("Osoba lub stocznia").performClick().performTextReplacement("Rura")
+        compose.onNodeWithText("Anuluj").assertIsDisplayed().performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { state.editor == null }
+        compose.onNodeWithText("Edytuj pozycję").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(opalarka, state.rows[0].item)
             assertFalse(state.rows[0].approved)
         }
-        compose.onAllNodesWithContentDescription("Popraw")[1].performClick()
+        compose.onNode(
+            hasContentDescription("Popraw") and hasAnyAncestor(hasAnyDescendant(hasText("Rękawice · 9")) and hasClickAction()),
+            useUnmergedTree = true,
+        ).performClick()
         compose.onNodeWithText("Edytuj pozycję").assertIsDisplayed()
         compose.runOnIdle { assertEquals(gloves, state.editor?.item) }
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        compose.waitUntil(timeoutMillis = 5_000) { state.editor == null }
         compose.onNodeWithText("Edytuj pozycję").assertDoesNotExist()
     }
 
@@ -59,10 +65,10 @@ class RecognizedOrderEditorTest {
         val quantity = field("Ilość")
         listOf("", "0", "-1", "9223372036854775808").forEach {
             quantity.performTextReplacement(it)
-            save.performScrollTo().assertIsNotEnabled()
+            save.assertIsDisplayed().assertIsNotEnabled()
         }
         quantity.performTextReplacement("4")
-        save.performScrollTo().assertIsEnabled().performClick()
+        save.assertIsEnabled().performClick()
         compose.runOnIdle {
             assertEquals(2, state.rows.size)
             assertEquals(opalarka, state.rows.first().item)
@@ -90,7 +96,7 @@ class RecognizedOrderEditorTest {
         compose.onNodeWithText("Potwierdzam 5 para").performScrollTo().performClick()
         compose.onNodeWithText("Potwierdzam dane fragmentu").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(source, state.rows[1].item) }
-        compose.onNodeWithText("Zapisz zmiany").performScrollTo().performClick()
+        compose.onNodeWithText("Zapisz zmiany").performClick()
         compose.runOnIdle {
             val edited = state.rows[1].item
             assertEquals("g10", edited.productId)
@@ -130,7 +136,7 @@ class RecognizedOrderEditorTest {
             assertEquals("67", state.editor?.quantityText)
             assertEquals(24L, state.rows[23].item.quantity)
         }
-        compose.onNodeWithText("Zapisz zmiany").performScrollTo().performClick()
+        compose.onNodeWithText("Zapisz zmiany").performClick()
         compose.onNodeWithText("67 szt.", useUnmergedTree = true).assertIsDisplayed()
         compose.runOnIdle { assertEquals(23L, state.rows[22].item.quantity) }
     }

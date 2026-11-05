@@ -926,7 +926,7 @@ internal fun ParsedNoteReviewContent(
             val personMatch = remember(recipientQuery, people) { recognizedPerson(recipientQuery, people) }
             val recipientShipyard = remember(recipientQuery, shipyards) { recognizedRecipientShipyard(recipientQuery, shipyards) }
             Column {
-                Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(onClick = openEditor), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(onClickLabel = "Edytuj pozycję", onClick = openEditor), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(row.approved, { row.approved = it }, modifier = Modifier.semantics { contentDescription = "Zatwierdź pozycję: ${item.name}" })
                     Column(Modifier.weight(1f)) {
                         Text(productTitle(productMatch?.name ?: item.name, productMatch?.variant ?: item.variant), fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
@@ -1057,7 +1057,7 @@ internal fun ParsedNoteReviewContent(
                 defaultIsShipyard = defaultRecipientIsShipyard,
                 onAddProductTags = onAddProductTags,
                 onCreatePerson = onCreatePerson,
-                onDismiss = orderState::dismiss,
+                onDismiss = { orderState.dismiss(draft) },
                 onSave = { orderState.save(draft, it) },
             )
         }

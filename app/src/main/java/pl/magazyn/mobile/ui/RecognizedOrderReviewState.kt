@@ -18,8 +18,8 @@ internal class RecognizedOrderReviewState(items: List<ParsedItem>) {
         if (editor == null) editor = RecognizedOrderItemDraft(row)
     }
 
-    fun dismiss() {
-        editor = null
+    fun dismiss(draft: RecognizedOrderItemDraft) {
+        if (editor === draft) editor = null
     }
 
     fun save(draft: RecognizedOrderItemDraft, item: ParsedItem) {
@@ -30,7 +30,7 @@ internal class RecognizedOrderReviewState(items: List<ParsedItem>) {
         } else {
             row.item = item
         }
-        dismiss()
+        dismiss(draft)
     }
 }
 

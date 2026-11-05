@@ -89,7 +89,8 @@ internal fun RecognizedOrderItemEditorSheet(
         }
         HorizontalDivider(Modifier.padding(top = 8.dp))
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 12.dp),
+            Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             EditorRecipientFields(item, people, shipyards, defaultRecipient, recipientValid,
@@ -120,13 +121,22 @@ internal fun RecognizedOrderItemEditorSheet(
             item.sourceText?.let {
                 Text("Fragment wiadomości", style = MaterialTheme.typography.titleSmall)
                 Text(it, style = MaterialTheme.typography.bodyMedium)
-                Text("Ilość w pierwotnej propozycji: ${draft.row?.source?.quantity ?: draft.initial.quantity}",
-                    style = MaterialTheme.typography.labelSmall)
+                ProductUnits.explicitQuantity(it)?.let { quantity ->
+                    Text("Ilość z wiadomości: $quantity", style = MaterialTheme.typography.labelSmall)
+                }
             }
             if (item.requiresSourceConfirmation) {
                 EditorWarning("Fragment wymaga rozstrzygnięcia. Sprawdź przedmiot, wariant, ilość i odbiorcę.")
                 OutlinedButton(onClick = draft::confirmSource, enabled = valid) { Text("Potwierdzam dane fragmentu") }
             }
+        }
+        HorizontalDivider()
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = { focus.clearFocus(); onDismiss() }, modifier = Modifier.weight(1f)) { Text("Anuluj") }
             Button(
                 onClick = {
                     if (valid && product != null && quantity != null) {
@@ -149,9 +159,8 @@ internal fun RecognizedOrderItemEditorSheet(
                         ))
                     }
                 },
-                enabled = valid, modifier = Modifier.fillMaxWidth(),
+                enabled = valid, modifier = Modifier.weight(1.5f),
             ) { Text("Zapisz zmiany") }
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Anuluj") }
         }
     }
     if (creatingPerson) {
