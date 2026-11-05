@@ -16,6 +16,20 @@ class OrderCoverageIntegrationTest {
     private val db get()=env.database
     @Before fun setup()=runBlocking {env=IsolatedApplicationEnvironment.create();db.seedCoreData();db.shipyardDao().insert(ShipyardEntity("yard","Elektro"))}
     @After fun close(){env.close()}
+    @Test fun cancellingRecognitionDoesNotCreateAnOrderOrStockMovement() = runBlocking {
+        val vm = env.track(HomeViewModel(env.application))
+        val raw = "2 opalarki"
+        val stockBefore = db.productDao().observeAllWithStock("warehouse-main").first()
+        val note = ParsedNote(null, listOf(ParsedItem("Opalarka", null, 3, "szt.", 1f)),
+            kind = ParsedInputKind.ORDER)
+        vm.updateQuickInput(raw)
+        assertTrue(vm.openReview(note))
+        vm.closeReview()
+        assertEquals(0L, db.queryLong("SELECT COUNT(*) FROM orders"))
+        assertEquals(0L, db.queryLong("SELECT COUNT(*) FROM stock_movements"))
+        assertEquals(stockBefore, db.productDao().observeAllWithStock("warehouse-main").first())
+    }
+
     @Test fun omittedPersonLineBlocksSaveAndExplicitResolutionCreatesSeparateRecipients()=runBlocking {
         val raw="Elektro\nProdukt rozmiar 52 x2\nButy x1 dla Jan Kowalski"
         val catalog=db.productDao().observeAllWithStock("warehouse-main").first()

@@ -27,6 +27,44 @@ class OrderCoverageTest {
         assertTrue(OrderCoverage.canSave(checked.copy(excludedSourceIds=boots.sourceIds),approved))
         assertFalse(OrderCoverage.canSave(checked,approved))
     }
+    @Test fun recognizedRowsStaySingleWhenQuantityOrUnitDiffers() {
+        val checked = OrderCoverage.reconcile(raw, proposal, catalog, listOf("Elektro"))
+        assertEquals(4, checked.items.size)
+        assertEquals(setOf("g", "o", "h"), checked.items.mapNotNull { it.productId }.toSet())
+        val gloves = checked.items.single { it.productId == "g" }
+        assertEquals("paczki", gloves.requestedUnit)
+        assertTrue(ProductUnits.needsConfirmation(gloves, "opak."))
+
+        val opalarka = proposal.copy(items = listOf(proposal.items.last()))
+        val changed = OrderCoverage.reconcile("2 opalarki", opalarka, catalog, emptyList())
+        assertEquals(3L, changed.items.single().quantity)
+        assertTrue(changed.items.single().requiresSourceConfirmation)
+    }
+
+    @Test fun sameProductForDifferentShipyardsPreservesEachSource() {
+        val elektro = proposal.items.last().copy(quantity = 2, recipientName = "Elektro", recipientId = "yard-e")
+        val rura = elektro.copy(quantity = 3, recipientName = "Rura", recipientId = "yard-r")
+        val note = proposal.copy(items = listOf(rura, elektro))
+        val checked = OrderCoverage.reconcile("2 opalarki dla Elektro\n3 opalarki dla Rura",
+            note, catalog, listOf("Elektro", "Rura"))
+        assertEquals(2, checked.items.size)
+        assertEquals(setOf("source-0"), checked.items.single { it.recipientId == "yard-e" }.sourceIds)
+        assertEquals(setOf("source-1"), checked.items.single { it.recipientId == "yard-r" }.sourceIds)
+        assertTrue(OrderCoverage.canSave(checked, checked.items))
+    }
+
+    @Test fun twoSizesOfSameProductRemainSeparate() {
+        val gloves9 = proposal.items.first()
+        val gloves10 = gloves9.copy(productId = "g10", variant = "10", quantity = 2)
+        val note = proposal.copy(items = listOf(gloves10, gloves9))
+        val checked = OrderCoverage.reconcile("3 opakowania rękawic wampirków rozmiar 9\n2 opakowania rękawic wampirków rozmiar 10",
+            note, catalog + product("g10", "Rękawice Wampirki", "10", "opak."), emptyList())
+        assertEquals(2, checked.items.size)
+        assertEquals(setOf("source-0"), checked.items.single { it.productId == "g" }.sourceIds)
+        assertEquals(setOf("source-1"), checked.items.single { it.productId == "g10" }.sourceIds)
+        assertTrue(OrderCoverage.canSave(checked, checked.items))
+    }
+
     @Test fun conflictingBootsKeepOneRowAndRequireRecipientAndVariantReview() {
         val wrongBoots = ParsedItem("Buty robocze", "46", 1, "para", 1f,
             productId = "b46", recipientKind = "shipyard", recipientId = "yard", recipientName = "Elektro")
