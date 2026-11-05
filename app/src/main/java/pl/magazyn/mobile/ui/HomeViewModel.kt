@@ -112,7 +112,9 @@ data class NoteReviewUiState(
     val id: String = UUID.randomUUID().toString(),
     val request: QuickInputUiState? = null,
     val notice: String? = null,
-)
+) {
+    internal val orderEditorState by lazy { RecognizedOrderReviewState(note.items) }
+}
 
 class HomeViewModel @JvmOverloads constructor(
     application: Application,
