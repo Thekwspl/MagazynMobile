@@ -77,12 +77,16 @@ class RoomAgentDataSource(private val database: AppDatabase) : AgentDataSource {
 
     override suspend fun currentStock(ids: List<String>): List<Pair<String, Double>> {
         if (ids.isEmpty() || ids.any(String::isBlank)) throw AgentFailure("Agent nie wskazał poprawnych ID produktów.")
-        val products = database.productDao().findByIds(ids).filterNot { it.isArchived }.map { it.id }.toSet()
-        return ids.distinct().map { id ->
-            if (id !in products) throw AgentFailure("Nieznany produkt agenta: $id.")
-            val balance = database.stockDao().find("warehouse-main", id)
-            if (balance == null || !balance.isKnown) throw AgentFailure("Brak znanego stanu magazynowego dla produktu $id.")
-            id to balance.quantity
+        val uniqueIds = ids.distinct()
+        val balances = uniqueIds.chunked(500).flatMap {
+            database.stockDao().readAgentBalances("warehouse-main", it)
+        }.associateBy { it.productId }
+        return uniqueIds.map { id ->
+            val balance = balances[id] ?: throw AgentFailure("Nieznany produkt agenta: $id.")
+            val quantity = balance.quantity
+            if (balance.isKnown != true || quantity == null)
+                throw AgentFailure("Brak znanego stanu magazynowego dla produktu $id.")
+            id to quantity
         }
     }
     override suspend fun product(id: String) = database.productDao().findById(id)?.takeUnless { it.isArchived }
@@ -147,15 +151,16 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
     private var mode = QuickInputMode.ALL
     private var rawText = ""
     private var activeReply: AgentReply? = null
-    suspend fun analyze(message: String, mode: QuickInputMode = QuickInputMode.ALL): AgentReply {
+    suspend fun analyze(message: String, mode: QuickInputMode = QuickInputMode.ALL): AgentReply = AgentTimings.measure("analysis") {
         this.mode = mode
         rawText = message
         activeReply = null
-        val auth = client.authStatus()
+        val auth = AgentTimings.measure("auth_http") { client.authStatus() }
         if (auth.optJSONObject("account")?.optString("type") != "chatgpt" && auth.optString("authMode") != "chatgpt")
             throw AgentFailure("Agent-service nie ma aktywnego logowania ChatGPT.")
-        client.fullSync(source.catalog(nextRevision()))
-        return advance(client.message(message, mode))
+        val catalog = AgentTimings.measure("room_catalog") { source.catalog(nextRevision()) }
+        AgentTimings.measure("catalog_sync_http") { client.fullSync(catalog) }
+        advance(AgentTimings.measure("message_http") { client.message(message, mode) })
     }
 
     private fun validate(reply: AgentReply) {
@@ -172,7 +177,7 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
         requireCurrent(reply)
         if (reply.status != AgentStatus.NEEDS_USER_CHOICE || reply.candidates.none { it.id == candidateId })
             throw AgentFailure("Nieprawidłowy wybór kandydata.")
-        val next = client.choice(reply.sessionId, candidateId)
+        val next = AgentTimings.measure("choice_http") { client.choice(reply.sessionId, candidateId) }
         if (next.sessionId != reply.sessionId) throw AgentFailure("Agent zmienił sesję po wyborze.")
         return advance(next)
     }
@@ -182,7 +187,7 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
         if (reply.status != AgentStatus.NEEDS_USER_CHOICE || reply.clarifications.isEmpty() ||
             !areRequiredClarificationsAnswered(reply.clarifications, answers))
             throw AgentFailure("Uzupełnij wszystkie wymagane odpowiedzi.")
-        val next = client.answers(reply.sessionId, answers)
+        val next = AgentTimings.measure("answers_http") { client.answers(reply.sessionId, answers) }
         if (next.sessionId != reply.sessionId) throw AgentFailure("Agent zmienił sesję podczas wysyłania odpowiedzi.")
         return advance(next)
     }
@@ -192,57 +197,66 @@ class AgentRepository(private val client: AgentClient, private val source: Agent
         repeat(4) {
             validate(reply)
             if (reply.status != AgentStatus.NEEDS_DATA) { activeReply = reply; return reply }
-            val requests = reply.needsData.map { request ->
-                val data: JSONObject
-                val tool: String
-                when (request) {
-                    is AgentToolRequest.Stock -> {
-                        tool = "get_current_stock"
-                        data = JSONObject().put("stocks", JSONArray().apply { source.currentStock(request.productIds).forEach { (id, value) ->
-                            put(JSONObject().put("productId", id).put("available", value))
-                        } })
-                    }
-                    is AgentToolRequest.PersonItems -> {
-                        tool = "get_person_current_items"
-                        data = JSONObject().put("personId", request.personId).put("items", JSONArray().apply {
-                            source.personItems(request.personId).forEach { put(JSONObject().put("productId", it.productId)
-                                .put("quantity", it.quantity).put("unit", it.unit).put("issuedDate", it.issuedDate)) }
-                        })
-                    }
-                    is AgentToolRequest.ShipyardStock -> {
-                        tool = "get_shipyard_stock"
-                        data = JSONObject().put("shipyardId", request.shipyardId).put("stocks", JSONArray().apply {
-                            source.shipyardStock(request.shipyardId).forEach { put(JSONObject().put("productId", it.productId)
-                                .put("quantity", it.quantity).put("unit", it.unit)) }
-                        })
-                    }
-                    is AgentToolRequest.ActiveOrders -> {
-                        tool = "get_active_orders"
-                        data = recipientData(request.recipient).put("orders", JSONArray().apply {
-                            source.activeOrders(request.recipient).forEach { order -> put(JSONObject()
-                                .put("orderId", order.orderId).put("status", order.status).put("plannedIssueDate", order.plannedIssueDate)
-                                .put("items", JSONArray().apply { order.items.forEach { put(JSONObject().put("productId", it.productId)
-                                    .put("quantity", it.quantity).put("unit", it.unit)) } })) }
-                        })
-                    }
-                    is AgentToolRequest.RecentIssues -> {
-                        tool = "get_recent_issues"
-                        data = recipientData(request.recipient).put("issues", JSONArray().apply {
-                            source.recentIssues(request.recipient, request.limit).forEach { put(JSONObject()
-                                .put("movementId", it.movementId).put("lineId", it.lineId).put("productId", it.productId)
-                                .put("quantity", it.quantity).put("unit", it.unit).put("issuedDate", it.issuedDate)) }
-                        })
-                    }
-                }
-                AgentProtocol.result(request.id, tool, data)
+            val requests = AgentTimings.measure("room_needs_data") { readRound(reply.needsData) }
+            val next = AgentTimings.measure("tool_results_http") {
+                client.toolResults(reply.sessionId, AgentProtocol.toolResults(requests))
             }
-            val next = client.toolResults(reply.sessionId, AgentProtocol.toolResults(requests))
             if (next.sessionId != reply.sessionId) throw AgentFailure("Agent zmienił sesję podczas odczytu stanu.")
             reply = next
         }
         validate(reply)
         if (reply.status != AgentStatus.NEEDS_DATA) { activeReply = reply; return reply }
         throw AgentFailure("Agent przekroczył limit żądań odczytu.")
+    }
+
+    private suspend fun readRound(needsData: List<AgentToolRequest>): List<JSONObject> {
+        val stockIds = needsData.filterIsInstance<AgentToolRequest.Stock>().flatMap { it.productIds }.distinct()
+        val stock = if (stockIds.isEmpty()) emptyMap() else source.currentStock(stockIds).toMap()
+        return needsData.map { request ->
+            val data: JSONObject
+            val tool: String
+            when (request) {
+                is AgentToolRequest.Stock -> {
+                    tool = "get_current_stock"
+                    data = JSONObject().put("stocks", JSONArray().apply { request.productIds.forEach { id ->
+                        val value = stock[id] ?: throw AgentFailure("Brak wyniku odczytu stanu produktu.")
+                        put(JSONObject().put("productId", id).put("available", value))
+                    } })
+                }
+                is AgentToolRequest.PersonItems -> {
+                    tool = "get_person_current_items"
+                    data = JSONObject().put("personId", request.personId).put("items", JSONArray().apply {
+                        source.personItems(request.personId).forEach { put(JSONObject().put("productId", it.productId)
+                            .put("quantity", it.quantity).put("unit", it.unit).put("issuedDate", it.issuedDate)) }
+                    })
+                }
+                is AgentToolRequest.ShipyardStock -> {
+                    tool = "get_shipyard_stock"
+                    data = JSONObject().put("shipyardId", request.shipyardId).put("stocks", JSONArray().apply {
+                        source.shipyardStock(request.shipyardId).forEach { put(JSONObject().put("productId", it.productId)
+                            .put("quantity", it.quantity).put("unit", it.unit)) }
+                    })
+                }
+                is AgentToolRequest.ActiveOrders -> {
+                    tool = "get_active_orders"
+                    data = recipientData(request.recipient).put("orders", JSONArray().apply {
+                        source.activeOrders(request.recipient).forEach { order -> put(JSONObject()
+                            .put("orderId", order.orderId).put("status", order.status).put("plannedIssueDate", order.plannedIssueDate)
+                            .put("items", JSONArray().apply { order.items.forEach { put(JSONObject().put("productId", it.productId)
+                                .put("quantity", it.quantity).put("unit", it.unit)) } })) }
+                    })
+                }
+                is AgentToolRequest.RecentIssues -> {
+                    tool = "get_recent_issues"
+                    data = recipientData(request.recipient).put("issues", JSONArray().apply {
+                        source.recentIssues(request.recipient, request.limit).forEach { put(JSONObject()
+                            .put("movementId", it.movementId).put("lineId", it.lineId).put("productId", it.productId)
+                            .put("quantity", it.quantity).put("unit", it.unit).put("issuedDate", it.issuedDate)) }
+                    })
+                }
+            }
+            AgentProtocol.result(request.id, tool, data)
+        }
     }
 
     private fun recipientData(key: AgentRecipientKey) = JSONObject().put("recipientKind", key.kind).put("recipientId", key.id)

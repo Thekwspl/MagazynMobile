@@ -44,6 +44,9 @@ class HttpAgentClient(endpoint: String, token: String, allowDebugLoopback: Boole
                 if (status == 403) throw AgentFailure("Operacja jest zabroniona przez agent-service (HTTP 403).")
                 if (status == 429) throw AgentFailure("Zbyt wiele żądań do agent-service (HTTP 429). Spróbuj później.")
                 if (status == 409) throw AgentFailure("Niezgodna wersja klienta i agent-service (HTTP 409). Wdróż protokół v2 na serwerze.")
+                if (status == 502) throw AgentFailure("Błąd odpowiedzi Codexa lub bramy agent-service (HTTP 502).")
+                if (status == 503) throw AgentFailure("Agent-service lub proces Codexa jest chwilowo niedostępny (HTTP 503).")
+                if (status == 504) throw AgentFailure("Brama lub agent-service przekroczył czas oczekiwania na Codexa (HTTP 504).")
                 if (status !in 200..299) throw AgentFailure("Agent-service zwrócił błąd HTTP $status.")
                 if (status == 204) "" else connection.inputStream.bufferedReader().use { it.readText() }
             } finally { connection.disconnect() }
@@ -60,14 +63,16 @@ class HttpAgentClient(endpoint: String, token: String, allowDebugLoopback: Boole
     catch (e: org.json.JSONException) { throw AgentFailure("Niepoprawny status autoryzacji agent-service.", e) }
     override suspend fun fullSync(catalog: JSONObject) { request("PUT", "/v1/catalog/full-sync", catalog) }
     override suspend fun message(text: String) = message(text, pl.magazyn.mobile.domain.QuickInputMode.ALL)
-    override suspend fun message(text: String, mode: pl.magazyn.mobile.domain.QuickInputMode) = AgentProtocol.parse(request("POST", "/v1/sessions/message",
+    override suspend fun message(text: String, mode: pl.magazyn.mobile.domain.QuickInputMode) = parseReply(request("POST", "/v1/sessions/message",
         JSONObject().put("message", text).put("schemaVersion", AgentProtocol.VERSION).put("mode", mode.name)))
     override suspend fun toolResults(sessionId: String, results: JSONObject) =
-        AgentProtocol.parse(request("POST", "/v1/sessions/${encode(sessionId)}/tool-results", results))
+        parseReply(request("POST", "/v1/sessions/${encode(sessionId)}/tool-results", results))
     override suspend fun answers(sessionId: String, answers: List<AgentClarificationAnswer>) =
-        AgentProtocol.parse(request("POST", "/v1/sessions/${encode(sessionId)}/answers", AgentProtocol.answers(answers)))
+        parseReply(request("POST", "/v1/sessions/${encode(sessionId)}/answers", AgentProtocol.answers(answers)))
     override suspend fun choice(sessionId: String, candidateId: String) =
-        AgentProtocol.parse(request("POST", "/v1/sessions/${encode(sessionId)}/choice", JSONObject().put("candidateId", candidateId)))
+        parseReply(request("POST", "/v1/sessions/${encode(sessionId)}/choice", JSONObject().put("candidateId", candidateId)))
+
+    private fun parseReply(json: String) = AgentTimings.measure("protocol_validation") { AgentProtocol.parse(json) }
 
     private fun encode(id: String) = java.net.URLEncoder.encode(id, "UTF-8")
 }
