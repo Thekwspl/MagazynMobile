@@ -41,13 +41,20 @@ object OrderCoverage {
 
     fun reconcile(raw: String, note: ParsedNote, catalog: List<ProductWithStock>, headerLabels: List<String>, rules: List<pl.magazyn.mobile.data.ParserLearningRuleEntity> = emptyList()): ParsedNote {
         if (note.kind != ParsedInputKind.ORDER || raw.isBlank()) return note
-        val requests = raw.lineSequence().flatMap { it.split(';').asSequence() }.map(String::trim)
+        val requests = raw.lineSequence().flatMap { line ->
+            // A second explicit quantity starts a separate request. Keep less clear lists
+            // intact so the residual-word check can surface them for review.
+            line.split(Regex("""(?i);|\s+(?:i|oraz|\+)\s+(?=\d+\s)|,\s+(?=\d+\s)""")).asSequence()
+        }.map(String::trim)
             .filter(String::isNotBlank).filterNot { line ->
                 val withoutDate = line.replace(Regex("\\b\\d{1,2}\\.\\d{1,2}(?:\\.\\d{4})?\\b"), "").trim()
                 withoutDate.isBlank() || headerLabels.any { ImportParser.key(it) == ImportParser.key(withoutDate) }
             }.mapIndexed { index, text -> SourceOrderRequest("source-$index", text) }.toList()
-        val items = note.items.map { it.copy(sourceIds = emptySet(), sourceText = null) }.toMutableList()
+        if (note.sourceRequests.isNotEmpty() && note.sourceRequests == requests) return note
+        val items = note.items.toMutableList()
+        val requestCounts = requests.groupingBy { it.text }.eachCount()
         requests.forEach { request ->
+            val repeated = requestCounts.getValue(request.text) > 1
             val parsed = NoteParser().parse(request.text, QuickInputMode.ORDER, learningRules = rules).items
             val sourcePerson = recipient(request.text) ?: parsed.mapNotNull { it.recipientName }.distinct().singleOrNull()
             val recipientLabels = listOfNotNull(sourcePerson) + RecognitionRules.active(rules).filter {
@@ -59,22 +66,33 @@ object OrderCoverage {
             val ambiguousList = Regex("(?i)\\b(?:i|oraz)\\b|\\+|,(?!\\s*(?:\\d|rozmiar\\b|r\\.))").containsMatchIn(request.text)
             val sourceVariant = variant(request.text)
             val sourceLabels = (listOf(request.text) + parsed.map { it.name }).distinct()
-            val candidates = catalog.filter { product ->
+            val productFamily = catalog.filter { product ->
                 (listOf(product.name) + product.aliases.split(',')).filter(String::isNotBlank).any { label ->
                     sourceLabels.any { labelMatches(it, label) }
-                } && (sourceVariant == null || product.variant == null ||
-                    variantKey(product.variant) == variantKey(sourceVariant))
+                }
             }
-            val matching = items.indices.filter { index ->
+            val candidates = productFamily.filter { product ->
+                sourceVariant == null || product.variant == null || variantKey(product.variant) == variantKey(sourceVariant)
+            }
+            val related = items.indices.filter { index ->
                 val item = items[index]
-                val productMatch = item.productId != null && candidates.any { it.id == item.productId } ||
+                val productMatch = item.productId != null && productFamily.any { it.id == item.productId } ||
                     sourceLabels.any { labelMatches(it, item.name) } || candidates.any { labelMatches(item.name, it.name) && variantKey(item.variant.orEmpty()) == variantKey(it.variant.orEmpty()) }
-                val correctRecipient = sourcePerson == null || (if (sourceIsShipyard) item.recipientKind == "shipyard" else item.recipientKind != "shipyard") &&
-                    item.recipientName?.let { name -> recipientLabels.any { labelMatches(it, name) } } == true
-                val correctVariant = sourceVariant == null || item.variant?.let {
-                    variantKey(it) == variantKey(sourceVariant)
-                } == true
-                productMatch && correctRecipient && correctVariant
+                productMatch
+            }
+            fun correctRecipient(item: ParsedItem): Boolean = sourcePerson == null ||
+                (if (sourceIsShipyard) item.recipientKind == "shipyard" else item.recipientKind != "shipyard") &&
+                item.recipientName?.let { name -> recipientLabels.any { labelMatches(it, name) } } == true
+            fun correctVariant(item: ParsedItem): Boolean = sourceVariant == null ||
+                item.variant?.let { variantKey(it) == variantKey(sourceVariant) } == true
+            val available = related.filter { items[it].sourceIds.isEmpty() }
+            val exact = available.filter { correctRecipient(items[it]) && correctVariant(items[it]) }
+            val matching = exact.ifEmpty {
+                available.ifEmpty { related.filter { items[it].sourceText?.lines()?.contains(request.text) == true } }
+            }.let { matches ->
+                if (matches.size > 1 && matches.map { items[it] }.distinct().size == 1 &&
+                    repeated
+                ) matches.take(1) else matches
             }
             // One source can legitimately expand into several products; every distinct catalog target must be accounted for.
             val allTargetsCovered = candidates.isEmpty() || candidates.all { p -> matching.any { index ->
@@ -94,13 +112,23 @@ object OrderCoverage {
             val residual = tokens(request.text).any { word ->
                 !word.matches(Regex("m?\\d+")) && accountedWords.none { similar(word, it) } && syntaxWords.none { similar(word, it) }
             }
-            if (matching.isNotEmpty() && allTargetsCovered && !residual) matching.forEach { index ->
+            if (matching.isNotEmpty() && !(ambiguousList && residual)) matching.forEach { index ->
                 val item = items[index]
                 val requestedQuantity = sourceQuantity(request.text)
-                items[index] = item.copy(sourceIds = item.sourceIds + request.id,
-                    sourceText = listOfNotNull(item.sourceText, request.text).joinToString("\n"), requestedUnit = ProductUnits.explicitUnit(request.text) ?: item.requestedUnit,
-                    requiresSourceConfirmation = item.requiresSourceConfirmation || item.sourceIds.isNotEmpty() || matching.size > 1 || ambiguousList ||
-                        requestedQuantity != null && requestedQuantity != item.quantity)
+                val recipientConflict = !correctRecipient(item)
+                items[index] = item.copy(
+                    sourceIds = item.sourceIds + request.id,
+                    sourceText = listOfNotNull(item.sourceText, request.text).joinToString("\n"),
+                    requestedUnit = ProductUnits.explicitUnit(request.text) ?: item.requestedUnit,
+                    recipientName = if (recipientConflict) sourcePerson else item.recipientName,
+                    recipientId = item.recipientId.takeUnless { recipientConflict },
+                    recipientKind = item.recipientKind.takeUnless { recipientConflict },
+                    sourceRecipient = if (recipientConflict) sourcePerson else item.sourceRecipient,
+                    requiresSourceConfirmation = item.requiresSourceConfirmation || item.sourceIds.isNotEmpty() ||
+                        matching.size > 1 || repeated || ambiguousList || residual || !allTargetsCovered ||
+                        !correctVariant(item) || recipientConflict ||
+                        requestedQuantity != null && requestedQuantity != item.quantity,
+                )
             } else {
                 val guessed = parsed.singleOrNull()
                 items += ParsedItem(name = guessed?.name ?: request.text.trimStart('-', '•', ' '),
@@ -115,6 +143,10 @@ object OrderCoverage {
         return note.copy(items = items.map { item ->
             if (item.sourceIds.isEmpty()) item.copy(requiresSourceConfirmation = true,
                 sourceText = "Pozycja propozycji bez jednoznacznego fragmentu źródła: ${item.name}") else item
+        }.distinctBy { item ->
+            // An identical proposal linked to the same single request adds no information.
+            // Leave unlinked proposals and repeated source requests visible for review.
+            if (item.sourceIds.size == 1) item else Any()
         }, sourceRequests = requests)
     }
 

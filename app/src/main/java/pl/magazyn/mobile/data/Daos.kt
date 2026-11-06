@@ -356,9 +356,19 @@ interface StockDao {
     @Query("SELECT * FROM stock_balances WHERE warehouseId = :warehouseId AND productId = :productId LIMIT 1")
     suspend fun find(warehouseId: String, productId: String): StockBalanceEntity?
 
+    @Query("""
+        SELECT p.id AS productId, s.quantity, s.isKnown
+        FROM products p
+        LEFT JOIN stock_balances s ON s.productId = p.id AND s.warehouseId = :warehouseId
+        WHERE p.isArchived = 0 AND p.id IN (:productIds)
+    """)
+    suspend fun readAgentBalances(warehouseId: String, productIds: List<String>): List<AgentStockRead>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(items: List<StockBalanceEntity>)
 }
+
+data class AgentStockRead(val productId: String, val quantity: Double?, val isKnown: Boolean?)
 
 data class NegativeStockItem(
     val productId: String,

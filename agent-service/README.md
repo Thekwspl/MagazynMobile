@@ -87,3 +87,31 @@ Każda analiza Androida synchronizuje pełny katalog i aktywne reguły z Room. `
 TASK używa `task`, NOTE `note.text`, CONTACT `contact`; pozostałe payloady są null. Odpowiedzi TASK/NOTE/CONTACT nie wymagają stanu, odbiorcy ani pozycji zamówienia. ORDER zachowuje dotychczasowy odczyt stanu z telefonu. Każdy wynik jest propozycją do istniejącego ekranu weryfikacji, bez automatycznego zapisu. CONTACT zachowuje istniejącą weryfikację osoby i ręczne dodanie numeru do profilu; nie tworzy sam pracowników.
 
 Testy automatyczne używają atrap Codexa. Przed użyciem na telefonie sprawdź z prawdziwym kontem: wszystkie tryby, kolor/markę kasku, komplety i jednoczęściowe ubrania, aktywną/edytowaną/wyłączoną regułę, wspólnego prowadzącego dwóch stoczni i rundę kilku pytań. `npm run smoke:codex` sprawdza istniejący przepływ ORDER, wymaga osobno skonfigurowanej usługi i logowania; nie potwierdza pozostałych scenariuszy.
+
+### Pomiary czasu rozpoznawania
+
+W izolowanej instancji uruchom usługę z `AGENT_TIMINGS=1`. Dziennik zawiera
+czasy synchronizacji katalogu, sprawdzenia konta, startu lub użycia istniejącego
+app-servera, startu lub wznowienia wątku, rundy modelu, walidacji i wyszukiwania
+MCP. Przy rundzie modelu pole `calls` podaje liczbę wywołań narzędzi. Domyślnie
+pomiar serwerowy jest wyłączony. Zmienne, dane zamówienia i wyniki modelu nie
+trafiają do tych wpisów.
+
+Na telefonie testowym ustaw `adb shell setprop log.tag.MagazynAgent DEBUG`,
+uruchom aplikację od nowa i użyj `adb logcat -s MagazynAgent:D`. Wpisy obejmują
+czas żądań HTTP, odczytu Room, walidacji protokołu, uzgodnienia pokrycia
+i pierwszej kompozycji widoku. Czas żądania HTTP obejmuje także oczekiwanie
+na serwer. Porównuj go z osobnymi czasami po stronie usługi. Po pomiarze
+wyłącz tag diagnostyczny i ponownie uruchom aplikację.
+
+Po `npm ci` i `npm run build` w aktualnym oraz bazowym checkoucie uruchom
+`node scripts/benchmark-catalog.mjs /sciezka/do/bazy/agent-service/dist/src`.
+Benchmark wykonuje po 30 powtórzeń partii wyszukiwań dla świeżej i rozgrzanej
+rewizji oraz sprawdza identyczność wyników. Mierzy lokalne operacje katalogu.
+Pełny smoke test Codexa opisano powyżej.
+
+Zmiany katalogowe i pomiary serwerowe działają po wdrożeniu nowej paczki
+agent-service zgodnie z [procedurą aktualizacji](../docs/AGENT_UPDATE.md).
+API i AgentResponse pozostają w wersji 2. Zbiorczy odczyt stanów na Androidzie
+składa odpowiedź dla każdego oryginalnego ID żądania zgodnie z tym samym
+kontraktem. Stany są odczytywane od nowa w każdej rundzie.

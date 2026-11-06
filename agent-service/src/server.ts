@@ -1,9 +1,11 @@
+import { performance } from "node:perf_hooks";
+import { measureStage, recordTiming } from "./timings.js";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CatalogStore, type CatalogDelta, type CatalogSnapshot } from "./catalog.js";
-import { searchCatalog, SEARCH_TOOLS, type SearchTool } from "./catalogTools.js";
+import { SEARCH_TOOLS, type SearchTool } from "./catalogTools.js";
 import { CodexAppServerClient } from "./codexAppServerClient.js";
 import { CodexWarehouseAgent, type CodexRunner } from "./codexWarehouseAgent.js";
 import { PROTOCOL_VERSION, type InputMode, type ClarificationAnswer, type ReadOnlyToolResult } from "./contracts.js";
@@ -57,7 +59,9 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
         if (!valid || request.socket.remoteAddress !== "127.0.0.1") return json(response, 403, { error: "forbidden" });
         const payload = await body<{ tool: SearchTool; query: string }>(request);
         if (!SEARCH_TOOLS.includes(payload.tool)) return json(response, 400, { error: "unknown_tool" });
-        return json(response, 200, searchCatalog(catalog.read(), payload.tool, payload.query));
+        const started = performance.now();
+        try { return json(response, 200, catalog.search(payload.tool, payload.query)); }
+        finally { recordTiming("mcp_catalog_search", started); }
       }
       if (request.method === "GET" && url.pathname === "/health")
         return json(response, 200, { status: "ok" });
@@ -94,7 +98,8 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
         counted = true; inFlight++;
       }
       if (request.method === "PUT" && url.pathname === "/v1/catalog/full-sync") {
-        catalog.fullSync(await body<CatalogSnapshot>(request)); return json(response, 204, null);
+        await measureStage("catalog_full_sync", async () => catalog.fullSync(await body<CatalogSnapshot>(request)));
+        return json(response, 204, null);
       }
       if (request.method === "PATCH" && url.pathname === "/v1/catalog/delta-sync") {
         catalog.deltaSync(await body<CatalogDelta>(request)); return json(response, 204, null);
@@ -136,8 +141,8 @@ export function createAgentService(options: { mode?: "local" | "codex"; codex?: 
           : local.resumeWithChoice(sessionId, payload.candidateId));
       }
       if (request.method === "GET" && url.pathname === "/v1/auth/status") {
-        await codex.start("codex", mcp());
-        const account = await codex.accountRead() as { account?: { type?: string }; authMode?: string };
+        await measureStage("codex_start_or_reuse", () => codex.start("codex", mcp()));
+        const account = await measureStage("codex_account_read", () => codex.accountRead()) as { account?: { type?: string }; authMode?: string };
         if (account.account?.type === "chatgpt" || account.authMode === "chatgpt") loginPending = false;
         return json(response, 200, account);
       }

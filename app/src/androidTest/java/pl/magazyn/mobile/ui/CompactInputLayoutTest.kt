@@ -77,8 +77,8 @@ class CompactInputLayoutTest {
         val variant = compose.onNodeWithText("Wariant").fetchSemanticsNode().boundsInRoot
         val quantity = compose.onNodeWithText("Ilość").fetchSemanticsNode().boundsInRoot
         val unit = compose.onNodeWithText("Jednostka").fetchSemanticsNode().boundsInRoot
-        assertTrue(variant.left < quantity.left && quantity.left < unit.left)
-        assertTrue(kotlin.math.abs(variant.top - unit.top) < 2f)
+        assertTrue(variant.top < quantity.top && quantity.left < unit.left)
+        assertTrue(kotlin.math.abs(quantity.top - unit.top) < 2f)
         compose.onNodeWithText("Jednostka").assert(hasSetTextAction().not())
         compose.onNodeWithText("Uwagi").assertDoesNotExist()
     }
@@ -99,8 +99,8 @@ class CompactInputLayoutTest {
             }
         }
         compose.onNodeWithContentDescription("Popraw").performScrollTo().assertIsDisplayed().assertHasClickAction()
-        compose.onNodeWithText("15 m").assertIsDisplayed()
-        val quantity=compose.onNodeWithText("15 m").fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithText("15 m", useUnmergedTree = true).assertIsDisplayed()
+        val quantity=compose.onNodeWithText("15 m", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val edit=compose.onNodeWithContentDescription("Popraw").fetchSemanticsNode().boundsInRoot
         assertTrue(quantity.right <= edit.left + 1f)
         compose.onNodeWithContentDescription("Popraw").performClick()
