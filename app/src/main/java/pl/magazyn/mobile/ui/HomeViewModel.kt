@@ -61,6 +61,7 @@ import pl.magazyn.mobile.data.NotebookTaskStepEntity
 import pl.magazyn.mobile.data.NotebookTaskStepPersonEntity
 import pl.magazyn.mobile.data.TaskPlaceEntity
 import pl.magazyn.mobile.data.ProductVisibilityStore
+import pl.magazyn.mobile.agent.AgentTimings
 import pl.magazyn.mobile.agent.AgentFailure
 import pl.magazyn.mobile.agent.AgentClarificationAnswer
 import pl.magazyn.mobile.agent.AgentClarificationType
@@ -114,6 +115,7 @@ data class NoteReviewUiState(
     val notice: String? = null,
 ) {
     internal val orderEditorState by lazy { RecognizedOrderReviewState(note.items) }
+    internal val reviewReadyAt = if (note.agentProposal) AgentTimings.start() else null
 }
 
 class HomeViewModel @JvmOverloads constructor(
@@ -230,9 +232,11 @@ class HomeViewModel @JvmOverloads constructor(
         if (request != currentRequest() || _reviewSave.value.isSaving) return false
         if (request.mode.preferredKind != null && request.mode.preferredKind != note.kind) return false
         _reviewSave.value = ReviewSaveUiState()
+        val coverageStarted = if (note.agentProposal) AgentTimings.start() else null
         val complete = pl.magazyn.mobile.domain.OrderCoverage.reconcile(request.text, note, recognitionProducts,
             recognitionYards.flatMap { listOf(it.name) + it.aliases.split(',') + it.tags.split(',') },
             rules = if (_conversion.value != null) conversionRules else learningRules.value)
+        coverageStarted?.let { AgentTimings.record("order_coverage", it) }
         _noteReview.value = NoteReviewUiState(request.text, complete.copy(items = complete.items.map { item ->
             if (complete.kind == ParsedInputKind.ORDER && item.sourceIds.isNotEmpty()) return@map item
             val itemKey = ImportParser.key(item.name)
@@ -527,7 +531,9 @@ class HomeViewModel @JvmOverloads constructor(
         if (request != currentRequest()) return
         checkSourceNote(request)
         val state = when (reply.status) {
-            AgentStatus.PROPOSAL -> CodexAnalysisUiState(result = repository.review(reply), request = request)
+            AgentStatus.PROPOSAL -> CodexAnalysisUiState(
+                result = AgentTimings.measure("review_prepare") { repository.review(reply) }, request = request,
+            )
             AgentStatus.NEEDS_USER_CHOICE -> CodexAnalysisUiState(reply = reply, request = request)
             AgentStatus.ERROR -> CodexAnalysisUiState(error = reply.error ?: "Agent zwrócił błąd.")
             AgentStatus.NEEDS_DATA -> CodexAnalysisUiState(error = "Agent wymaga dodatkowych danych.")

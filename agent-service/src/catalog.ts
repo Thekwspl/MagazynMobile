@@ -1,3 +1,5 @@
+import { searchCatalog, type SearchTool } from "./catalogTools.js";
+
 export interface PersonRecord {
   id: string;
   firstName: string;
@@ -62,6 +64,10 @@ export class CatalogStore {
 
   read(): CatalogSnapshot {
     return structuredClone(this.snapshot);
+  }
+
+  search(tool: SearchTool, query: string): unknown[] {
+    return searchCatalog(this.snapshot, tool, query);
   }
 
   fullSync(next: CatalogSnapshot): void {

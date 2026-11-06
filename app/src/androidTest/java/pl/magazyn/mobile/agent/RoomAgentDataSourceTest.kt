@@ -46,6 +46,17 @@ class RoomAgentDataSourceTest {
         try { source.currentStock(listOf("product-1")); fail("Unknown balance accepted") } catch (_: AgentFailure) { }
     }
 
+    @Test fun readsSeveralProductsInRequestedOrderAndNeverCachesBalances() = runBlocking {
+        val db = environment.database
+        val source = RoomAgentDataSource(db)
+        db.productDao().insert(ProductEntity("product-2", "Kask", unit = "szt."))
+        db.stockDao().upsert(listOf(StockBalanceEntity("warehouse-main", "product-2", -4.0)))
+        val ids = listOf("product-2", "product-1", "product-2")
+        assertEquals(listOf("product-2" to -4.0, "product-1" to 0.0), source.currentStock(ids))
+        db.stockDao().upsert(listOf(StockBalanceEntity("warehouse-main", "product-2", 6.0)))
+        assertEquals(listOf("product-2" to 6.0, "product-1" to 0.0), source.currentStock(ids))
+    }
+
     @Test fun catalogReflectsRoomAndExcludesPhoneNumbers() = runBlocking {
         val database = environment.database
         database.employeeDao().update(database.employeeDao().findById("employee-1")!!.copy(phoneNumbers = "+48 123456789"))

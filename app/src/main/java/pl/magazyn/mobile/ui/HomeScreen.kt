@@ -245,6 +245,9 @@ fun ParsedNoteReviewScreen(
         return
     }
     val note = current.note
+    LaunchedEffect(current.id) {
+        current.reviewReadyAt?.let { pl.magazyn.mobile.agent.AgentTimings.record("review_composed", it) }
+    }
     val matchedPerson = note.person?.let { parsed -> recognizedPerson(parsed.fullName, people) }
     BackHandler {
         if (!saving.isSaving) { viewModel.closeReview(); onBack() }

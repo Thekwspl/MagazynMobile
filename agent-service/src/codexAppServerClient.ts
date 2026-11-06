@@ -1,3 +1,5 @@
+import { performance } from "node:perf_hooks";
+import { measureStage, recordTiming } from "./timings.js";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { agentResponseJsonSchema, parseAgentResponse, type AgentResponse } from "./contracts.js";
@@ -90,11 +92,11 @@ export class CodexAppServerClient {
   startChatGptDeviceLogin(): Promise<unknown> { return this.request("account/login/start", { type: "chatgptDeviceCode" }); }
 
   async runStructuredOrder(prompt: string, cwd: string, threadId?: string): Promise<{ threadId: string; response: AgentResponse; toolCalls: number }> {
-    const thread = threadId
-      ? await this.request<{ thread: { id: string } }>("thread/resume", { threadId })
-      : await this.request<{ thread: { id: string } }>("thread/start", {
+    const thread = await measureStage(threadId ? "thread_resume" : "thread_start", () => threadId
+      ? this.request<{ thread: { id: string } }>("thread/resume", { threadId })
+      : this.request<{ thread: { id: string } }>("thread/start", {
           cwd, approvalPolicy: "never", sandbox: "read-only", serviceName: "magazyn_mobile_agent_service",
-        });
+        }));
     const id = thread.thread?.id;
     if (!id) throw new Error("CODEX_PROTOCOL_ERROR: brak threadId.");
     if (this.collectors.has(id)) throw new Error("CODEX_THREAD_BUSY: trwa już turn tej sesji.");
@@ -105,6 +107,7 @@ export class CodexAppServerClient {
     });
     void completed.catch(() => {});
     this.collectors.set(id, collector);
+    const turnStarted = performance.now();
     try {
       const turn = await this.request<{ turn: { id: string } }>("turn/start", {
         threadId: id, input: [{ type: "text", text: prompt }], outputSchema: agentResponseJsonSchema,
@@ -115,8 +118,11 @@ export class CodexAppServerClient {
       collector.events.length = 0;
       const finalText = await completed;
       if (!finalText.trim()) throw new Error("CODEX_PROTOCOL_ERROR: turn zakończył się bez AgentResponse.");
-      return { threadId: id, response: parseAgentResponse(finalText), toolCalls: collector.toolCalls };
+      const validationStarted = performance.now();
+      try { return { threadId: id, response: parseAgentResponse(finalText), toolCalls: collector.toolCalls }; }
+      finally { recordTiming("model_response_validation", validationStarted); }
     } finally {
+      recordTiming(threadId ? "model_followup" : "model_first_turn", turnStarted, collector.toolCalls);
       clearTimeout(collector.timer);
       this.collectors.delete(id);
     }

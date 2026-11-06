@@ -1,3 +1,4 @@
+import { measureStage } from "./timings.js";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,8 +31,8 @@ export class CodexWarehouseAgent {
       warnings: [], questions: [], candidates: [], clarifications: [], needsData: [], error: { code, message } };
   }
   private async auth(): Promise<boolean> {
-    await this.codex.start("codex", this.mcp());
-    const state = await this.codex.accountRead() as { account?: { type?: string }; authMode?: string };
+    await measureStage("codex_start_or_reuse", () => this.codex.start("codex", this.mcp()));
+    const state = await measureStage("codex_account_read", () => this.codex.accountRead()) as { account?: { type?: string }; authMode?: string };
     return state?.account?.type === "chatgpt" || state?.authMode === "chatgpt";
   }
   private verifyRequests(response: AgentResponse, answeredQuestionIds: Set<string> = new Set()): void {

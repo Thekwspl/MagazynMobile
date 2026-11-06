@@ -61,8 +61,10 @@ class AgentIntegrationTest {
 
     private class Source(private val stocks: Map<String, Double>) : AgentDataSource {
         override suspend fun catalog(revision: Long) = JSONObject().put("revision", revision)
-        override suspend fun currentStock(ids: List<String>): List<Pair<String, Double>> = ids.map {
-            it to (stocks[it] ?: throw AgentFailure("Nieznany produkt: $it"))
+        val reads = mutableListOf<List<String>>()
+        override suspend fun currentStock(ids: List<String>): List<Pair<String, Double>> {
+            reads += ids
+            return ids.map { it to (stocks[it] ?: throw AgentFailure("Nieznany produkt: $it")) }
         }
         override suspend fun product(id: String) = if (id == "g") ProductEntity("g", "Rękawice", "XL", "para") else null
         override suspend fun person(id: String) = if (id == "p") EmployeeSummary("p", "Jan Kowalski", "Jan", "Kowalski", "", "", "", "") else null
@@ -116,6 +118,23 @@ class AgentIntegrationTest {
         assertEquals(0.0,note.items.single().availableQuantity!!,0.0)
         assertEquals(listOf("Sprawdź buty","Sprawdź inne buty"),note.reviewWarnings.map {it.message})
     }
+    @Test fun `stock requests share one live read per round and keep request IDs`() = runBlocking {
+        val raw = JSONObject(response("needs_data", listOf("g", "o")))
+        raw.getJSONArray("needsData").put(JSONObject().put("id", "r2")
+            .put("tool", "get_current_stock").put("arguments", JSONObject().put("productIds", JSONArray(listOf("o")))))
+        val client = Client(raw.toString())
+        val source = Source(mapOf("g" to 0.0, "o" to -1.0))
+        AgentRepository(client, source, { 1 }).analyze("dwa produkty")
+        assertEquals(listOf(listOf("g", "o")), source.reads)
+        val results = client.sent!!.getJSONArray("results")
+        assertEquals("r1", results.getJSONObject(0).getString("requestId"))
+        val second = results.getJSONObject(1)
+        assertEquals("r2", second.getString("requestId"))
+        val stock = second.getJSONObject("data").getJSONArray("stocks").getJSONObject(0)
+        assertEquals("o", stock.getString("productId"))
+        assertEquals(-1.0, stock.getDouble("available"), 0.0)
+    }
+
     @Test fun `multiple IDs and unknown ID do not fabricate stock`() = runBlocking {
         val client = Client(response("needs_data", listOf("g", "o")))
         AgentRepository(client, Source(mapOf("g" to 0.0, "o" to -1.0)), { 1 }).analyze("dwa produkty")
